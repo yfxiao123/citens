@@ -1,0 +1,86 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "litreview"
+version = "0.1.0"
+description = "An open-source literature-review agent that writes critical, citation-grounded surveys — every claim verifiable against its source."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "CiteLens Contributors" }]
+keywords = [
+    "literature-review",
+    "academic-research",
+    "agent",
+    "citation",
+    "survey-generation",
+    "rag",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "pydantic>=2.6",
+    "pydantic-settings>=2.1",
+    "httpx>=0.27",
+    "anyio>=4",
+    "openai>=1.12",
+    "typer>=0.12",
+    "rich>=13",
+    "arxiv>=2.0",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "sse-starlette>=2.0"]
+# Full-text citation grounding: PDF -> MarkItDown -> chunks. Without it the
+# verifier falls back to abstracts only (lower citation precision).
+pdf = ["markitdown[pdf]>=0.0.1"]
+# Native multi-provider routing (Anthropic/Gemini/Bedrock/Cohere) via LiteLLM.
+# The default OpenAI-compatible backend already covers OpenAI/DeepSeek/Ollama/
+# OpenRouter/vLLM/Groq without this extra.
+multi = ["litellm>=1.40"]
+dev = [
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+]
+
+[project.scripts]
+litreview = "litreview.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/your-org/citelens"
+Repository = "https://github.com/your-org/citelens"
+Issues = "https://github.com/your-org/citelens/issues"
+
+[tool.setuptools.packages.find]
+include = ["litreview*"]
+exclude = ["tests*", "resource*", "examples*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

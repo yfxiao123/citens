@@ -1,0 +1,31 @@
+# secrets / local config
+.env
+
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# run artifacts & caches
+runs/
+output/
+.cache/
+
+# course materials & legacy code (not part of the OSS repo)
+课程大作业.docx
+resource/
+src/
+app.py
+webui.py
+requirements.txt
+1407.5684.pdf
+
+# downloaded data (license: CC BY-NC, fetched at init time, not redistributed)
+data/sjr/
