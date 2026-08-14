@@ -2,14 +2,17 @@
 
 The single biggest lever for citation precision: ground claims against a
 paper's FULL TEXT (methods, results, numbers) rather than its ~150-word
-abstract. This module fetches an open-access PDF and converts it to clean text
-with MarkItDown, trying several sources in order:
+abstract. This module tries, in order:
 
+    0. a PDF the user dropped into PAPERS_DIR (see fetch_list.md — the honest
+       fallback for paywalled content the agent itself cannot fetch)
     1. arXiv PDF (for arXiv-indexed papers — always free)
     2. the paper's known OA pdf_url (captured from OpenAlex)
     3. Unpaywall (free, DOI-based OA locator)
 
-If nothing yields a PDF, callers fall back to the abstract.
+Publisher URLs additionally ride the user's declared access (proxy / EZproxy
+rewrite) via litreview.net. If nothing yields a PDF, callers fall back to the
+abstract.
 """
 
 from __future__ import annotations
@@ -17,18 +20,52 @@ from __future__ import annotations
 import os
 import re
 import tempfile
-
-import httpx
+from pathlib import Path
 
 from litreview import cache
 from litreview.config import settings
 from litreview.models import Paper
-from litreview.net import sync_client
+from litreview.net import rewrite_url, sync_client
 
 _ARXIV_ID_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5}|[a-z\-]+/\.[0-9]+)", re.IGNORECASE)
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _CHUNK_SIZE = 1200
 _HEADERS = {"User-Agent": "CiteLens/0.1 (open literature-review agent)"}
 _md = None  # lazy MarkItDown singleton
+
+
+def slugify(text: str) -> str:
+    """Lowercase, non-alphanumeric runs -> single '-' (used to match dropped PDFs)."""
+    return _NON_ALNUM_RE.sub("-", (text or "").lower()).strip("-")
+
+
+def pdf_slugs(paper: Paper) -> list[str]:
+    """Filename slugs a dropped PDF for this paper would plausibly carry."""
+    slugs: list[str] = []
+    if paper.doi:
+        slugs.append(slugify(paper.doi))
+    m = _ARXIV_ID_RE.search(paper.url or "")
+    if m:
+        slugs.append(slugify(m.group(1)))
+    title_slug = slugify(paper.title)
+    if len(title_slug) >= 20:  # too-short titles would match anything
+        slugs.append(title_slug[:60])
+    return [s for s in slugs if len(s) >= 8]
+
+
+def _local_pdf(paper: Paper) -> Path | None:
+    """A user-dropped PDF in PAPERS_DIR matching this paper, or None."""
+    d = Path(settings.papers_dir)
+    if not d.is_dir():
+        return None
+    slugs = pdf_slugs(paper)
+    if not slugs:
+        return None
+    for f in sorted(d.glob("*.pdf")):
+        stem = slugify(f.stem)
+        if any(s in stem or stem in s for s in slugs):
+            return f
+    return None
 
 
 def _markitdown():
@@ -62,9 +99,19 @@ def _unpaywall_pdf_url(doi: str) -> str | None:
         return None
 
 
+def _convert_pdf_file(path: str) -> str | None:
+    """MarkItDown-convert a local PDF file to text (None if unusable)."""
+    try:
+        text = _markitdown().convert(path).text_content or ""
+        return text.strip() if len(text) > 500 else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _download_and_convert(url: str) -> str | None:
     try:
-        with sync_client(url, timeout=60) as client:
+        url = rewrite_url(url)  # ride the user's EZproxy/declared access
+        with sync_client(url, timeout=60, headers=_HEADERS) as client:
             r = client.get(url)
         if r.status_code != 200 or len(r.content) < 2000:
             return None
@@ -76,16 +123,26 @@ def _download_and_convert(url: str) -> str | None:
             fh.write(r.content)
             tmp = fh.name
         try:
-            text = _markitdown().convert(tmp).text_content or ""
+            return _convert_pdf_file(tmp)
         finally:
             os.unlink(tmp)
-        return text.strip() if len(text) > 500 else None
     except Exception:  # noqa: BLE001
         return None
 
 
 def fetch_fulltext(paper: Paper) -> str | None:
-    """Return the paper's full text, or None if no OA PDF is available."""
+    """Return the paper's full text, or None if unavailable.
+
+    Order: user-dropped PDF (PAPERS_DIR) -> cache -> open-access network fetch.
+    The local check runs before the cache so a PDF dropped after a previous
+    miss is still picked up.
+    """
+    local = _local_pdf(paper)
+    if local is not None:
+        text = _convert_pdf_file(str(local))
+        if text:
+            return text
+
     cached = cache.get("fulltext", paper.id)
     if cached is not None:
         return cached or None

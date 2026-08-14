@@ -47,6 +47,7 @@ from litreview.grounding import (
     build_provenance,
     enrich_abstracts,
     parse_claims_from_review,
+    write_fetch_list,
 )
 from litreview.models import ExtractedPaper, RunMeta, ThemeStructure
 from litreview.search import blend_pool, search_papers
@@ -156,9 +157,19 @@ def _compose(
             ],
         },
     )
+    # papers still missing full text -> fetch list for manual (browser) download
+    missing = [
+        p
+        for p in extracted
+        if not any(c.kind.value == "fulltext" for c in chunk_store.chunks_for(p.id))
+    ]
+    fetch_list_path = write_fetch_list(run_dir, missing)
+    ground_msg = f"{n_full}/{len(extracted)} 篇获取到全文"
+    if fetch_list_path:
+        ground_msg += f" · {len(missing)} 篇待手动获取（见 fetch_list.md）"
     _emit(
         bus,
-        StepCompleted(step="ground", message=f"{n_full}/{len(extracted)} 篇获取到全文"),
+        StepCompleted(step="ground", message=ground_msg),
     )
 
     # write

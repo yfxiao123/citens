@@ -9,6 +9,7 @@ from litreview.grounding.citations import (
     parse_claims_from_review,
 )
 from litreview.grounding.enrichment import enrich_abstracts
+from litreview.grounding.fetchlist import ensure_papers_dir, write_fetch_list
 from litreview.grounding.fulltext import chunk_text, fetch_fulltext
 
 __all__ = [
@@ -16,7 +17,9 @@ __all__ = [
     "CitationTable",
     "build_provenance",
     "chunk_text",
+    "ensure_papers_dir",
     "enrich_abstracts",
     "fetch_fulltext",
     "parse_claims_from_review",
+    "write_fetch_list",
 ]

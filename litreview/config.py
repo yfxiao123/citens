@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     # Comma-separated domains you have institutional access to (routed via the
     # proxy). Empty = apply proxy to every fetch when a proxy is set.
     accessible_domains: str = ""
+    # Campus EZproxy URL prefix. When set, paywalled fetch URLs are rewritten as
+    #   {EZPROXY_PREFIX}url=<urlencoded target>
+    # so the request rides YOUR library session (e.g. after SSO login in the
+    # same network). Example: https://lib.univ.edu.cn/login?url=
+    # Leave empty to disable rewriting.
+    ezproxy_prefix: str = ""
+    # Drop folder for manually downloaded PDFs (see fetch_list.md emitted by a
+    # run). Full-text lookup checks here BEFORE hitting the network, so files
+    # you drop are picked up by the next run.
+    papers_dir: str = "papers"
 
     # --- Metadata / enrichment API keys (optional) --------------------------
     # Used to fill in missing abstracts and find full text by DOI.
