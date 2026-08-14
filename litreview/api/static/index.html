@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>litreview — citation-grounded literature reviews</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #161a22; --border: #262c38;
+    --fg: #e6e9ef; --muted: #8b93a3; --accent: #4da3ff; --ok: #3fb950; --err: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex; min-height: 100vh; flex-direction: column;
+  }
+  header { padding: 14px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 12px; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  main { flex: 1; display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px 24px; max-width: 1280px; width: 100%; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--fg); font-size: 14px;
+  }
+  button {
+    margin-top: 14px; width: 100%; padding: 10px; border: 0; border-radius: 6px;
+    background: var(--accent); color: #06121f; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: wait; }
+  #steps { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+  #steps li { padding: 6px 8px; border-left: 2px solid var(--border); margin: 4px 0; color: var(--muted); }
+  #steps li.running { border-left-color: var(--accent); color: var(--fg); }
+  #steps li.done { border-left-color: var(--ok); }
+  #steps li.fail { border-left-color: var(--err); color: var(--err); }
+  #steps .msg { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  #summary { margin: 0 0 12px; font-size: 13px; line-height: 1.7; }
+  #summary b { color: var(--accent); }
+  .bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 8px 0; }
+  .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  #review { font-size: 14px; line-height: 1.75; overflow-wrap: break-word; }
+  #review h1, #review h2 { border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  #review pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; }
+  #review code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  .placeholder { color: var(--muted); text-align: center; padding: 80px 0; font-size: 14px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 12px; border-top: 1px solid var(--border); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>litreview</h1>
+  <span class="sub">可信引用 · 批判性综述 · every claim verifiable against its source</span>
+</header>
+<main>
+  <section class="card">
+    <label>研究主题 / topic</label>
+    <input type="text" id="topic" placeholder="e.g. 订单簿建模 / limit order book modeling" value="">
+    <label>最终论文数 / max papers</label>
+    <input type="number" id="maxp" value="8" min="3" max="30">
+    <label>选项 / options</label>
+    <select id="fulltext">
+      <option value="1">获取全文（引用精度更高）</option>
+      <option value="0">仅摘要（更快）</option>
+    </select>
+    <button id="go">生成综述 / run</button>
+    <ul id="steps"></ul>
+    <div class="bar"><i id="prog"></i></div>
+  </section>
+  <section class="card">
+    <div id="summary"></div>
+    <div id="review"><div class="placeholder">综述将在这里显示 —— 输入主题后点击「生成综述」<br>The review appears here after a run.</div></div>
+  </section>
+</main>
+<footer>litreview · runs stream over SSE · <a href="/docs">API docs</a> · <a href="/runs">/runs</a></footer>
+<script>
+const $ = (id) => document.getElementById(id);
+const stepEls = {};
+
+function upsertStep(step, title) {
+  if (!stepEls[step]) {
+    const li = document.createElement("li");
+    li.dataset.step = step;
+    $("steps").appendChild(li);
+    stepEls[step] = li;
+  }
+  const li = stepEls[step];
+  li.className = "running";
+  if (title && !li.dataset.title) { li.dataset.title = title; li.innerHTML = `<b>${title}</b><span class="msg"></span>`; }
+  return li;
+}
+
+function renderMd(md) {
+  if (window.marked) return marked.parse(md);
+  // fallback: minimal renderer until marked loads
+  return "<pre>" + md.replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c])) + "</pre>";
+}
+
+async function run() {
+  const topic = $("topic").value.trim();
+  if (!topic) { alert("请输入研究主题 / enter a topic"); return; }
+  $("go").disabled = true;
+  $("steps").innerHTML = ""; Object.keys(stepEls).forEach(k => delete stepEls[k]);
+  $("summary").innerHTML = ""; $("prog").style.width = "0";
+  $("review").innerHTML = '<div class="placeholder">运行中… streaming events</div>';
+
+  const body = {
+    topic,
+    max_papers: parseInt($("maxp").value, 10) || 8,
+    fetch_fulltext: $("fulltext").value === "1",
+  };
+  try {
+    const resp = await fetch("/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", done = false;
+    while (!done) {
+      const { value, done: d } = await reader.read();
+      if (d) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const ev = parseSSE(frame);
+        if (ev) done = handleEvent(ev) || done;
+      }
+    }
+  } catch (e) {
+    $("summary").innerHTML = `<span style="color:var(--err)">运行失败 / failed: ${e.message}</span>`;
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+function parseSSE(frame) {
+  let event = "message", data = "";
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data += line.slice(5).trim();
+  }
+  if (!data || event === "ping") return null;
+  try { return JSON.parse(data); } catch { return null; }
+}
+
+function handleEvent(ev) {
+  if (ev.type === "RunStarted") {
+    document.title = `litreview — ${ev.topic}`;
+  } else if (ev.type === "StepStarted") {
+    upsertStep(ev.step, ev.title);
+  } else if (ev.type === "StepProgress") {
+    const li = upsertStep(ev.step, ev.step);
+    li.querySelector(".msg").textContent = ev.message + (ev.total ? ` (${ev.current}/${ev.total})` : "");
+    if (ev.total) $("prog").style.width = `${Math.round(100 * ev.current / ev.total)}%`;
+  } else if (ev.type === "StepCompleted") {
+    const li = upsertStep(ev.step, ev.step);
+    li.className = "done";
+    li.querySelector(".msg").textContent = ev.message;
+  } else if (ev.type === "RunFailed") {
+    const li = upsertStep(ev.step || "pipeline", "失败");
+    li.className = "fail"; li.querySelector(".msg").textContent = ev.message;
+    return true;
+  } else if (ev.type === "RunCompleted") {
+    const s = ev.summary || {};
+    $("prog").style.width = "100%";
+    const prec = s.citation_precision != null ? `${Math.round(s.citation_precision * 100)}%` : "n/a";
+    $("summary").innerHTML =
+      `<b>${s.topic ?? ""}</b><br>` +
+      `候选 ${s.total_papers ?? 0} 篇 → 采用 ${s.filtered_papers ?? 0} 篇 · ${s.claims ?? 0} 条带引用论断<br>` +
+      `引用精度 / citation precision: <b>${prec}</b><br>` +
+      `产物: <a href="/result/${encodeURIComponent(ev.run_dir.split(/[\\/]/).pop())}" target="_blank">完整结果 JSON</a> · ` +
+      `<code>${ev.review_path ?? ""}</code>`;
+    fetch(`/result/${encodeURIComponent(ev.run_dir.split(/[\\/]/).pop())}`)
+      .then(r => r.json())
+      .then(j => { if (j.review_md) $("review").innerHTML = renderMd(j.review_md); })
+      .catch(() => {});
+    return true;
+  }
+  return false;
+}
+
+// marked from CDN for markdown rendering (graceful fallback if offline)
+(function loadMarked() {
+  const s = document.createElement("script");
+  s.src = "https://cdn.jsdelivr.net/npm/marked@12/marked.min.js";
+  s.onerror = () => {};  // fallback renderer covers it
+  document.head.appendChild(s);
+})();
+
+$("go").addEventListener("click", run);
+$("topic").addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+</script>
+</body>
+</html>
