@@ -107,7 +107,7 @@ def verify_claims(
     ]
     done = 0
 
-    def _verify_batch(pair: tuple[int, list[Claim]]) -> list[VerificationResult]:
+    def _verify_batch(_i: int, pair: tuple[int, list[Claim]]) -> list[VerificationResult]:
         _, batch = pair
         cited_indices = sorted(
             {i for c in batch for i in c.citation_indices if chunk_store.has(table.paper_id(i))}

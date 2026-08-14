@@ -205,7 +205,7 @@ def write_review_body(
     )
 
     # --- generate concurrently, assemble in reading order --------------------
-    def _run(job):
+    def _run(_i, job):
         if on_step:
             on_step(job["label"], job.get("name", ""))
         return _chat_section(job["system"], job["user"], job["budget"], job["label"])
