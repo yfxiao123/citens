@@ -57,7 +57,7 @@ class SJRIndex:
         self._by_title = rows
 
     @classmethod
-    def load(cls, path: str | Path) -> "SJRIndex":
+    def load(cls, path: str | Path) -> SJRIndex:
         with open(path, encoding="utf-8-sig", newline="") as f:
             header = f.readline()
             delimiter = ";" if ";" in header else ","
@@ -68,7 +68,7 @@ class SJRIndex:
         raise ValueError(f"unrecognized SJR CSV header: {header[:80]!r}")
 
     @classmethod
-    def _load_official(cls, path: str | Path, delimiter: str) -> "SJRIndex":
+    def _load_official(cls, path: str | Path, delimiter: str) -> SJRIndex:
         rows: dict[str, VenueInfo] = {}
         with open(path, encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f, delimiter=delimiter):
@@ -85,7 +85,7 @@ class SJRIndex:
         return cls(rows)
 
     @classmethod
-    def _load_mirror(cls, path: str | Path, delimiter: str) -> "SJRIndex":
+    def _load_mirror(cls, path: str | Path, delimiter: str) -> SJRIndex:
         # latest-year row per journal (Sourceid); SJR may be blank for old years
         latest: dict[str, tuple[int, float]] = {}  # norm title -> (year, sjr)
         titles: dict[str, str] = {}
@@ -116,7 +116,7 @@ class SJRIndex:
         # mid-tier journal should not earn a global "Q1").
         p90, p75, p50 = _pct(0.90), _pct(0.75), _pct(0.50)
         rows: dict[str, VenueInfo] = {}
-        for key, (year, sjr) in latest.items():
+        for key, (_year, sjr) in latest.items():
             if sjr <= 0:
                 q = ""
             elif sjr >= p90:

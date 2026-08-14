@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from litreview.grounding import ChunkStore, CitationTable
 from litreview.llm import chat_json
-from litreview.models import Claim, VerificationResult, Verdict
+from litreview.models import Claim, Verdict, VerificationResult
 
 SYSTEM_PROMPT = """You are a citation-verification expert. You are given several CLAIMS (each citing \
 one or more papers by [index]) and the ABSTRACTS of the cited papers.

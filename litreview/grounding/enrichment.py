@@ -11,7 +11,7 @@ Driven by the access layer: a Springer key, if provided, adds another source.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import httpx
 
@@ -51,7 +51,7 @@ def _springer_by_doi(doi: str) -> str:
         return ""
 
 
-def _fill_one(paper: Paper) -> tuple[Optional[str], str]:
+def _fill_one(paper: Paper) -> tuple[str | None, str]:
     """Try sources in priority order; return (source_name, abstract)."""
     doi = (paper.doi or "").strip()
     if doi:
@@ -70,7 +70,7 @@ def _fill_one(paper: Paper) -> tuple[Optional[str], str]:
 def enrich_abstracts(
     papers: list[Paper],
     *,
-    on_progress: Optional[Callable[[int, int, str], None]] = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[int, list[dict]]:
     """Fill empty abstracts via cross-source DOI lookup.
 

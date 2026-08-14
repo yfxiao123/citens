@@ -8,7 +8,7 @@ coupling to pipeline internals.
 from __future__ import annotations
 
 import time
-from typing import Literal, Optional, Union
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -42,8 +42,8 @@ class StepProgress(_Base):
     type: Literal["step_progress"] = "step_progress"
     step: str = ""
     message: str = ""
-    current: Optional[int] = None
-    total: Optional[int] = None
+    current: int | None = None
+    total: int | None = None
 
 
 class StepCompleted(_Base):
@@ -65,9 +65,9 @@ class RunFailed(_Base):
     step: str = ""
 
 
-Event = Union[
-    RunStarted, StepStarted, StepProgress, StepCompleted, RunCompleted, RunFailed
-]
+Event = (
+    RunStarted | StepStarted | StepProgress | StepCompleted | RunCompleted | RunFailed
+)
 
 
 class EventBus:

@@ -15,7 +15,7 @@ text or only an abstract.
 from __future__ import annotations
 
 import re
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from litreview.models import Chunk, ChunkKind, Paper
 
@@ -37,7 +37,7 @@ class ChunkStore:
         papers: list[Paper],
         *,
         fetch_full: bool = False,
-        on_progress: Optional[Callable[[int, int, str], None]] = None,
+        on_progress: Callable[[int, int, str], None] | None = None,
     ) -> None:
         from litreview.grounding.fulltext import chunk_text, fetch_fulltext
 

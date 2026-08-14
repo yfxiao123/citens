@@ -116,7 +116,7 @@ def _download_and_convert(url: str) -> str | None:
         if r.status_code != 200 or len(r.content) < 2000:
             return None
         ctype = r.headers.get("content-type", "").lower()
-        if "pdf" not in ctype and not url.lower().endswith(".pdf") and not r.content[:5] == b"%PDF-":
+        if "pdf" not in ctype and not url.lower().endswith(".pdf") and r.content[:5] != b"%PDF-":
             # not a PDF (likely an HTML landing page) — skip
             return None
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as fh:

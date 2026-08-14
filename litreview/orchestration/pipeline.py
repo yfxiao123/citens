@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import traceback
 from dataclasses import dataclass, field
-from typing import Optional
 
 from litreview import cache, persistence
 from litreview.agents import (
@@ -32,8 +31,8 @@ from litreview.agents import (
 )
 from litreview.config import settings
 from litreview.events import (
-    EventBus,
     Event,
+    EventBus,
     RunCompleted,
     RunFailed,
     RunStarted,
@@ -56,9 +55,9 @@ from litreview.search import blend_pool, search_papers
 
 @dataclass
 class RunOptions:
-    max_results: Optional[int] = None
-    max_papers: Optional[int] = None
-    sources: Optional[list[str]] = None
+    max_results: int | None = None
+    max_papers: int | None = None
+    sources: list[str] | None = None
     use_cache: bool = True
     allow_supplement: bool = True
     max_supplement_papers: int = 4
@@ -69,7 +68,7 @@ class RunOptions:
     def resolved_max_results(self) -> int:
         return self.max_results or settings.default_max_results
 
-    def resolved_max_papers(self) -> Optional[int]:
+    def resolved_max_papers(self) -> int | None:
         if self.max_papers is None:
             mp = settings.default_max_papers
             return mp or None
@@ -86,7 +85,7 @@ class ComposeResult:
     synthesis: object
 
 
-def _emit(bus: Optional[EventBus], event: Event) -> None:
+def _emit(bus: EventBus | None, event: Event) -> None:
     if bus is not None:
         bus.emit(event)
 
@@ -95,7 +94,7 @@ def _compose(
     extracted: list[ExtractedPaper],
     topic: str,
     run_dir: str,
-    bus: Optional[EventBus],
+    bus: EventBus | None,
     *,
     fetch_fulltext: bool = True,
 ) -> ComposeResult:
@@ -263,8 +262,8 @@ async def _supplement_search(
 
 async def run_pipeline_async(
     topic: str,
-    options: Optional[RunOptions] = None,
-    bus: Optional[EventBus] = None,
+    options: RunOptions | None = None,
+    bus: EventBus | None = None,
 ) -> RunMeta:
     """Run the full pipeline asynchronously. Raises on unrecoverable failure."""
     options = options or RunOptions()
@@ -430,8 +429,8 @@ async def run_pipeline_async(
 
 def run_pipeline(
     topic: str,
-    options: Optional[RunOptions] = None,
-    bus: Optional[EventBus] = None,
+    options: RunOptions | None = None,
+    bus: EventBus | None = None,
 ) -> RunMeta:
     """Sync entry point (for CLI). Runs the async pipeline via asyncio.run."""
     return asyncio.run(run_pipeline_async(topic, options, bus))

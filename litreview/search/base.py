@@ -5,17 +5,16 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import Optional
 
 from litreview.models import Paper
 
-REGISTRY: dict[str, type["SearchSource"]] = {}
+REGISTRY: dict[str, type[SearchSource]] = {}
 
 
 def register(name: str):
     """Class decorator: register a SearchSource under ``name``."""
 
-    def deco(cls: type["SearchSource"]) -> type["SearchSource"]:
+    def deco(cls: type[SearchSource]) -> type[SearchSource]:
         REGISTRY[name] = cls
         return cls
 
@@ -32,7 +31,7 @@ class SearchSource(ABC):
         """Return up to ``max_results`` papers across all keywords."""
 
 
-def _enabled_sources(sources: Optional[list[str]]) -> list[str]:
+def _enabled_sources(sources: list[str] | None) -> list[str]:
     from litreview.config import settings
 
     if sources:
@@ -46,7 +45,7 @@ def _enabled_sources(sources: Optional[list[str]]) -> list[str]:
 async def search_papers(
     keywords: list[str],
     max_results: int = 60,
-    sources: Optional[list[str]] = None,
+    sources: list[str] | None = None,
 ) -> list[Paper]:
     """Query all enabled sources concurrently, then deduplicate."""
     names = _enabled_sources(sources)
@@ -59,7 +58,7 @@ async def search_papers(
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_papers: list[Paper] = []
-    for src, res in zip(instances, results):
+    for src, res in zip(instances, results, strict=False):
         if isinstance(res, Exception):
             print(f"[{src.name}] search failed: {res}")
             continue

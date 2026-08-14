@@ -72,6 +72,9 @@ exclude = ["tests*", "resource*", "examples*"]
 line-length = 100
 target-version = "py310"
 
+[tool.ruff.lint.per-file-ignores]
+"litreview/cli.py" = ["B008"]  # Typer idiom: Argument/Option as parameter defaults
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]

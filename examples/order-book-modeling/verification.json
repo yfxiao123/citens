@@ -1,0 +1,604 @@
+{
+  "citation_precision": 0.731,
+  "total_claims": 70,
+  "verifiable_claims": 52,
+  "supported": 26,
+  "partial": 12,
+  "unsupported": 14,
+  "unverifiable": 18,
+  "results": [
+    {
+      "claim_text": "[6] constructs the order book from first principles within an information-asymmetry framework, extending the canonical Glosten-Milgrom setup to infer the full bid-ask spread and the volume available at each price.",
+      "verdict": "supported",
+      "citation_indices": [
+        6
+      ],
+      "note": "Abstract [6] explicitly states it builds an agent-based model with informed trader, noise trader and competitive market makers using a Glosten-Milgrom-like approach to deduce the whole limit order book (bid-ask spread and volume available at each price)."
+    },
+    {
+      "claim_text": "[4] takes the opposite, more phenomenological route, asking what the order book’s information content implies for stochastic price dynamics and the emergence of fat tails.",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "Abstract [4] presents a phenomenological approach to fat tails by studying information in the LOB and inferring a jump-diffusion process that accounts for the volatility smile, consistent with 'opposite' to microfoundational modeling and focused on stochastic price dynamics."
+    },
+    {
+      "claim_text": "[5] shifts the setting to matching markets, where monetary transfers may not be sufficient to guarantee market clearing, and analyzes how order-flow dynamics, spread formation, and execution slippage interact under such structural frictions.",
+      "verdict": "supported",
+      "citation_indices": [
+        5
+      ],
+      "note": "Abstract [5] formalizes mate selection as a Limit Order Book system where monetary transfers fail to close the psychological gap, and analyzes structural illiquidity, rigid bid-ask spreads, execution slippage, and volatility shocks."
+    },
+    {
+      "claim_text": "[6] supplies the microfoundational base: by modeling informed traders, noise traders, and competitive market makers, it shows that observable features of the whole order book—spread, depth, price-dependent volume—can be interpreted as equilibrium outcomes of adverse selection and competitive quoting.",
+      "verdict": "supported",
+      "citation_indices": [
+        6
+      ],
+      "note": "Abstract [6] models informed traders, noise traders, and competitive market makers, deriving the whole LOB (spread, depth, volume at each price) as an equilibrium outcome linked to adverse selection and competitive quoting."
+    },
+    {
+      "claim_text": "[4] moves from structure to implication.",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "Abstract [4] moves from LOB structure (equilibrium order collection) to implications for stochastic price dynamics (volatility smile, fat tails, jump-diffusion), consistent with 'from structure to implication'."
+    },
+    {
+      "claim_text": "In this sense, [4] is the natural downstream counterpart of [6]—if the order book is a well-defined object, then its informational content can be inverted into stochastic price dynamics.",
+      "verdict": "supported",
+      "citation_indices": [
+        4,
+        6
+      ],
+      "note": "Given [6] constructs the order book as a well-defined equilibrium object and [4] shows how LOB information can be inverted into stochastic price dynamics, [4] is reasonably characterized as the downstream counterpart of [6]."
+    },
+    {
+      "claim_text": "[5] then complicates the picture by questioning the medium through which market clearing occurs.",
+      "verdict": "supported",
+      "citation_indices": [
+        5
+      ],
+      "note": "Abstract [5] questions whether compensatory transfers clear matching markets and proposes a limit-order-book mechanism with structural liquidity constraints, i.e. it questions the medium of market clearing."
+    },
+    {
+      "claim_text": "In conventional order book models, including [6], prices and monetary transfers are the natural equilibrating variables; in matching markets, however, structural preference gaps can persist even when transfers are available, so spread and execution slippage become consequential in ways that financial-market models may not capture.",
+      "verdict": "supported",
+      "citation_indices": [
+        6
+      ],
+      "note": "Abstract [6] models price/spread formation in an order book; abstract [5] shows transfers cannot close structural preference gaps and that spread/slippage matter, supporting the distinction drawn."
+    },
+    {
+      "claim_text": "The three papers thus form a triangle: [6] explains where the order book comes from, [4] explains what the order book predicts, and [5] explains when those predictions may fail because non-price constraints bind.",
+      "verdict": "supported",
+      "citation_indices": [
+        4,
+        5,
+        6
+      ],
+      "note": "Abstract [6] derives the whole order book from agent interactions, abstract [4] derives fat tails/volatility smile from the order book, and abstract [5] highlights failures of price/transfer clearing when non-price constraints bind."
+    },
+    {
+      "claim_text": "[4] asserts that the limit order book contains enough information to determine fat tails in financial data, effectively claiming that the observable order book is sufficient for the distributional properties of prices.",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "Abstract [4] states a novel approach to determining fat tails by studying information in the limit order book and infers a jump-diffusion from it, supporting the sufficiency interpretation."
+    },
+    {
+      "claim_text": "[5] does not directly contradict this claim, but its central finding—that monetary transfers alone cannot clear matched markets when preference gaps are structural—implies that an order book model built solely on price-clearing channels will miss an important class of frictions.",
+      "verdict": "supported",
+      "citation_indices": [
+        5
+      ],
+      "note": "Abstract [5]'s central result is that monetary compensation cannot clear matches when preference gaps are structural, implying price-only clearing misses frictions; it does not directly address [4]."
+    },
+    {
+      "claim_text": "[4] is concerned with financial price distributions, where a well-developed institutional structure of dealers, market makers, and monetary exchange makes price-based clearing plausible.",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "Abstract [4] is set in financial order-driven markets with market makers, limit orders, and monetary execution, making price-based clearing a plausible setting."
+    },
+    {
+      "claim_text": "[5] is concerned with the broader class of matching markets, where a shortage of acceptable monetary compensation means the book, the spread, and slippage carry non-price allocative content.",
+      "verdict": "supported",
+      "citation_indices": [
+        5
+      ],
+      "note": "The abstract of [5] argues that monetary transfers fail to close the psychological gap, leading to structural liquidity constraints and persistent inefficiencies, so the LOB-like spread/slippage indeed convey non-price allocative content."
+    },
+    {
+      "claim_text": "This reading is consonant with [6], whose competitive market-maker assumption is precisely a statement that the quoting side of the market can adjust prices until expected profits are zero; [5] reminds us that such an assumption is not neutral and may fail when preference heterogeneity cannot be monetized.",
+      "verdict": "supported",
+      "citation_indices": [
+        5,
+        6
+      ],
+      "note": "The abstract of [6] assumes competitive market makers within a Glosten-Milgrom framework, implying zero-profit price adjustment, while [5] shows compensation cannot overcome structural preference gaps, so the contrast is a reasonable synthesis."
+    },
+    {
+      "claim_text": "A second, subtler divergence runs between [6] and [4].",
+      "verdict": "supported",
+      "citation_indices": [
+        4,
+        6
+      ],
+      "note": "The abstracts of [6] and [4] show a clear divergence: [6] builds an agent-based model to deduce the book, whereas [4] empirically infers price dynamics from LOB data; the claim of a (subtle) divergence is inferable."
+    },
+    {
+      "claim_text": "[6] derives the whole order book from the behavior of informed and uninformed traders, implying that order book shape is an outcome of information processing.",
+      "verdict": "supported",
+      "citation_indices": [
+        6
+      ],
+      "note": "The abstract of [6] states it deduces the whole LOB from interactions among informed, noise, and market-making agents, so order book shape is linked to information processing."
+    },
+    {
+      "claim_text": "[4] instead treats the order book as a data-rich object and derives price dynamics directly from its information content.",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "The abstract of [4] explicitly studies information contained in the LOB and infers a jump-diffusion price process, treating the book as a data-rich object."
+    },
+    {
+      "claim_text": "[6] makes the book endogenous to an information structure, which is attractive for regulatory applications because it permits counterfactual analysis of rule changes.",
+      "verdict": "supported",
+      "citation_indices": [
+        6
+      ],
+      "note": "The abstract of [6] says the model provides a tool for regulators and can forecast consequences of rule changes such as tick size alterations, so counterfactual regulatory analysis is supported."
+    },
+    {
+      "claim_text": "[4] makes prices endogenous to the book, which is attractive for empirical work because it connects the book to measurable return distributions.",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "The abstract of [4] explicitly links the limit order book to volatility smile, fat tails, and jump-diffusion dynamics, i.e., measurable return distributions, and derives these from the book itself, making prices endogenous to the book."
+    },
+    {
+      "claim_text": "A future synthesis would need to articulate how the information structure that generates the book in [6] is encoded in, and recoverable from, the book’s empirical information that [4] exploits.",
+      "verdict": "supported",
+      "citation_indices": [
+        4,
+        6
+      ],
+      "note": "[6] models an information structure (informed/noise traders, market makers) generating the order book, while [4] exploits empirical order-book information to infer price dynamics. The claim that a synthesis must articulate how [6]'s generative information structure maps onto [4]'s empirical information is a reasonable inference from the two abstracts."
+    },
+    {
+      "claim_text": "My own position is that the tension between [4] and [5] is the most productive one for future research.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        4,
+        5
+      ],
+      "note": "The abstract of [5] is about matching markets (e.g., marriage) modeled as a limit order book, and [4] is about financial LOB and price dynamics. Neither abstract discusses a 'tension' between them or that this is the most productive research direction; this is an unsupported subjective opinion."
+    },
+    {
+      "claim_text": "The regulatory ambition of [6] would therefore be well advised to incorporate the structural-preference channels identified by [5].",
+      "verdict": "unsupported",
+      "citation_indices": [
+        5,
+        6
+      ],
+      "note": "[6] concerns financial order book regulation and agent types, while [5] concerns social matching markets and preference differentials. The abstracts provide no basis for incorporating [5]'s 'structural-preference channels' into [6]'s regulatory framework; this is an unsupported cross-domain leap."
+    },
+    {
+      "claim_text": "[1] extends a limit order book framework to describe how market orders affect liquidity and solves for an order placement strategy that minimizes expected liquidity cost.",
+      "verdict": "supported",
+      "citation_indices": [
+        1
+      ],
+      "note": "The abstract of [1] states it extends a limit order book model with resilience, describes liquidity price impact of market orders, and solves the problem of minimizing expected liquidity costs via an optimal order placement strategy."
+    },
+    {
+      "claim_text": "[2] similarly works within a limit order book model, deriving optimal execution strategies under a general resilience structure and arbitrary trading dates.",
+      "verdict": "supported",
+      "citation_indices": [
+        2
+      ],
+      "note": "The abstract of [2] explicitly works within a limit order book model with nonlinear price impact and resilience, allowing non-homogeneous resilience rates and arbitrary trading dates, and derives optimal execution strategies."
+    },
+    {
+      "claim_text": "[1] reaches the same conclusion through an optimization problem over market orders, while [2] generalizes the setting by allowing the trading dates to be arbitrary and the resilience to be non-homogeneous.",
+      "verdict": "partial",
+      "citation_indices": [
+        1,
+        2
+      ],
+      "note": "[1] already allows time-dependent resilience and arbitrary trading times, so describing [2] as generalizing by allowing these is misleading if the baseline is [1]; 'reaches the same conclusion' is vague."
+    },
+    {
+      "claim_text": "In this respect it is the natural baseline for the theme, and [1] builds on a similar order book setting by adding portfolio liquidation constraints.",
+      "verdict": "supported",
+      "citation_indices": [
+        1
+      ],
+      "note": "[1]'s abstract confirms it builds on a limit order book model with resilience and addresses constrained portfolio liquidation."
+    },
+    {
+      "claim_text": "[2] then stretches the framework further by relaxing two assumptions of earlier work—homogeneous resilience and a fixed set of trading dates—and by asking a question that neither [1] nor [3] addresses explicitly: when do the model’s dynamics admit price manipulation?",
+      "verdict": "partial",
+      "citation_indices": [
+        1,
+        2,
+        3
+      ],
+      "note": "[2] indeed relaxes homogeneous resilience and fixed trading dates and addresses price manipulation, but the claim that neither [1] nor [3] does so is not substantiated (no [3] abstract, and [1] already has similar generality)."
+    },
+    {
+      "claim_text": "The conditions [2] derives on the order book shape and resilience are therefore not merely technical; they provide an economic validity test for the entire class of models.",
+      "verdict": "partial",
+      "citation_indices": [
+        2
+      ],
+      "note": "[2]'s abstract derives conditions for optimality and absence of price manipulation, but does not explicitly frame them as an 'economic validity test for the entire class of models'; this is an interpretive stretch."
+    },
+    {
+      "claim_text": "In this sense, [2] acts as a normative check on the descriptive models of [3] and the applied models of [1].",
+      "verdict": "unsupported",
+      "citation_indices": [
+        1,
+        2,
+        3
+      ],
+      "note": "[2]'s abstract contrasts with Gatheral (2008) but makes no reference to [1] or [3]; the claim that it acts as a normative check on them has no basis in the provided abstracts."
+    },
+    {
+      "claim_text": "[2] assumes a specific exponential form of resilience and develops its conditions inside that assumption, while [3] derives impact from a more detailed account of order book dynamics.",
+      "verdict": "partial",
+      "citation_indices": [
+        2,
+        3
+      ],
+      "note": "[2]'s abstract does assume exponential resilience, but the claim about [3] deriving impact from a more detailed account of order book dynamics is unverifiable because [3]'s abstract is not provided."
+    },
+    {
+      "claim_text": "If resilience is an endogenous outcome of order arrivals and cancellations, as [3] suggests, then imposing an exponential resilience structure, as [2] does, may be unnecessarily restrictive; conversely, if exponential resilience is needed to obtain clean no-manipulation conditions, then the more realistic dynamics in [3] may inadvertently allow strategies that are profitable only by moving prices and then reversing the move.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        2,
+        3
+      ],
+      "note": "The claim relies on [3], whose abstract is not provided, and attributes to [2] a restrictiveness concern that the abstract does not state. No basis in the provided abstracts."
+    },
+    {
+      "claim_text": "A position worth defending is that [2]’s manipulation conditions should be treated as constraints to be imposed on any microstructural model, including [3]’s, rather than as an alternative modeling philosophy.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        2,
+        3
+      ],
+      "note": "The claim references [3] (not provided) and misrepresents [2]'s finding: [2] states its model avoids manipulation, not that manipulation conditions should be imposed on any model."
+    },
+    {
+      "claim_text": "With them, the practical value of [1]’s constrained liquidation framework and [3]’s tractable impact function is substantially enhanced.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        1,
+        3
+      ],
+      "note": "The claim depends on unspecified antecedents and [3]'s impact function, which is not described in the provided abstracts. Neither [1] nor [2] supports this assertion."
+    },
+    {
+      "claim_text": "[2] notes that its absence-of-manipulation result holds under idealized assumptions and lacks empirical validation, and [3] concedes that its model relies on simplified assumptions about order arrivals and liquidity dynamics.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        2,
+        3
+      ],
+      "note": "[2] does not mention idealized assumptions or lack of empirical validation; it says 'under general conditions' and offers no caveats about validation. [3] is not provided."
+    },
+    {
+      "claim_text": "Both caveats point in the same direction: the next step is to connect the structural insight of [3], the portfolio realism of [1], and the manipulation constraints of [2] to actual order book data.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        1,
+        2,
+        3
+      ],
+      "note": "The 'caveats' referenced in claim 3 are not grounded in the abstracts, and [3] is absent. The proposed next step is not mentioned in [1] or [2]."
+    },
+    {
+      "claim_text": "Studies converge on the claim that liquidity characteristics such as depth and resilience materially alter the cost of large orders, and that dynamic order splitting is justified precisely because the book’s state evolves in response to trading [1][2][3].",
+      "verdict": "partial",
+      "citation_indices": [
+        1,
+        2,
+        3
+      ],
+      "note": "The general statement about liquidity/resilience affecting costs and dynamic order splitting is consistent with [1] and [2], but the claim explicitly includes [3], whose abstract is not provided, so full convergence cannot be verified."
+    },
+    {
+      "claim_text": "Likewise, the book is widely held to encode information about latent price dynamics and volatility, linking microstructure to macro price behavior [4][6][7].",
+      "verdict": "supported",
+      "citation_indices": [
+        4,
+        6,
+        7
+      ],
+      "note": "Supported by [4] and [6]: [4] links the LOB to volatility smile and inferred jump-diffusion dynamics, and [6] links equilibrium book state to efficient price dynamics. [7] was not provided but is not needed for the core claim."
+    },
+    {
+      "claim_text": "[4] argues that order book variables suffice to determine the distribution of prices, including heavy tails, while [0] counters that book variables leave substantial microstructure noise unexplained, pointing to randomness sourced outside the book.",
+      "verdict": "partial",
+      "citation_indices": [
+        0,
+        4
+      ],
+      "note": "The first part about [4] is supported: the abstract says the LOB implies a volatility smile and fat tails. However, the contrast with [0] cannot be verified because no abstract for [0] was provided."
+    },
+    {
+      "claim_text": "[4]’s sufficiency result is achieved within a parametric microstructure model: the book determines the price distribution only conditional on a specified map from book states to order flow.",
+      "verdict": "partial",
+      "citation_indices": [
+        4
+      ],
+      "note": "The abstract supports an equilibrium LOB model from which price dynamics are inferred, but it does not explicitly describe a 'parametric microstructure model' or a 'specified map from book states to order flow'; these are added specifics not in the abstract."
+    },
+    {
+      "claim_text": "[2] imposes a specific exponential resilience structure and demonstrates that the shape of resilience, uniform or not, is consequential for ruling out price manipulation.",
+      "verdict": "supported",
+      "citation_indices": [
+        2
+      ],
+      "note": "The abstract describes exponential resilience, allows non-homogeneous resilience rates, and derives no price manipulation as a corollary, while contrasting with Gatheral's model where exponential resilience can produce manipulation."
+    },
+    {
+      "claim_text": "In [2], persistence is an input regulated by the assumed structure; in [3], persistence is an output of the mechanics.",
+      "verdict": "partial",
+      "citation_indices": [
+        2,
+        3
+      ],
+      "note": "The [2] part is inferable from exponential resilience being an exogenous model input, but the [3] part cannot be assessed because no abstract for [3] was provided."
+    },
+    {
+      "claim_text": "[5] shows that in matching markets, monetary transfers alone do not guarantee clearing when structural preference gaps exist; some agents will not trade at any price consistent with the book.",
+      "verdict": "supported",
+      "citation_indices": [
+        5
+      ],
+      "note": "The abstract explicitly states that monetary compensation cannot structurally close the internal preference differential and that matching failures are liquidity droughts due to wide bid-ask spreads."
+    },
+    {
+      "claim_text": "Standard models [1][2][3] treat price as the universal adjustment mechanism: the book clears by moving quotes.",
+      "verdict": "partial",
+      "citation_indices": [
+        1,
+        2,
+        3
+      ],
+      "note": "The abstracts of [1] and [2] focus on optimal execution in a limit order book model with resilience; they do not explicitly claim that price is the 'universal adjustment mechanism' for market clearing. The claim is a plausible interpretation but overstates the specific content of the cited abstracts."
+    },
+    {
+      "claim_text": "Yet if [5] is right, there are states of the world—crashes, freezes, forced liquidations—where dynamics are driven by non-price constraints, and no amount of quote adjustment restores equilibrium.",
+      "verdict": "partial",
+      "citation_indices": [
+        5
+      ],
+      "note": "Abstract [5] discusses non-clearing markets due to structural liquidity constraints that are immune to monetary compensation, which is consistent with the idea of non-price constraints. However, the specific examples of 'crashes, freezes, forced liquidations' are not mentioned in the abstract, representing an extrapolation."
+    },
+    {
+      "claim_text": "The implication is not that [1][2][3] are wrong within their domain, but that their domain is narrower than commonly assumed: they model price-mediated reallocation, not market clearing in general.",
+      "verdict": "partial",
+      "citation_indices": [
+        1,
+        2,
+        3
+      ],
+      "note": "The claim draws an implication about the limited domain of standard models, which is not explicitly stated in abstracts [1], [2], or [5]. It is a reasonable synthesis but goes beyond the provided abstracts, which do not directly discuss the scope of their applicability."
+    },
+    {
+      "claim_text": "围绕订单簿建模的研究已在过去二十年中形成较为完整的理论—实证—算法闭环。从理论层面看，学者们逐步超越传统有效市场假说，将限价订单簿视为由到达、撤销和成交事件驱动的随机系统，并发展出连续时间马尔可夫模型、队列动态模型和基于代理的模拟框架。其中，Cont-Stoikov-Talreja 型队列模型因其解析可处理性成为基准[1,2]；更复杂的点过程模型则借助 Hawkes 过程捕捉订单流的自激和互激特征，揭示价格形成的微观机制[5]。在市场影响与最优执行方面，Almgren-Chriss 框架奠定了考虑临时与永久冲击的最优清算模型基础[4]，后续研究进一步引入库存风险、对冲目标和市场操纵约束，形成以随机最优控制为核心的执行理论[3,6]。实证层面，高频逐笔数据使得研究者能够直接估计订单簿状态变量、冲击函数和波动率，并发现市场微观结构噪声对已实现波动率的显著影响[7,8]。总体而言，学界已形成共识：订单簿是价格发现与流动性供给的核心场所，其动态可由多层队列与非平稳事件流共同描述；市场冲击在中等规模下呈凹形，而过度依赖线性冲击模型会导致执行成本低估与操纵策略设计偏差[4,6]。",
+      "verdict": "unsupported",
+      "citation_indices": [
+        4,
+        5
+      ],
+      "note": "The claim cites specific papers for specific contributions, but the cited abstracts do not support these attributions. For example, [1] and [2] are not Cont-Stoikov-Talreja queue models, [5] does not discuss Hawkes processes, and [4] does not present the Almgren-Chriss framework. The overall synthesis is not grounded in the provided abstracts."
+    },
+    {
+      "claim_text": "展望未来，订单簿建模有望在三个方向取得突破。其一，深度生成模型与大规模消息级数据结合，将实现对订单簿状态演化、流动性提供与撤单行为的端到端模拟，这既能提升可扩展性，也能在反事实分析中揭示微观机制。其二，强化学习与多智能体博弈框架将逐步替代静态最优控制，使执行策略能够自适应对手方行为与日内流动性变化，同时融入监管约束与价格操纵检测[6]。其三，跨市场、跨资产和跨币种的研究将推动微观结构模型的统一化，特别是在加密货币市场中，透明而高粒度的链上订单簿数据为验证经典模型提供了前所未有的天然实验场。此外，实时估计与在线学习技术有望让模型从“后验拟合”走向“前验预警”，从而更好地服务于流动性风险监测和监管实践。整体而言，订单簿建模正处于从描述性统计到因果推断、从单一市场到多市场网络的转型期，其理论进展将对算法交易、市场微观结构与系统性风险监管产生深远影响。",
+      "verdict": "partial",
+      "citation_indices": [
+        6
+      ],
+      "note": "Only one part of the claim is cited to [6], which does discuss regulatory tools and applications. However, the broader claims about deep generative models, reinforcement learning, and multi-agent frameworks are forward-looking statements not present in the abstract of [6]. Additionally, '[6]' does not specifically mention price manipulation detection, making the grounding partial."
+    },
+    {
+      "claim_text": "**参考文献**\n\n[1] Gould M D, Porter M A, Williams S, et al.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        1
+      ],
+      "note": "This item is a reference list entry, not a substantive claim, and cannot be evaluated against the cited abstracts."
+    },
+    {
+      "claim_text": "[2] Cont R, Stoikov S, Talreja R.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        2
+      ],
+      "note": "The cited abstract [2] is by Alfonsi and Schied, not Cont, Stoikov, and Talreja. The abstract contains no mention of these authors or their model."
+    },
+    {
+      "claim_text": "[4] Almgren R, Chriss N.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        4
+      ],
+      "note": "The cited abstract [4] is by Langnau and Punchev, not Almgren and Chriss. The abstract provides no basis for attributing it to Almgren and Chriss."
+    },
+    {
+      "claim_text": "[5] Bouchaud J-P, Farmer J D, Lillo F.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        5
+      ],
+      "note": "The cited abstract [5] is by Yao Wu, not Bouchaud, Farmer, and Lillo. The abstract is about matching markets and a limit order book model, with no mention of Bouchaud et al."
+    },
+    {
+      "claim_text": "[6] Cartea Á, Jaimungal S, Penalva J.",
+      "verdict": "unsupported",
+      "citation_indices": [
+        6
+      ],
+      "note": "The cited abstract [6] is by Huang, Pulido, Rosenbaum, et al., not Cartea, Jaimungal, and Penalva. The abstract contains no indication of authorship by Cartea et al."
+    },
+    {
+      "claim_text": "[3] constructs a market impact model endogenously from order book dynamics, with the impact function depending on order size and liquidity.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        3
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "[3] states this directly: the optimal strategy is a sequence of smaller trades.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        3
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "[3] provides the microstructural foundation, deriving market impact from the mechanics of the book itself rather than postulating it as a reduced-form function.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        3
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "The theme's organizing distinction — noise explainability versus volatility estimation — maps directly onto [0] and [7], and the two papers, read jointly, articulate a single methodological circuit in which estimation and validation presuppose one another.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        0,
+        7
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "[0] addresses a foundational question for any empirical use of high-frequency data: whether the variables observable from the limit order book are sufficient to account for market microstructure noise.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        0
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "To answer it, the paper develops a statistical test of whether order book variables fully explain such noise, and the empirical verdict is negative: the book's informational content does not fully account for microstructure noise, with additional sources of noise indicated beyond those the book captures [0].",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        0
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "The lasting contribution is accordingly less a specific estimate than a reusable diagnostic — a testing framework for assessing the informational content of the order book and, by extension, for detecting where the book falls short [0].",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        0
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "[7] proceeds from the complementary premise that quote and trade records carry substantial information worth harvesting.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        7
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "Its research question is how to operationalise an expanded filtration — that is, how high-frequency quotation and transaction data, observed non-synchronously, can be practically organized for estimating realized volatilities and kernels [7].",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        7
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "Using NASDAQ records, the paper demonstrates that this data paradigm supports feasible volatility estimation from non-synchronous high-frequency data, and that kernel-based methods applied to quote and trade data improve volatility estimation [7].",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        7
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "The emphasis falls deliberately on implementation: the goal is to make an informationally enriched filtration usable in real data, and the demonstration on NASDAQ establishes operationalisability rather than merely theoretical promise [7].",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        7
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "The paper's stated scope — kernel estimation rather than structural order-book dynamics modelling — is itself revealing: [7] treats the book's observable quotes as a data input for measurement, not as the object of a structural model [7].",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        7
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "On the surface, [0] and [7] might seem to pull",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        0,
+        7
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "[0]’s residual noise, by contrast, captures exactly those flow components that escape any such map.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        0
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "[3], in contrast, derives market impact endogenously from order book dynamics, without imposing a resilience function.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        3
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "[3] Avellaneda M, Stoikov S.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        3
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "[7] Easley D, López de Prado M, O’Hara M.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        7
+      ],
+      "note": "cited source(s) have no abstract available"
+    },
+    {
+      "claim_text": "[8] Barndorff-Nielsen O E, Shephard N.",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        8
+      ],
+      "note": "cited source(s) have no abstract available"
+    }
+  ]
+}

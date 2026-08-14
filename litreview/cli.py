@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import sys
 import traceback
-from typing import Optional
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -18,8 +17,8 @@ from litreview.events import (
     RunFailed,
     RunStarted,
     StepCompleted,
-    StepStarted,
     StepProgress,
+    StepStarted,
 )
 from litreview.orchestration import RunOptions, run_pipeline
 from litreview.search import REGISTRY as SEARCH_REGISTRY
@@ -65,9 +64,9 @@ def _make_rich_handler(console: Console):
 @app.command()
 def run(
     topic: list[str] = typer.Argument(None, help="研究主题 (research topic)"),
-    n: Optional[int] = typer.Option(None, "-n", "--max-papers", help="最终保留论文数"),
-    max_results: Optional[int] = typer.Option(None, "--max-results", help="候选池目标数"),
-    sources: Optional[str] = typer.Option(None, "--sources", help="逗号分隔检索源"),
+    n: int | None = typer.Option(None, "-n", "--max-papers", help="最终保留论文数"),
+    max_results: int | None = typer.Option(None, "--max-results", help="候选池目标数"),
+    sources: str | None = typer.Option(None, "--sources", help="逗号分隔检索源"),
     no_cache: bool = typer.Option(False, "--no-cache", help="禁用缓存"),
     no_fulltext: bool = typer.Option(
         False, "--no-fulltext", help="不获取全文（仅用摘要溯源，精度较低）"
@@ -91,7 +90,7 @@ def run(
     except Exception:  # noqa: BLE001
         console.print("[bold red]运行失败:[/]")
         traceback.print_exc()
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @app.command()
@@ -124,10 +123,7 @@ def sjr(
     shipping with the package. Ranking degrades gracefully (neutral venue
     factor) when it is absent.
     """
-    from pathlib import Path
-
     from litreview.config import settings
-    from litreview.net import sync_client
     from litreview.ranking import SJRIndex
 
     path = Path(settings.sjr_csv_path)
@@ -166,11 +162,11 @@ def sjr(
     except ImportError:
         console.print("[bold red]缺少 pyreadr[/]（默认数据源需要）：pip install pyreadr")
         console.print("或使用 --mirror 下载无需转换的 CSV 镜像")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     except Exception as e:  # noqa: BLE001
         console.print(f"[bold red]下载失败:[/] {e}")
         console.print(f"可手动下载后保存为 {settings.sjr_csv_path}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 def _download_to(url: str, path: Path) -> None:

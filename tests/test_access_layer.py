@@ -152,7 +152,6 @@ if __name__ == "__main__":
                 inspect.signature(fn).parameters
             ):
                 with tempfile.TemporaryDirectory() as td:
-                    import pytest  # type: ignore
 
                     if "monkeypatch" in inspect.signature(fn).parameters:
                         class _MP:  # minimal shim

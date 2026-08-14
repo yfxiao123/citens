@@ -1,92 +1,159 @@
-# 文献综述智能体 (Literature Review Agent)
+# CiteLens (litreview)
 
-课程大作业项目：构建一个文献综述智能体，输入研究主题，自动完成论文检索、筛选、信息抽取、主题组织和综述撰写全流程。
+**An open-source literature-review agent that writes critical, citation-grounded surveys — every claim verifiable against its source.**
 
-## 功能
-
-- **论文检索**：自动生成多组关键词，并发检索 arXiv + Semantic Scholar + OpenAlex
-- **论文筛选**：LLM 逐篇相关性评分，保留高相关论文
-- **信息抽取**：从摘要中提取研究问题、方法、主要发现、局限性等信息
-- **主题组织**：自动识别 3-6 个主题维度，归类论文并梳理逻辑关系
-- **综述撰写**：生成带引用的完整综述 Markdown 文件
-- **双交互方式**：CLI 命令行 + Gradio Web 界面
-
-## 项目结构
+Give it a topic. It plans English search queries, fans out over arXiv / Semantic Scholar / OpenAlex / Crossref, reranks the pool by **abstract relevance × citations × journal quartile (SCImago SJR)**, extracts structured findings, then writes a survey with numbered claims — and **verifies each claim against the source text**, reporting a citation-precision score instead of hoping for the best.
 
 ```
-├── app.py                  # CLI 入口
-├── webui.py                # Gradio Web 界面
-├── src/
-│   ├── config.py           # 配置管理
-│   ├── models.py           # Pydantic 数据模型
-│   ├── llm.py              # LLM 统一调用（OpenAI / Ollama）
-│   ├── pipeline.py         # 主流程编排
-│   ├── search/
-│   │   ├── arxiv.py        # arXiv API 检索
-│   │   ├── semantic_scholar.py  # Semantic Scholar API 检索
-│   │   ├── openalex.py     # OpenAlex API 检索
-│   │   └── base.py         # 三源并发检索 + 去重
-│   └── agents/
-│       ├── keyword_agent.py    # 关键词生成
-│       ├── filter_agent.py     # 论文筛选
-│       ├── extract_agent.py    # 信息抽取
-│       ├── organize_agent.py   # 主题组织
-│       └── write_agent.py      # 综述撰写
-├── output/                 # 运行输出目录（自动生成）
-├── requirements.txt
-└── .env.example
+litreview run 订单簿建模 -n 8
+...
+✓ 8 papers · 3 themes · 70 cited claims
+✓ citation precision 73%   (3/8 papers grounded on full text)
 ```
 
-## 快速开始
+> 中文简介见[下方](#中文简介)。
 
-### 1. 安装依赖
+---
+
+## Why this exists
+
+Most "AI literature review" tools are summary aggregators: they retrieve, paraphrase, and list. Two things are almost universally missing — and they're the whole point here:
+
+**1. Verifiable citations.** The writer only emits claims tied to numbered references. A verifier agent then judges every claim against the cited paper's ground text (full text when an open PDF exists, abstract otherwise) with a four-way verdict — `supported / partial / unsupported / unverifiable` — and the run reports **citation precision = (supported + partial) / verifiable claims**. Unsupported claims are visible in `provenance.json`, not silently kept. *(Among popular open-source agents, only PaperQA2 does comparable grounding — and it answers questions rather than writing surveys.)*
+
+**2. A critical stance.** A Synthesis agent extracts **consensus, contradictions, and gaps** across papers; the writer argues a position instead of concatenating abstracts. A Reflector agent checks coverage, runs a gap-targeted supplementary search, and recomposes the survey — at least one full loop per run.
+
+And one practical bet you won't find elsewhere:
+
+**3. Your access is the agent's access.** Campus EZproxy, VPN proxy, or just "I'll download the PDFs myself" — see [The access layer](#the-access-layer).
+
+## How it works
+
+```
+            CLI (Typer/Rich)      FastAPI + SSE + single-page UI
+                        \             /
+                 ┌───────────────────────────┐
+                 │        orchestrator        │  events · run-dir · cache
+                 ├───────────────────────────┤
+  planner → search → rank → filter → enrich → extract
+        (4 sources,    (SJR      (LLM        (cross-source
+         async)        quartile   score)       abstract fill-in)
+         + citations)
+                 → organize → synthesize(consensus/contradictions/gaps)
+                 → write([n] claims) → verify(LM-as-judge vs ground text)
+                 → reflect → supplement → recompose
+                 ├───────────────────────────┤
+                 │ grounding: full-text PDFs → chunks → retrieval        │
+                 │ access: proxy · EZproxy rewrite · manual PDF drop     │
+                 └───────────────────────────┘
+```
+
+Every run writes an inspectable directory:
+
+```
+runs/<topic>-<timestamp>/
+├── review.md              # the survey, with [n] citation markers
+├── references.bib         # BibTeX
+├── provenance.json        # claim → reference → verdict mapping
+├── verification.json      # per-claim verdicts + citation precision
+├── grounding.json         # which papers have full text vs abstract only
+├── fetch_list.md          # papers YOU can fetch manually (see below)
+└── steps/*.json           # every intermediate stage
+```
+
+## Quick start
 
 ```bash
-pip install -r requirements.txt
+pip install -e ".[pdf]"            # or ".[api,pdf]" for the web UI
+cp .env.example .env               # fill in LLM_API_KEY (OpenAI-compatible)
+litreview sjr                      # one-time: fetch SCImago journal ranks
+litreview run "limit order book modeling" -n 8
 ```
 
-### 2. 配置环境变量
+Works with any OpenAI-compatible backend — DeepSeek (`LLM_API_BASE=https://api.deepseek.com/v1`), Ollama, OpenRouter, vLLM, Groq — or native Anthropic/Gemini via the `[multi]` extra (LiteLLM).
 
-复制 `.env.example` 为 `.env`，填写配置：
+Web UI (SSE streaming, live step progress, precision panel):
 
 ```bash
-# 使用 OpenAI（默认）
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-your-key-here
-OPENAI_MODEL=gpt-4o-mini
-
-# 或使用 Ollama 本地模型
-# LLM_PROVIDER=ollama
-# OLLAMA_BASE_URL=http://localhost:11434
-# OLLAMA_MODEL=qwen2.5:7b
+pip install -e ".[api,pdf]"
+uvicorn litreview.api.app:app --port 8000     # open http://localhost:8000
+# or: docker compose up
 ```
 
-### 3. 运行
+CLI reference: `litreview run | sources | sjr | version` (`litreview --help`).
 
-**CLI 模式**：
-```bash
-python app.py 大语言模型在金融领域的应用
+## The access layer
+
+Open-access sources cover a lot, but the best paper for a section is often paywalled, and publishers aggressively block non-browser traffic. Instead of pretending, CiteLens routes around **your** access in three tiers:
+
+1. **Proxy / VPN** — set `HTTP_PROXY`/`HTTPS_PROXY` (+ optional `ACCESSIBLE_DOMAINS` allowlist) and all full-text fetches ride it.
+2. **EZproxy rewrite** — set `EZPROXY_PREFIX=https://lib.univ.edu.cn/login?url=` and publisher URLs are rewritten through your library proxy (the standard campus pattern).
+3. **Manual drop (always works)** — papers the agent can't fetch are listed in `fetch_list.md` with DOIs and suggested filenames. Download them in your browser (where your campus login lives), drop the PDFs into `papers/`, and the next run automatically grounds claims on their full text. No filename bookkeeping needed — DOI, arXiv id, or recognizable title words all match.
+
+The honesty rule: a paper grounded only on its abstract is labeled as such in `grounding.json`; nothing is silently upgraded to "verified".
+
+## Venue-aware ranking
+
+Retrieval order decides which papers survive. Ranking on raw citations starves fresh preprints; ranking on LLM relevance alone is opaque. CiteLens blends three factors with configurable weights (default 0.6 / 0.2 / 0.2):
+
+```
+rank = 0.6 · (relevance/5)  +  0.2 · min(log10(1+cites)/3, 1)  +  0.2 · venue(SJR quartile)
 ```
 
-**Web 界面**：
-```bash
-python webui.py
+`litreview sjr` fetches the SCImago Journal Rank dataset (official field-normalized quartiles via a GitHub mirror; a no-dependency CSV fallback approximates by percentile). The SJR data is **CC BY-NC**, so it's downloaded on demand — never committed or redistributed. Without it, the venue factor is neutral and everything else still works. Every run stores its full ranking breakdown (`steps/03c_ranking.json`) — explainable by construction.
+
+## Citation precision, honestly
+
+Precision depends on how much ground text exists. Same topic, same model:
+
+| grounding | claims | precision |
+|---|---|---|
+| abstracts only | ~50 | ~35% |
+| + 1 full text (open PDF) | 53 | 47% |
+| + dropped PDFs & OA fetches (3/8 full text) | 70 | **73%** |
+
+The number is computed by an LLM-as-judge with the cited paper's retrieved chunks in view — it's a working measure, not a certification. Claims whose cited paper has no ground text are excluded from the denominator and reported as `unverifiable` instead.
+
+## Project layout
+
+```
+litreview/
+├── cli.py                     # Typer CLI
+├── api/                       # FastAPI + SSE + static UI
+├── orchestration/pipeline.py  # stages, events, run-dir persistence
+├── agents/                    # planner/filter/extract/organize/synth/writer/verifier/reflector
+├── search/                    # pluggable async sources (arXiv/S2/OpenAlex/Crossref)
+├── grounding/                 # chunk store, citation table, BibTeX, provenance,
+│                              #   full-text fetch, abstract enrichment, fetch list
+├── ranking.py                 # SJR index + composite rerank
+├── net.py                     # access layer: proxy, EZproxy rewrite, domain allowlist
+└── models.py / config.py / events.py / cache.py / persistence.py
 ```
 
-运行结果保存在 `output/` 目录下。
+## Roadmap
 
-## Pipeline 流程
+- chunk-level provenance (claim → exact passage, not just paper)
+- citation-graph snowballing (references of included papers)
+- formal eval on a public survey benchmark
+- PDF ingestion for a whole existing library
+- multilingual survey output
 
-```
-用户输入主题 → 关键词生成(6-8条) → 三源检索(arXiv+S2+OpenAlex)
-  → LLM筛选(保留≥15篇) → 信息抽取(5个字段)
-  → 主题组织(3-6个维度) → 综述撰写(引言+各主题+总结)
-```
+## License
 
-## 技术栈
+MIT. The runtime-fetched SCImago dataset is CC BY-NC (attributed to SCImago Lab; fetched by `litreview sjr`, never redistributed here).
 
-- **LLM 后端**：OpenAI / Ollama 双后端可切换
-- **学术 API**：arXiv + Semantic Scholar + OpenAlex
-- **数据模型**：Pydantic v2
-- **Web 界面**：Gradio
-- **运行环境**：Python 3.10+
+---
+
+## 中文简介
+
+**CiteLens（包名 `litreview`）**：输入一个研究主题，自动完成「关键词规划 → 四源并发检索（arXiv / Semantic Scholar / OpenAlex / Crossref）→ 期刊分区×引用×相关性的复合排序 → LLM 筛选 → 摘要交叉补全 → 结构化抽取 → 主题组织 → 批判性综合（共识/矛盾/空白）→ 带引用撰写 → 逐条核验 → 反思补充检索」，产出一份**每条论断都可回溯到原文**的综述。
+
+与“摘要拼接器”们的三点不同：
+
+1. **可信引用**：撰写只输出带 `[n]` 标记的论断；核验 agent 逐条对照被引论文的原文（有开放 PDF 时用全文分块，否则用摘要），给出 supported/partial/unsupported/unverifiable 四类判定，并报告**引用精度**。整条链路存在 `provenance.json`，可审计。
+2. **批判立场**：综合 agent 显式提取跨论文的共识、矛盾与研究空白；反思 agent 发现覆盖缺口后补检并重写——不是罗列，是论证。
+3. **你的权限就是 agent 的权限**：校园代理/EZproxy 重写/手动投递 PDF 三档接入（见 [The access layer](#the-access-layer)），对拿不到全文的论文诚实标注，绝不冒充“已核验”。
+
+快速开始：`pip install -e ".[pdf]"` → 填 `.env` → `litreview sjr` → `litreview run 主题 -n 8`；Web 界面 `uvicorn litreview.api.app:app`。
+
+示例产物见 [`examples/order-book-modeling/`](examples/order-book-modeling/)（主题「订单簿建模」，8 篇论文，70 条论断，引用精度 73%）。

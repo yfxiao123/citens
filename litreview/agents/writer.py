@@ -138,7 +138,7 @@ def write_review_body(
         synth_prompt = (
             f"研究主题 / Topic: {topic}\n"
             f"共识 / Consensus:\n" + "".join(f"- {c}\n" for c in synthesis.consensus)
-            + f"矛盾 / Contradictions:\n" + "".join(f"- {c}\n" for c in synthesis.contradictions)
+            + "矛盾 / Contradictions:\n" + "".join(f"- {c}\n" for c in synthesis.contradictions)
         )
         crit = chat(CRIT_SYNTH_PROMPT, synth_prompt, max_tokens=4096)
         sections.append(

@@ -62,7 +62,7 @@ class CrossrefSearcher(SearchSource):
                 authors.append(name)
         doi = item.get("DOI")
         links = [
-            l.get("URL") for l in item.get("link", []) if l.get("content-type") == "application/pdf"
+            lk.get("URL") for lk in item.get("link", []) if lk.get("content-type") == "application/pdf"
         ]
         return Paper(
             title=(item.get("title") or [""])[0],

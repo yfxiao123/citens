@@ -28,10 +28,7 @@ def _format_label(p: Paper) -> str:
 
 def _bibtex_key(p: Paper, index: int) -> str:
     """authorlastname + year + index, ASCII-safe and unique."""
-    if p.authors:
-        last = re.split(r"[\s,]+", p.authors[0])[-1]
-    else:
-        last = "anon"
+    last = re.split(r"[\s,]+", p.authors[0])[-1] if p.authors else "anon"
     last = unicodedata.normalize("NFKD", last).encode("ascii", "ignore").decode("ascii")
     last = re.sub(r"[^A-Za-z]", "", last).lower() or "anon"
     return f"{last}{p.year or 'nd'}{index}"

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field, computed_field, field_validator
 
@@ -36,13 +35,13 @@ class Paper(BaseModel):
 
     title: str
     authors: list[str] = Field(default_factory=list)
-    year: Optional[int] = None
+    year: int | None = None
     abstract: str = ""
     source: str = ""
     citation_count: int = 0
     url: str = ""
-    doi: Optional[str] = None
-    pdf_url: Optional[str] = None  # open-access full-text PDF, if known
+    doi: str | None = None
+    pdf_url: str | None = None  # open-access full-text PDF, if known
     venue: str = ""  # journal / conference / repository name, when known
 
     @field_validator("doi", mode="before")
@@ -188,4 +187,4 @@ class RunMeta(BaseModel):
     themes: list[str] = Field(default_factory=list)
     review_path: str = ""
     run_dir: str = ""
-    citation_precision: Optional[float] = None  # filled by Verifier (Phase 3)
+    citation_precision: float | None = None  # filled by Verifier (Phase 3)
