@@ -7,15 +7,24 @@ A thin, dependency-light abstraction over chat-completion backends:
 * ``LiteLLMBackend`` (optional, needs the ``[multi]`` extra) — native routing to
   Anthropic / Gemini / Bedrock / Cohere for users who need it.
 
-The module-level :func:`chat` / :func:`chat_json` helpers cache a singleton
-backend built from :mod:`litreview.config`.
+Performance/cost layout:
+* **Two model tiers.** Cheap structured stages (planner/filter/extract) use
+  ``LLM_MODEL``; the intelligence-heavy stages (writer/synth/verifier) pass
+  ``strong=True`` and use ``LLM_MODEL_STRONG`` (falls back to ``LLM_MODEL``).
+* **Response cache.** Successful completions are cached on disk keyed by
+  (model, prompts, params) — re-runs of the same topic skip repeat calls.
+* :func:`run_concurrent` — a small thread-pool map used to parallelize
+  per-paper / per-batch LLM calls (``LLM_CONCURRENCY``).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Protocol, runtime_checkable
 
+from litreview import cache
 from litreview.config import settings
 
 
@@ -42,16 +51,16 @@ def _strip_fences(raw: str) -> str:
 
 
 class OpenAICompatBackend:
-    """OpenAI-compatible Chat Completions backend."""
+    """OpenAI-compatible Chat Completions backend (one instance per model)."""
 
-    def __init__(self) -> None:
+    def __init__(self, model: str | None = None) -> None:
         from openai import OpenAI
 
         kwargs: dict[str, Any] = {"api_key": settings.llm_api_key}
         if settings.llm_api_base:
             kwargs["base_url"] = settings.llm_api_base
         self._client = OpenAI(**kwargs)
-        self._model = settings.llm_model
+        self._model = model or settings.llm_model
 
     def chat(
         self,
@@ -80,7 +89,7 @@ class OpenAICompatBackend:
 class LiteLLMBackend:
     """Optional multi-provider backend (requires the ``[multi]`` extra)."""
 
-    def __init__(self) -> None:
+    def __init__(self, model: str | None = None) -> None:
         try:
             import litellm  # noqa: F401
         except ImportError as e:  # pragma: no cover - env dependent
@@ -90,7 +99,7 @@ class LiteLLMBackend:
             ) from e
         self._api_key = settings.llm_api_key
         self._api_base = settings.llm_api_base
-        self._model = settings.llm_model
+        self._model = model or settings.llm_model
 
     def chat(
         self,
@@ -122,22 +131,28 @@ class LiteLLMBackend:
         return resp.choices[0].message.content or ""
 
 
-_backend: LLMBackend | None = None
+_backends: dict[str, LLMBackend] = {}
 
 
-def get_backend() -> LLMBackend:
-    """Return (and cache) the LLM backend chosen by ``LLM_PROVIDER``."""
-    global _backend
-    if _backend is not None:
-        return _backend
+def get_backend(model: str | None = None) -> LLMBackend:
+    """Return (and cache) a backend for `model` (default: LLM_MODEL)."""
+    model = model or settings.llm_model
+    if model in _backends:
+        return _backends[model]
     provider = settings.llm_provider.lower()
     if provider == "litellm":
-        _backend = LiteLLMBackend()
+        backend: LLMBackend = LiteLLMBackend(model)
     elif provider == "openai":
-        _backend = OpenAICompatBackend()
+        backend = OpenAICompatBackend(model)
     else:
         raise ValueError(f"Unsupported LLM_PROVIDER: {provider!r}")
-    return _backend
+    _backends[model] = backend
+    return backend
+
+
+def strong_model() -> str:
+    """The model used for intelligence-heavy stages (writer/synth/verifier)."""
+    return settings.llm_model_strong or settings.llm_model
 
 
 def chat(
@@ -147,14 +162,31 @@ def chat(
     temperature: float = 0.3,
     max_tokens: int | None = None,
     response_json: bool = False,
+    strong: bool = False,
 ) -> str:
-    return get_backend().chat(
+    model = strong_model() if strong else settings.llm_model
+    budget = max_tokens or settings.llm_max_tokens_default
+    cache_key = {
+        "model": model,
+        "system": system_prompt,
+        "user": user_prompt,
+        "temperature": temperature,
+        "max_tokens": budget,
+        "json": response_json,
+    }
+    cached = cache.get("llm", cache_key)
+    if cached is not None:
+        return cached
+    text = get_backend(model).chat(
         system_prompt,
         user_prompt,
         temperature=temperature,
-        max_tokens=max_tokens,
+        max_tokens=budget,
         response_json=response_json,
     )
+    if text:  # never cache empty outputs (reasoning-model failure mode)
+        cache.put("llm", cache_key, text)
+    return text
 
 
 def chat_json(
@@ -163,6 +195,7 @@ def chat_json(
     *,
     temperature: float = 0.3,
     max_tokens: int | None = None,
+    strong: bool = False,
 ) -> dict:
     """Call the LLM and parse a JSON response.
 
@@ -178,6 +211,7 @@ def chat_json(
             temperature=temperature,
             max_tokens=budget,
             response_json=True,
+            strong=strong,
         )
 
     raw = _strip_fences(_call(max_tokens))
@@ -187,3 +221,42 @@ def chat_json(
         bigger = max(max_tokens * 2, 8192)
         raw = _strip_fences(_call(bigger))
         return json.loads(raw)
+
+
+def run_concurrent(
+    fn: Callable[[int, Any], Any],
+    items: list[Any],
+    *,
+    on_done: Callable[[int, Any, Any], None] | None = None,
+    max_workers: int | None = None,
+) -> list[Any]:
+    """Map ``fn(i, item)`` over ``items`` with a thread pool (LLM-bound I/O).
+
+    ``on_done(i, item, result)`` fires in the SUBMITTING thread as each job
+    completes (safe for progress events). Returns results in input order;
+    ``fn`` should absorb its own exceptions. Falls back to a sequential loop
+    when concurrency is 1 or there is a single item.
+    """
+    n = len(items)
+    if n == 0:
+        return []
+    workers = max_workers if max_workers is not None else settings.llm_concurrency
+    if n == 1 or workers <= 1:
+        out = []
+        for i, item in enumerate(items):
+            r = fn(i, item)
+            if on_done:
+                on_done(i, item, r)
+            out.append(r)
+        return out
+
+    results: list[Any] = [None] * n
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(fn, i, item): i for i, item in enumerate(items)}
+        for fut in as_completed(futures):
+            i = futures[fut]
+            r = fut.result()
+            results[i] = r
+            if on_done:
+                on_done(i, items[i], r)
+    return results

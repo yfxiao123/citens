@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # Reasoning models (e.g. DeepSeek-V4-flash) consume tokens for "thinking";
     # leave headroom so JSON outputs are not truncated to empty.
     llm_max_tokens_default: int = 4096
+    # Stronger model for intelligence-heavy stages (writer / synth / verifier).
+    # Empty = use the same LLM_MODEL everywhere (cheap stages — planner/filter/
+    # extract — always use LLM_MODEL).
+    llm_model_strong: str = ""
+    # Thread-pool size for parallel LLM calls (extract / verify / write
+    # sections). 1 = sequential.
+    llm_concurrency: int = 6
 
     # --- Search sources ------------------------------------------------------
     # Comma-separated subset, or "all". Order does not imply priority.

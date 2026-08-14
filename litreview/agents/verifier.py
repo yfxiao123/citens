@@ -1,18 +1,20 @@
 """Citation-verification agent (the "trustworthy" signature).
 
 For every claim the writer made that carries a citation, the Verifier checks it
-against the cited paper's abstract (ground text) using an LLM-as-judge. It
-returns a verdict per claim and an aggregate citation-precision metric — the
-headline number for the README ("X% of claims are supported by their cited
-sources"). Unsupported claims are surfaced for rewriting / removal.
+against the cited paper's ground text (full text when fetched, else abstract)
+using an LLM-as-judge on the STRONG model tier. It returns a verdict per claim
+and an aggregate citation-precision metric — the headline number for the README
+("X% of claims are supported by their cited sources"). Unsupported claims are
+surfaced for rewriting / removal.
 
-Claims are processed in batches to keep the call count (and cost) bounded.
+Claims are processed in batches to keep the call count (and cost) bounded;
+batches are independent and run on a thread pool.
 """
 
 from __future__ import annotations
 
 from litreview.grounding import ChunkStore, CitationTable
-from litreview.llm import chat_json
+from litreview.llm import chat_json, run_concurrent
 from litreview.models import Claim, Verdict, VerificationResult
 
 SYSTEM_PROMPT = """You are a citation-verification expert. You are given several CLAIMS (each citing \
@@ -97,12 +99,16 @@ def verify_claims(
         else:
             to_check.append((len(results) + len(unverifiable), claim))
 
-    # Second pass: judge the verifiable claims in batches.
+    # Second pass: judge the verifiable claims in concurrent batches.
     verifiable = [c for _, c in to_check]
-    for start in range(0, len(verifiable), batch_size):
-        batch = verifiable[start : start + batch_size]
-        if on_progress:
-            on_progress(start + len(batch), total)
+    batches = [
+        (start, verifiable[start : start + batch_size])
+        for start in range(0, len(verifiable), batch_size)
+    ]
+    done = 0
+
+    def _verify_batch(pair: tuple[int, list[Claim]]) -> list[VerificationResult]:
+        _, batch = pair
         cited_indices = sorted(
             {i for c in batch for i in c.citation_indices if chunk_store.has(table.paper_id(i))}
         )
@@ -115,18 +121,19 @@ def verify_claims(
             "Return a verdict for each claim_index (0-based within this batch)."
         )
         try:
-            raw = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+            raw = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048, strong=True)
             verdicts = {int(r.get("claim_index", -1)): r for r in raw.get("results", [])}
         except Exception as e:  # noqa: BLE001
             print(f"    verify batch failed: {e}")
             verdicts = {}
 
+        out: list[VerificationResult] = []
         for j, claim in enumerate(batch):
             entry = verdicts.get(j, {})
             verdict_str = str(entry.get("verdict", "partial")).lower().strip()
             if verdict_str not in {v.value for v in Verdict}:
                 verdict_str = "partial"
-            results.append(
+            out.append(
                 VerificationResult(
                     claim_text=claim.text,
                     verdict=Verdict(verdict_str),
@@ -134,6 +141,16 @@ def verify_claims(
                     note=entry.get("note", ""),
                 )
             )
+        return out
+
+    def on_done(_i, _pair, batch_results):
+        nonlocal done
+        done += len(batch_results)
+        if on_progress:
+            on_progress(done, total)
+
+    for batch_results in run_concurrent(_verify_batch, batches, on_done=on_done):
+        results.extend(batch_results)
 
     # Append unverifiable claims at the end.
     results.extend(unverifiable)

@@ -52,7 +52,7 @@ def synthesize(
         f"论文 / Papers:{''.join(parts)}\n\n"
         "Identify consensus, contradictions, and gaps across these papers."
     )
-    result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=3072)
+    result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=3072, strong=True)
     return SynthesisResult(
         consensus=result.get("consensus", []) or [],
         contradictions=result.get("contradictions", []) or [],

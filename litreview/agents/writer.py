@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-from litreview.llm import chat
+from litreview.llm import chat, run_concurrent
 from litreview.models import ExtractedPaper, SynthesisResult, ThemeStructure
 
 INTRO_PROMPT = """You are an academic survey writer. Write the "Introduction" (500-800 words) for \
@@ -48,15 +48,20 @@ CONCLUSION_PROMPT = """You are an academic survey writer. Write "Conclusion & Ou
 words) for the topic.
 1. Summarize main findings and consensus.
 2. Note current shortcomings.
-3. Outlook on future directions.
-4. Cite with [index] where appropriate.
-5. Fluent, scholarly prose."""
+3. Outlook on future directions — anchor it in the listed research gaps where possible.
+4. Cite ONLY the papers listed below, using their EXACT [index]. Never invent papers, \
+authors, or numbering not in the list — a conclusion citing unknown work is worthless.
+5. Do NOT write any heading, bold title, or references list.
+6. Fluent, scholarly prose."""
 
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
+_BOLD_TITLE_RE = re.compile(r"^\s{0,3}\*\*[^*\n]+\*\*\s*$")
+_TAIL_REFS_RE = re.compile(r"\n\s*(\*{0,2}references\*{0,2}|参考文献)\s*\n.*$", re.IGNORECASE)
+_TERMINALS = "。．.!?！？；;”\"')]}】》…"
 
 
 def _strip_leading_headings(text: str) -> str:
-    """Drop heading lines the model re-emits at the top of a section body."""
+    """Drop heading/bold-title lines the model re-emits at the top of a section."""
     lines = text.splitlines()
     changed = True
     while changed and lines:
@@ -65,11 +70,46 @@ def _strip_leading_headings(text: str) -> str:
         if not lines[0].strip() and len(lines) > 1 and _HEADING_RE.match(lines[1]):
             lines.pop(0)
             changed = True
-        # remove a leading heading line
-        if lines and _HEADING_RE.match(lines[0]):
+        # remove a leading heading line (## ...) or bold-only title (**...**)
+        if lines and (_HEADING_RE.match(lines[0]) or _BOLD_TITLE_RE.match(lines[0])):
             lines.pop(0)
             changed = True
     return "\n".join(lines).strip()
+
+
+def _strip_tail_references(text: str) -> str:
+    """Drop a trailing References block the model sometimes appends (the real
+    one is rendered by the CitationTable — a model-made one hallucinates)."""
+    return _TAIL_REFS_RE.sub("", text).rstrip()
+
+
+def _complete(text: str) -> bool:
+    """True if the text ends in terminal punctuation (not mid-sentence)."""
+    t = text.rstrip()
+    return bool(t) and t[-1] in _TERMINALS
+
+
+def _chat_section(system: str, user: str, max_tokens: int, label: str = "") -> str:
+    """chat() with writer-grade retries: reasoning models sometimes return an
+    empty body (thinking ate the budget) or truncate mid-sentence. Retry once
+    with double the budget; still return whatever we have after that.
+
+    Writer sections run on the STRONG model tier (see litreview.llm)."""
+    text = ""
+    for attempt in range(2):
+        budget = max_tokens * (attempt + 1)
+        try:
+            text = chat(system, user, max_tokens=budget, strong=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"    [writer:{label}] attempt {attempt + 1} failed: {e}")
+            text = ""
+        if len(text) >= 200 and _complete(text):
+            return text
+        print(
+            f"    [writer:{label}] attempt {attempt + 1} "
+            f"({'empty' if not text else 'truncated'}; retrying with more tokens)"
+        )
+    return text
 
 
 def _papers_block(indexed: list[tuple[int, ExtractedPaper]]) -> str:
@@ -96,8 +136,10 @@ def write_review_body(
     """Generate the review BODY (title + intro + theme sections + critical
     synthesis + conclusion).
 
-    The references section is intentionally NOT included here; the pipeline
-    appends it from the CitationTable.
+    Sections are independent prompts — they are generated CONCURRENTLY on the
+    thread pool and assembled in reading order. The references section is
+    intentionally NOT included here; the pipeline appends it from the
+    CitationTable.
     """
     sections: list[str] = [f"# {topic}\n"]
 
@@ -111,16 +153,18 @@ def write_review_body(
             f"  矛盾 / Contradictions: {contra}\n"
         )
 
-    if on_step:
-        on_step("intro")
-    intro = chat(INTRO_PROMPT, f"研究主题 / Topic: {topic}", max_tokens=4096)
-    sections.append(f"## 引言 / Introduction\n\n{_strip_leading_headings(intro)}\n")
+    # --- build all section jobs (kind, label, system, user, budget) ----------
+    jobs: list[dict] = [
+        {"kind": "intro", "label": "intro", "system": INTRO_PROMPT,
+         "user": f"研究主题 / Topic: {topic}", "budget": 4096}
+    ]
 
+    theme_jobs: list[dict] = []
     for ti, theme in enumerate(themes.themes):
-        if on_step:
-            on_step(f"theme-{ti+1}", theme.name)
         idx_set = {i for i in theme.paper_indices if 0 <= i < len(papers)}
         indexed = [(i, papers[i]) for i in sorted(idx_set)]
+        if not indexed:
+            continue
         section_prompt = (
             f"研究主题 / Topic: {topic}\n"
             f"主题名称 / Theme: {theme.name}\n"
@@ -129,31 +173,63 @@ def write_review_body(
             f"{synth_context}"
             f"包含论文 / Papers (index in [brackets]):{_papers_block(indexed)}\n"
         )
-        body = chat(SECTION_PROMPT, section_prompt, max_tokens=6144)
-        sections.append(f"### {theme.name}\n\n{_strip_leading_headings(body)}\n")
+        theme_jobs.append(
+            {"kind": "theme", "label": f"theme-{ti+1}", "name": theme.name,
+             "system": SECTION_PROMPT, "user": section_prompt, "budget": 6144}
+        )
+    jobs.extend(theme_jobs)
 
     if synthesis and (synthesis.consensus or synthesis.contradictions):
-        if on_step:
-            on_step("critical-synthesis")
         synth_prompt = (
             f"研究主题 / Topic: {topic}\n"
             f"共识 / Consensus:\n" + "".join(f"- {c}\n" for c in synthesis.consensus)
             + "矛盾 / Contradictions:\n" + "".join(f"- {c}\n" for c in synthesis.contradictions)
         )
-        crit = chat(CRIT_SYNTH_PROMPT, synth_prompt, max_tokens=4096)
-        sections.append(
-            f"## 批判性综合 / Critical Synthesis\n\n{_strip_leading_headings(crit)}\n"
+        jobs.append(
+            {"kind": "crit", "label": "critical-synthesis",
+             "system": CRIT_SYNTH_PROMPT, "user": synth_prompt, "budget": 4096}
         )
 
-    if on_step:
-        on_step("conclusion")
     summary = "".join(f"- {t.name}: {t.description}\n" for t in themes.themes)
-    conclusion = chat(
-        CONCLUSION_PROMPT,
-        f"研究主题 / Topic: {topic}\n\n主题结构 / Themes:\n{summary}",
-        max_tokens=4096,
+    gaps = ""
+    if synthesis and synthesis.gaps:
+        gaps = "研究空白 / Research gaps:\n" + "".join(f"- {g}\n" for g in synthesis.gaps)
+    jobs.append(
+        {"kind": "conclusion", "label": "conclusion", "system": CONCLUSION_PROMPT,
+         "user": (
+             f"研究主题 / Topic: {topic}\n\n主题结构 / Themes:\n{summary}\n{gaps}\n"
+             f"可引用论文 / Citable papers (use EXACT [index]):"
+             f"{_papers_block(list(enumerate(papers)))}"
+         ),
+         "budget": 4096}
     )
-    sections.append(f"## 总结与展望 / Conclusion\n\n{_strip_leading_headings(conclusion)}\n")
+
+    # --- generate concurrently, assemble in reading order --------------------
+    def _run(job):
+        if on_step:
+            on_step(job["label"], job.get("name", ""))
+        return _chat_section(job["system"], job["user"], job["budget"], job["label"])
+
+    bodies = run_concurrent(_run, jobs)
+
+    intro = _strip_leading_headings(bodies[0])
+    sections.append(f"## 引言 / Introduction\n\n{intro}\n")
+
+    for job, body in zip(theme_jobs, bodies[1 : 1 + len(theme_jobs)], strict=False):
+        body = _strip_tail_references(_strip_leading_headings(body))
+        if body:
+            sections.append(f"### {job['name']}\n\n{body}\n")
+        else:
+            print(f"    [writer] theme section empty after retries, skipped: {job['name']}")
+
+    offset = 1 + len(theme_jobs)
+    if offset < len(bodies):  # critical synthesis present
+        crit = _strip_tail_references(_strip_leading_headings(bodies[offset]))
+        sections.append(f"## 批判性综合 / Critical Synthesis\n\n{crit}\n")
+        offset += 1
+    if offset < len(bodies):
+        conclusion = _strip_tail_references(_strip_leading_headings(bodies[offset]))
+        sections.append(f"## 总结与展望 / Conclusion\n\n{conclusion}\n")
 
     return "\n".join(sections)
 
