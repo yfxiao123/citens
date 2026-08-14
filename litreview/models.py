@@ -12,13 +12,23 @@ import hashlib
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 
 def _stable_id(*parts: str) -> str:
     """Deterministic short id from parts (used for paper / chunk identity)."""
     h = hashlib.sha1("\u241F".join(parts).encode("utf-8")).hexdigest()
     return h[:12]
+
+
+_DOI_URL_PREFIXES = (
+    "https://doi.org/",
+    "http://doi.org/",
+    "https://dx.doi.org/",
+    "http://dx.doi.org/",
+    "doi:",
+    "info:doi/",
+)
 
 
 class Paper(BaseModel):
@@ -33,6 +43,22 @@ class Paper(BaseModel):
     url: str = ""
     doi: Optional[str] = None
     pdf_url: Optional[str] = None  # open-access full-text PDF, if known
+    venue: str = ""  # journal / conference / repository name, when known
+
+    @field_validator("doi", mode="before")
+    @classmethod
+    def _normalize_doi(cls, v):
+        """Strip URL forms (OpenAlex returns 'https://doi.org/10.x/...') so the
+        bare DOI is usable in Unpaywall/Crossref/BibTeX everywhere downstream."""
+        if not v:
+            return v
+        s = str(v).strip()
+        low = s.lower()
+        for p in _DOI_URL_PREFIXES:
+            if low.startswith(p):
+                s = s[len(p):]
+                break
+        return s or None
 
     @computed_field  # type: ignore[misc]
     @property
@@ -56,6 +82,8 @@ class ScoredPaper(Paper):
 
     relevance_score: int = 0
     filter_reason: str = ""
+    venue_quartile: str = ""  # SJR quartile of the venue ("" if unknown)
+    rank_score: float = 0.0  # composite retrieval score (see litreview.ranking)
 
     def brief(self) -> str:
         return (

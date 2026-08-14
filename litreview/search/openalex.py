@@ -78,6 +78,7 @@ class OpenAlexSearcher(SearchSource):
             url=work.get("id", ""),
             doi=work.get("doi"),
             pdf_url=pdf_url,
+            venue=source_name if source_name != "OpenAlex" else "",
         )
 
     @staticmethod

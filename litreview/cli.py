@@ -105,6 +105,86 @@ def sources():
 
 
 @app.command()
+def sjr(
+    force: bool = typer.Option(False, "--force", help="重新下载（即使文件已存在）"),
+    mirror: bool = typer.Option(
+        False, "--mirror", help="用纯 CSV 镜像（无需 pyreadr，分区为百分位近似）"
+    ),
+    official: bool = typer.Option(
+        False, "--official", help="直接从 scimagojr.com 下载（常被反爬拦截且很慢）"
+    ),
+):
+    """Download the SCImago journal-rank CSV (venue quartiles for ranking).
+
+    Default: the ikashnitsky/sjrdata GitHub mirror — full official data
+    (2025 edition, field-normalized quartiles) converted locally (needs
+    ``pip install pyreadr``). --mirror uses a plain-CSV mirror with
+    percentile-approximated quartiles; --official hits scimagojr.com directly.
+    The dataset is CC BY-NC licensed, so it is fetched on demand instead of
+    shipping with the package. Ranking degrades gracefully (neutral venue
+    factor) when it is absent.
+    """
+    from pathlib import Path
+
+    from litreview.config import settings
+    from litreview.net import sync_client
+    from litreview.ranking import SJRIndex
+
+    path = Path(settings.sjr_csv_path)
+    if path.is_file() and not force:
+        console.print(f"[green]✓[/] 已存在 {path}（--force 重新下载）")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if official:
+            url = "https://www.scimagojr.com/journalrank.php?out=xls"
+            console.print(f"下载 SCImago SJR 数据 …\n  {url}")
+            _download_to(url, path)
+        elif mirror:
+            url = (
+                "https://raw.githubusercontent.com/Michael-E-Rose/"
+                "SCImagoJournalRankIndicators/master/all.csv"
+            )
+            console.print(f"下载 SCImago SJR 数据（CSV 镜像）…\n  {url}")
+            _download_to(url, path)
+        else:
+            url = (
+                "https://raw.githubusercontent.com/ikashnitsky/sjrdata/"
+                "master/data/sjr_journals.rda"
+            )
+            console.print(f"下载 SCImago SJR 数据（官方数据镜像，需 pyreadr）…\n  {url}")
+            rda = path.with_suffix(".rda")
+            _download_to(url, rda)
+            from litreview.ranking import convert_rda_to_csv
+
+            n = convert_rda_to_csv(rda, path)
+            console.print(f"转换完成：{n:,} journals")
+            rda.unlink(missing_ok=True)
+        index = SJRIndex.load(path)
+        console.print(f"[green]✓[/] {len(index):,} journals -> {path}")
+    except ImportError:
+        console.print("[bold red]缺少 pyreadr[/]（默认数据源需要）：pip install pyreadr")
+        console.print("或使用 --mirror 下载无需转换的 CSV 镜像")
+        raise typer.Exit(code=1)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[bold red]下载失败:[/] {e}")
+        console.print(f"可手动下载后保存为 {settings.sjr_csv_path}")
+        raise typer.Exit(code=1)
+
+
+def _download_to(url: str, path: Path) -> None:
+    from litreview.net import sync_client
+
+    with sync_client(url, timeout=300, headers={"User-Agent": "Mozilla/5.0 (litreview)"}) as client:
+        r = client.get(url)
+        r.raise_for_status()
+    if len(r.content) < 100_000 or b"Title" not in r.content[:8000]:
+        raise ValueError(f"unexpected payload ({len(r.content)} bytes)")
+    path.write_bytes(r.content)
+
+
+@app.command()
 def version():
     """Show version."""
     console.print(f"litreview {__version__}")

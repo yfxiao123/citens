@@ -70,6 +70,16 @@ class Settings(BaseSettings):
     enrich_abstracts: bool = True  # cross-source DOI enrichment for missing abstracts
     output_dir: str = "runs"
 
+    # --- Venue-aware ranking -------------------------------------------------
+    # Composite retrieval score = w_rel*(relevance/5) + w_cit*citation_factor
+    #                        + w_ven*venue_factor(SJR quartile). See ranking.py.
+    rank_weight_relevance: float = 0.6
+    rank_weight_citations: float = 0.2
+    rank_weight_venue: float = 0.2
+    # SCImago journal-rank CSV (semicolon-delimited). Downloaded once via
+    # `litreview sjr` — CC BY-NC licensed, so it is fetched, not shipped.
+    sjr_csv_path: str = "data/sjr/sjr.csv"
+
     # --- Reliability ---------------------------------------------------------
     cache_enabled: bool = True
     cache_dir: str = ".cache"

@@ -50,6 +50,7 @@ from litreview.grounding import (
     write_fetch_list,
 )
 from litreview.models import ExtractedPaper, RunMeta, ThemeStructure
+from litreview.ranking import quartile_histogram, rank_papers
 from litreview.search import blend_pool, search_papers
 
 
@@ -307,13 +308,31 @@ async def run_pipeline_async(
             _emit(bus, StepProgress(step="filter", message=title, current=i, total=total))
 
         scored = filter_papers(papers, topic, on_progress=_filter_progress)
+        # venue-aware composite ranking (relevance x citations x SJR quartile),
+        # applied when deciding which papers survive the cap
+        scored = rank_papers(scored)
+        persistence.save_step(
+            run_dir,
+            "03c_ranking",
+            [
+                {
+                    "title": p.title[:60],
+                    "relevance": p.relevance_score,
+                    "citations": p.citation_count,
+                    "venue": p.venue,
+                    "quartile": p.venue_quartile or "-",
+                    "rank_score": p.rank_score,
+                }
+                for p in scored
+            ],
+        )
         if max_papers and len(scored) > max_papers:
-            scored = sorted(
-                scored, key=lambda p: (p.relevance_score, p.citation_count), reverse=True
-            )[:max_papers]
+            scored = scored[:max_papers]
         meta.filtered_papers = len(scored)
         persistence.save_step(run_dir, "03_filtered", scored)
-        _emit(bus, StepCompleted(step="filter", message=f"{len(scored)} 篇通过"))
+        hist = quartile_histogram(scored)
+        hist_msg = " · ".join(f"{k}:{v}" for k, v in sorted(hist.items()))
+        _emit(bus, StepCompleted(step="filter", message=f"{len(scored)} 篇通过（{hist_msg}）"))
 
         # Step 3.5: enrich missing abstracts via cross-source DOI lookup
         if options.enrich_abstracts:

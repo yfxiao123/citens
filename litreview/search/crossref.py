@@ -74,6 +74,7 @@ class CrossrefSearcher(SearchSource):
             url=item.get("URL", "") or (f"https://doi.org/{doi}" if doi else ""),
             doi=doi,
             pdf_url=links[0] if links else None,
+            venue=(item.get("container-title") or [""])[0] or "",
         )
 
 

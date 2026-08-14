@@ -41,9 +41,11 @@ def _bib_escape(value: object) -> str:
     return str(value).replace("{", "").replace("}", "").strip()
 
 
-def _bib_venue(source: str) -> str:
-    """Prefer the venue inside parens (e.g. 'OpenAlex (Journal of Finance)'),
-    otherwise the whole source string."""
+def _bib_venue(source: str, venue: str = "") -> str:
+    """Prefer the explicit venue field, then the venue inside parens (e.g.
+    'OpenAlex (Journal of Finance)'), otherwise the whole source string."""
+    if venue.strip():
+        return _bib_escape(venue)
     s = (source or "").strip()
     if "(" in s and s.endswith(")"):
         inner = s[s.find("(") + 1 : -1].strip()
@@ -92,7 +94,7 @@ class CitationTable:
                 fields.append(("doi", _bib_escape(p.doi)))
             if p.url:
                 fields.append(("url", _bib_escape(p.url)))
-            source = _bib_venue(p.source)
+            source = _bib_venue(p.source, getattr(p, "venue", ""))
             fields.append(("journal", source))
             body = ",\n  ".join(f"{k} = {{{v}}}" for k, v in fields)
             entries.append(f"@article{{{key},\n  {body},\n}}")

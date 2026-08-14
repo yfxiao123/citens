@@ -41,7 +41,7 @@ class SemanticScholarSearcher(SearchSource):
     async def _one(self, client: httpx.AsyncClient, query: str, limit: int) -> list[Paper]:
         params = {
             "query": query,
-            "fields": "title,authors,year,abstract,citationCount,externalIds,url",
+            "fields": "title,authors,year,abstract,citationCount,externalIds,url,venue",
         }
         resp = await client.get(f"{self.BASE_URL}/paper/search/bulk", params=params)
         resp.raise_for_status()
@@ -61,4 +61,5 @@ class SemanticScholarSearcher(SearchSource):
             citation_count=item.get("citationCount", 0) or 0,
             url=item.get("url") or "",
             doi=ext_ids.get("DOI"),
+            venue=item.get("venue") or "",
         )

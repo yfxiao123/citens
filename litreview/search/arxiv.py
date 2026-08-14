@@ -47,4 +47,5 @@ class ArxivSearcher(SearchSource):
             citation_count=0,  # arXiv exposes no citation counts
             url=result.entry_id,
             doi=result.doi,
+            venue=getattr(result, "journal_ref", "") or "",
         )
