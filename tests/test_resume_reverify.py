@@ -90,7 +90,7 @@ async def test_resume_skips_retrieval_and_composes(tmp_path, monkeypatch):
     def _fake_compose(extracted, topic, run_dir, bus, **k):
         return pl.ComposeResult(
             themes=type("T", (), {"themes": []})(),
-            review_path=str(PathLike := f"{run_dir}/review.md"),
+            review_path=f"{run_dir}/review.md",
             table=CitationTable(extracted),
             claims=[],
             precision=0.5,
