@@ -10,6 +10,7 @@ run picks them up automatically (see fulltext._local_pdf).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from litreview.config import settings
@@ -49,7 +50,7 @@ def suggested_filename(paper: Paper) -> str:
     return f"{slugify(paper.title)[:80]}.pdf"
 
 
-def write_fetch_list(run_dir: str, papers: list[Paper]) -> str | None:
+def write_fetch_list(run_dir: str, papers: Sequence[Paper]) -> str | None:
     """Write fetch_list.md for `papers` (those without fetched full text)."""
     if not papers:
         return None

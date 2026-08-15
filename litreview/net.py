@@ -86,5 +86,5 @@ def sync_client(url: str | None = None, **kwargs) -> httpx.Client:
         try:  # httpx >= 0.28
             return httpx.Client(proxy=proxy, **kwargs)
         except TypeError:  # httpx < 0.28
-            return httpx.Client(proxies=proxy, **kwargs)
+            return httpx.Client(proxies=proxy, **kwargs)  # type: ignore[call-arg]
     return httpx.Client(**kwargs)

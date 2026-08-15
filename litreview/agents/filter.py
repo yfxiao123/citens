@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal, overload
+
 from litreview.agents.scoping import filters_block, min_year_from_filters
 from litreview.llm import chat_json
 from litreview.models import Paper, ScoredPaper
@@ -19,6 +21,28 @@ one paper's metadata, you must:
 
 Output JSON:
 {"score": 3, "reason": "This paper directly addresses the topic's core method..."}"""
+
+
+@overload
+def filter_papers(
+    papers: list[Paper],
+    topic: str,
+    *,
+    filters: dict | None = ...,
+    on_progress=...,
+    return_log: Literal[False] = ...,
+) -> list[ScoredPaper]: ...
+
+
+@overload
+def filter_papers(
+    papers: list[Paper],
+    topic: str,
+    *,
+    filters: dict | None = ...,
+    on_progress=...,
+    return_log: Literal[True],
+) -> tuple[list[ScoredPaper], list[dict]]: ...
 
 
 def filter_papers(

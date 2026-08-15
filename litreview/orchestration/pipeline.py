@@ -61,7 +61,9 @@ from litreview.models import (
     ExtractedPaper,
     RunMeta,
     RunMode,
+    SynthesisResult,
     ThemeStructure,
+    VerificationResult,
 )
 from litreview.ranking import quartile_histogram, rank_papers
 from litreview.search import blend_pool, search_papers
@@ -99,7 +101,7 @@ class ComposeResult:
     table: CitationTable
     claims: list
     precision: float
-    synthesis: object
+    synthesis: SynthesisResult
 
 
 def _emit(bus: EventBus | None, event: Event) -> None:
@@ -212,7 +214,7 @@ def _compose(
     )
 
     # claim intent manifest: map claims to synthesis intents
-    intent_to_claims = {}
+    intent_to_claims: dict[str, list[int]] = {}
     for i, claim in enumerate(claims):
         # Each claim implicitly supports one of the synthesis themes
         # For now, use a simple heuristic: map to the first consensus item mentioned
@@ -242,7 +244,7 @@ def _compose(
     persistence.save_step(run_dir, "07_claim_manifest", claim_manifest.model_dump())
 
     # verify (citation precision)
-    ver_results = []
+    ver_results: list[VerificationResult] = []
     precision = 0.0
     if claims:
         _emit(bus, StepStarted(step="verify", title="引用核验"))
@@ -280,9 +282,12 @@ def _compose(
         unsupported_count = sum(1 for r in ver_results if r.verdict.value == "unsupported")
         if unsupported_count > 0:
             _emit(bus, StepStarted(step="defense", title="双向核验（辩护律师）"))
-            source_contexts = {}
+            source_contexts: dict[int, str] = {}
             for i, claim in enumerate(claims):
-                chunks = chunk_store.chunks_for(claim.citation_indices[0] if claim.citation_indices else "")
+                # citation_indices are [n] table indices — resolve to the
+                # paper's chunk-store key (its id) before fetching ground text.
+                pid = table.paper_id(claim.citation_indices[0]) if claim.citation_indices else ""
+                chunks = chunk_store.chunks_for(pid)
                 source_contexts[i] = "\n\n".join(c.text for c in chunks[:3])
             
             defense_reviews = review_unsupported_claims(claims, ver_results, source_contexts)

@@ -23,6 +23,8 @@ jobs:
           pip install -e ".[dev,api]"
       - name: Lint (ruff)
         run: ruff check litreview tests
+      - name: Types (mypy)
+        run: mypy litreview
       - name: Test (pytest)
         run: pytest tests/ -q
         env:

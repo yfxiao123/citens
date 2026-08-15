@@ -11,7 +11,7 @@ Driven by the access layer: a Springer key, if provided, adds another source.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import httpx
 
@@ -68,7 +68,7 @@ def _fill_one(paper: Paper) -> tuple[str | None, str]:
 
 
 def enrich_abstracts(
-    papers: list[Paper],
+    papers: Sequence[Paper],
     *,
     on_progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[int, list[dict]]:

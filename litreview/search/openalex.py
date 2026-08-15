@@ -39,7 +39,7 @@ class OpenAlexSearcher(SearchSource):
         return out
 
     async def _one(self, client: httpx.AsyncClient, query: str, limit: int) -> list[Paper]:
-        params = {
+        params: dict[str, str | int] = {
             "filter": f"title.search:{query}",
             "per_page": min(limit, 50),
             "sort": "relevance_score:desc",

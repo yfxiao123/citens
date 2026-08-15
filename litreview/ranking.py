@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -220,7 +221,7 @@ def citation_factor(citations: int) -> float:
     return min(math.log10(1 + max(citations, 0)) / 3.0, 1.0)
 
 
-def rank_papers(papers: list[ScoredPaper]) -> list[ScoredPaper]:
+def rank_papers(papers: Sequence[ScoredPaper]) -> list[ScoredPaper]:
     """Fill venue_quartile/rank_score on copies, sorted by rank_score desc.
 
     Tie-break on relevance then citations so equal composites keep the more

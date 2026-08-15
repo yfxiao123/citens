@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Sequence
 
 from litreview.models import Citation, Claim, Paper
 
@@ -54,8 +55,8 @@ def _bib_venue(source: str, venue: str = "") -> str:
 class CitationTable:
     """Index <-> paper_id <-> label, for a fixed ordering of papers."""
 
-    def __init__(self, papers: list[Paper]) -> None:
-        self.papers = papers
+    def __init__(self, papers: Sequence[Paper]) -> None:
+        self.papers = list(papers)
         self._by_index: dict[int, Citation] = {}
         for i, p in enumerate(papers):
             self._by_index[i] = Citation(index=i, paper_id=p.id, label=_format_label(p))

@@ -15,6 +15,7 @@ auditable.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 import httpx
 
@@ -122,7 +123,7 @@ def _to_paper(work: dict, direction: str, from_doi: str) -> Paper | None:
 
 
 async def snowball(
-    seed_papers: list[Paper],
+    seed_papers: Sequence[Paper],
     existing_ids: set[str],
     *,
     backward: bool = True,

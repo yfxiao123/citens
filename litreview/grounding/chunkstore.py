@@ -15,7 +15,7 @@ text or only an abstract.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from litreview.models import Chunk, ChunkKind, Paper
 
@@ -34,7 +34,7 @@ class ChunkStore:
 
     def build_from(
         self,
-        papers: list[Paper],
+        papers: Sequence[Paper],
         *,
         fetch_full: bool = False,
         on_progress: Callable[[int, int, str], None] | None = None,

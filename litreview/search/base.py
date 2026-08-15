@@ -59,7 +59,7 @@ async def search_papers(
 
     all_papers: list[Paper] = []
     for src, res in zip(instances, results, strict=False):
-        if isinstance(res, Exception):
+        if isinstance(res, BaseException):
             print(f"[{src.name}] search failed: {res}")
             continue
         all_papers.extend(res)
