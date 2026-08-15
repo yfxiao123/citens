@@ -83,6 +83,7 @@ class RunOptions:
     extra: dict = field(default_factory=dict)
     filters: dict = field(default_factory=dict)  # pre-run clarifications (see clarify.py)
     mode: RunMode | None = None  # adaptive mode (auto-detected if None)
+    resume_dir: str | None = None  # existing run dir: reuse its extracted papers
 
     def resolved_max_results(self) -> int:
         return self.max_results or settings.default_max_results
@@ -92,6 +93,38 @@ class RunOptions:
             mp = settings.default_max_papers
             return mp or None
         return self.max_papers or None
+
+
+def _load_extracted_for_resume(run_dir: str) -> list[ExtractedPaper]:
+    """Load a previous run's 04_extracted.json, or raise with a clear message."""
+    import os
+
+    path = os.path.join(run_dir, "steps", "04_extracted.json")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"cannot resume {run_dir}: no steps/04_extracted.json "
+            "(the run must have completed the extraction step)"
+        )
+    import json
+
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    return [ExtractedPaper(**p) for p in raw]
+
+
+def _mode_from_run_dir(run_dir: str) -> RunMode:
+    """Recover the run mode persisted by step 0 (default: deep_review)."""
+    import json
+    import os
+
+    path = os.path.join(run_dir, "steps", "00_intent.json")
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return RunMode(json.load(f).get("mode", "deep_review"))
+        except ValueError:
+            pass
+    return RunMode.DEEP_REVIEW
 
 
 @dataclass
@@ -389,195 +422,216 @@ async def run_pipeline_async(
     max_results = options.resolved_max_results()
     max_papers = options.resolved_max_papers()
 
-    run_dir = persistence.new_run_dir(topic)
+    run_dir = options.resume_dir or persistence.new_run_dir(topic)
     meta = RunMeta(topic=topic, run_dir=run_dir)
     _emit(bus, RunStarted(topic=topic))
+    if options.resume_dir is None:
+        # written before anything can fail, so `citens resume` can recover
+        # the exact topic even when meta.json was never reached
+        persistence.save_json(run_dir, "run.json", {"topic": topic})
 
     try:
-        # Step 0: intent detection (auto-detect mode if not specified)
-        if options.mode is None:
-            _emit(bus, StepStarted(step="intent", title="检测用户意图"))
-            mode_str = detect_intent(topic, options.filters)
-            options.mode = RunMode(mode_str)
-            persistence.save_step(run_dir, "00_intent", {"mode": mode_str})
-            _emit(bus, StepCompleted(step="intent", message=f"运行模式: {mode_str}"))
+        resumed = options.resume_dir is not None
+        if resumed:
+            # Resume path: a previous run of this topic already extracted
+            # its papers — reuse them and skip retrieval entirely.
+            extracted = _load_extracted_for_resume(run_dir)
+            if options.mode is None:
+                options.mode = _mode_from_run_dir(run_dir)
+            if options.mode == RunMode.QUICK_SCAN:
+                options.allow_supplement = False
+            _emit(
+                bus,
+                StepCompleted(
+                    step="extract",
+                    message=f"resume: reusing {len(extracted)} papers from {run_dir}",
+                ),
+            )
+        if not resumed:
+            # Step 0: intent detection (auto-detect mode if not specified)
+            if options.mode is None:
+                _emit(bus, StepStarted(step="intent", title="检测用户意图"))
+                mode_str = detect_intent(topic, options.filters)
+                options.mode = RunMode(mode_str)
+                persistence.save_step(run_dir, "00_intent", {"mode": mode_str})
+                _emit(bus, StepCompleted(step="intent", message=f"运行模式: {mode_str}"))
         
-        # Apply mode-specific defaults
-        if options.mode == RunMode.QUICK_SCAN:
-            options.allow_supplement = False  # skip reflection for quick scans
-            if options.max_papers is None:
-                options.max_papers = 5  # fewer papers for quick overview
+            # Apply mode-specific defaults
+            if options.mode == RunMode.QUICK_SCAN:
+                options.allow_supplement = False  # skip reflection for quick scans
+                if options.max_papers is None:
+                    options.max_papers = 5  # fewer papers for quick overview
 
-        # Step 1: keywords
-        _emit(bus, StepStarted(step="planner", title="生成检索关键词"))
-        if options.filters:
-            persistence.save_step(run_dir, "00_filters", options.filters)
-        keywords = generate_keywords(topic, filters=options.filters)
-        meta.keywords = keywords
-        persistence.save_step(run_dir, "01_keywords", keywords)
-        if options.filters:
-            _emit(
-                bus,
-                StepProgress(step="planner", message=f"已应用 {len(options.filters)} 条澄清约束"),
-            )
-        _emit(bus, StepCompleted(step="planner", message=f"{len(keywords)} 条关键词"))
-
-        # Step 2: search (iterative — refine if first round is thin)
-        _emit(bus, StepStarted(step="search", title="检索论文"))
-        cache_key = {"keywords": keywords, "max_results": max_results, "sources": options.sources}
-        papers = cache.get("search", cache_key) if options.use_cache else None
-        if papers is None:
-            papers = await search_papers(keywords, max_results, sources=options.sources)
-            if options.use_cache:
-                cache.put("search", cache_key, [p.model_dump() for p in papers])
-        else:
-            from citens.models import Paper
-
-            papers = [Paper(**p) for p in papers]
-
-        # Iterative refinement: if pool is thin, refine queries and search again
-        min_pool = max_papers * 2 if max_papers else 15
-        if len(papers) < min_pool and options.mode != RunMode.QUICK_SCAN:
-            _emit(
-                bus,
-                StepProgress(step="search", message=f"首轮 {len(papers)} 篇不足，迭代扩展检索…"),
-            )
-            found_titles = [p.title for p in papers[:10]]
-            refined = refine_queries(topic, keywords, found_titles, known_gaps=[])
-            if refined:
+            # Step 1: keywords
+            _emit(bus, StepStarted(step="planner", title="生成检索关键词"))
+            if options.filters:
+                persistence.save_step(run_dir, "00_filters", options.filters)
+            keywords = generate_keywords(topic, filters=options.filters)
+            meta.keywords = keywords
+            persistence.save_step(run_dir, "01_keywords", keywords)
+            if options.filters:
                 _emit(
                     bus,
-                    StepProgress(step="search", message=f"补充查询: {', '.join(refined[:3])}"),
+                    StepProgress(step="planner", message=f"已应用 {len(options.filters)} 条澄清约束"),
                 )
-                more = await search_papers(refined, max_results=min(max_results, 30), sources=options.sources)
-                # Merge and deduplicate
-                from citens.search import deduplicate
+            _emit(bus, StepCompleted(step="planner", message=f"{len(keywords)} 条关键词"))
 
-                papers = deduplicate(papers + more)
-                keywords = keywords + refined  # track all queries used
-                meta.keywords = keywords
+            # Step 2: search (iterative — refine if first round is thin)
+            _emit(bus, StepStarted(step="search", title="检索论文"))
+            cache_key = {"keywords": keywords, "max_results": max_results, "sources": options.sources}
+            papers = cache.get("search", cache_key) if options.use_cache else None
+            if papers is None:
+                papers = await search_papers(keywords, max_results, sources=options.sources)
+                if options.use_cache:
+                    cache.put("search", cache_key, [p.model_dump() for p in papers])
+            else:
+                from citens.models import Paper
 
-        if max_papers:
-            papers = blend_pool(papers, cap=max(max_papers * 3, 12))
-        meta.total_papers = len(papers)
-        persistence.save_step(run_dir, "02_papers", papers)
-        _emit(bus, StepCompleted(step="search", message=f"{len(papers)} 篇候选"))
+                papers = [Paper(**p) for p in papers]
 
-        # Step 3: filter
-        _emit(bus, StepStarted(step="filter", title="论文筛选"))
-
-        def _filter_progress(i, total, title):
-            _emit(bus, StepProgress(step="filter", message=title, current=i, total=total))
-
-        scored, filter_log = filter_papers(
-            papers, topic, filters=options.filters, on_progress=_filter_progress, return_log=True
-        )
-        # venue-aware composite ranking (relevance x citations x SJR quartile),
-        # applied when deciding which papers survive the cap
-        scored = rank_papers(scored)
-        persistence.save_step(
-            run_dir,
-            "03c_ranking",
-            [
-                {
-                    "title": p.title[:60],
-                    "relevance": p.relevance_score,
-                    "citations": p.citation_count,
-                    "venue": p.venue,
-                    "quartile": p.venue_quartile or "-",
-                    "rank_score": p.rank_score,
-                }
-                for p in scored
-            ],
-        )
-        # Save filter log with exclusion reasons
-        persistence.save_step(run_dir, "03_filter_log", filter_log)
-        if max_papers and len(scored) > max_papers:
-            scored = scored[:max_papers]
-        meta.filtered_papers = len(scored)
-        persistence.save_step(run_dir, "03_filtered", scored)
-        hist = quartile_histogram(scored)
-        hist_msg = " · ".join(f"{k}:{v}" for k, v in sorted(hist.items()))
-        _emit(bus, StepCompleted(step="filter", message=f"{len(scored)} 篇通过（{hist_msg}）"))
-
-        # Step 3.2: citation snowballing — expand pool via refs/citations of top papers
-        if options.mode != RunMode.QUICK_SCAN:
-            _emit(bus, StepStarted(step="snowball", title="引用滚雪球"))
-            top_seeds = [p for p in scored[:3] if p.doi]
-            existing = {p.id for p in scored}
-            snowballed = await snowball(top_seeds, existing, limit_per_paper=6)
-            if snowballed:
+            # Iterative refinement: if pool is thin, refine queries and search again
+            min_pool = max_papers * 2 if max_papers else 15
+            if len(papers) < min_pool and options.mode != RunMode.QUICK_SCAN:
                 _emit(
                     bus,
-                    StepProgress(step="snowball", message=f"滚雪球发现 {len(snowballed)} 篇候选"),
+                    StepProgress(step="search", message=f"首轮 {len(papers)} 篇不足，迭代扩展检索…"),
                 )
-                # Filter the snowballed papers too
-                snow_scored = filter_papers(snowballed, topic, filters=options.filters)
-                snow_scored = rank_papers(snow_scored)
-                # Only add papers that pass quality bar and aren't already in
-                new_papers = [
-                    p for p in snow_scored
-                    if p.id not in existing and p.relevance_score >= 3
-                ][:options.max_supplement_papers]
-                if new_papers:
-                    scored = scored + new_papers
-                    meta.filtered_papers = len(scored)
-                    persistence.save_step(
-                        run_dir, "03s_snowball", {"added": new_papers, "total_found": len(snowballed)}
-                    )
+                found_titles = [p.title for p in papers[:10]]
+                refined = refine_queries(topic, keywords, found_titles, known_gaps=[])
+                if refined:
                     _emit(
                         bus,
-                        StepCompleted(
-                            step="snowball",
-                            message=f"滚雪球补充 {len(new_papers)} 篇（来源: 引用图）"
-                        ),
+                        StepProgress(step="search", message=f"补充查询: {', '.join(refined[:3])}"),
                     )
+                    more = await search_papers(refined, max_results=min(max_results, 30), sources=options.sources)
+                    # Merge and deduplicate
+                    from citens.search import deduplicate
+
+                    papers = deduplicate(papers + more)
+                    keywords = keywords + refined  # track all queries used
+                    meta.keywords = keywords
+
+            if max_papers:
+                papers = blend_pool(papers, cap=max(max_papers * 3, 12))
+            meta.total_papers = len(papers)
+            persistence.save_step(run_dir, "02_papers", papers)
+            _emit(bus, StepCompleted(step="search", message=f"{len(papers)} 篇候选"))
+
+            # Step 3: filter
+            _emit(bus, StepStarted(step="filter", title="论文筛选"))
+
+            def _filter_progress(i, total, title):
+                _emit(bus, StepProgress(step="filter", message=title, current=i, total=total))
+
+            scored, filter_log = filter_papers(
+                papers, topic, filters=options.filters, on_progress=_filter_progress, return_log=True
+            )
+            # venue-aware composite ranking (relevance x citations x SJR quartile),
+            # applied when deciding which papers survive the cap
+            scored = rank_papers(scored)
+            persistence.save_step(
+                run_dir,
+                "03c_ranking",
+                [
+                    {
+                        "title": p.title[:60],
+                        "relevance": p.relevance_score,
+                        "citations": p.citation_count,
+                        "venue": p.venue,
+                        "quartile": p.venue_quartile or "-",
+                        "rank_score": p.rank_score,
+                    }
+                    for p in scored
+                ],
+            )
+            # Save filter log with exclusion reasons
+            persistence.save_step(run_dir, "03_filter_log", filter_log)
+            if max_papers and len(scored) > max_papers:
+                scored = scored[:max_papers]
+            meta.filtered_papers = len(scored)
+            persistence.save_step(run_dir, "03_filtered", scored)
+            hist = quartile_histogram(scored)
+            hist_msg = " · ".join(f"{k}:{v}" for k, v in sorted(hist.items()))
+            _emit(bus, StepCompleted(step="filter", message=f"{len(scored)} 篇通过（{hist_msg}）"))
+
+            # Step 3.2: citation snowballing — expand pool via refs/citations of top papers
+            if options.mode != RunMode.QUICK_SCAN:
+                _emit(bus, StepStarted(step="snowball", title="引用滚雪球"))
+                top_seeds = [p for p in scored[:3] if p.doi]
+                existing = {p.id for p in scored}
+                snowballed = await snowball(top_seeds, existing, limit_per_paper=6)
+                if snowballed:
+                    _emit(
+                        bus,
+                        StepProgress(step="snowball", message=f"滚雪球发现 {len(snowballed)} 篇候选"),
+                    )
+                    # Filter the snowballed papers too
+                    snow_scored = filter_papers(snowballed, topic, filters=options.filters)
+                    snow_scored = rank_papers(snow_scored)
+                    # Only add papers that pass quality bar and aren't already in
+                    new_papers = [
+                        p for p in snow_scored
+                        if p.id not in existing and p.relevance_score >= 3
+                    ][:options.max_supplement_papers]
+                    if new_papers:
+                        scored = scored + new_papers
+                        meta.filtered_papers = len(scored)
+                        persistence.save_step(
+                            run_dir, "03s_snowball", {"added": new_papers, "total_found": len(snowballed)}
+                        )
+                        _emit(
+                            bus,
+                            StepCompleted(
+                                step="snowball",
+                                message=f"滚雪球补充 {len(new_papers)} 篇（来源: 引用图）"
+                            ),
+                        )
+                    else:
+                        _emit(bus, StepCompleted(step="snowball", message="滚雪球无新增相关论文"))
                 else:
-                    _emit(bus, StepCompleted(step="snowball", message="滚雪球无新增相关论文"))
-            else:
-                _emit(bus, StepCompleted(step="snowball", message="无可用引用图数据"))
+                    _emit(bus, StepCompleted(step="snowball", message="无可用引用图数据"))
 
-        # Step 3.5: enrich missing abstracts via cross-source DOI lookup
-        if options.enrich_abstracts:
-            _emit(bus, StepStarted(step="enrich", title="摘要补全"))
-            missing = sum(1 for p in scored if not p.abstract.strip())
-            if missing:
-                def _enrich_progress(i, n, t):
-                    _emit(bus, StepProgress(step="enrich", message=t, current=i, total=n))
+            # Step 3.5: enrich missing abstracts via cross-source DOI lookup
+            if options.enrich_abstracts:
+                _emit(bus, StepStarted(step="enrich", title="摘要补全"))
+                missing = sum(1 for p in scored if not p.abstract.strip())
+                if missing:
+                    def _enrich_progress(i, n, t):
+                        _emit(bus, StepProgress(step="enrich", message=t, current=i, total=n))
 
-                filled, elog = enrich_abstracts(scored, on_progress=_enrich_progress)
-                persistence.save_step(
-                    run_dir,
-                    "03b_enrichment",
-                    {"missing": missing, "filled": filled, "log": elog},
-                )
-                _emit(bus, StepCompleted(step="enrich", message=f"补全 {filled}/{missing} 篇缺失摘要"))
-            else:
-                _emit(bus, StepCompleted(step="enrich", message="无缺失摘要"))
+                    filled, elog = enrich_abstracts(scored, on_progress=_enrich_progress)
+                    persistence.save_step(
+                        run_dir,
+                        "03b_enrichment",
+                        {"missing": missing, "filled": filled, "log": elog},
+                    )
+                    _emit(bus, StepCompleted(step="enrich", message=f"补全 {filled}/{missing} 篇缺失摘要"))
+                else:
+                    _emit(bus, StepCompleted(step="enrich", message="无缺失摘要"))
 
-        # Step 4: extract
-        _emit(bus, StepStarted(step="extract", title="信息抽取"))
+            # Step 4: extract
+            _emit(bus, StepStarted(step="extract", title="信息抽取"))
 
-        def _extract_progress(i, total, title):
-            _emit(bus, StepProgress(step="extract", message=title, current=i, total=total))
+            def _extract_progress(i, total, title):
+                _emit(bus, StepProgress(step="extract", message=title, current=i, total=total))
 
-        extracted = extract_papers(scored, topic, on_progress=_extract_progress)
-        persistence.save_step(run_dir, "04_extracted", extracted)
+            extracted = extract_papers(scored, topic, on_progress=_extract_progress)
+            persistence.save_step(run_dir, "04_extracted", extracted)
 
-        # Generate comparison matrix from deep extraction (quality signals)
-        comp_rows = build_comparison_matrix(extracted)
-        comp_md = render_comparison_md(comp_rows)
-        persistence.save_step(run_dir, "04_comparison", comp_rows)
-        if comp_md:
-            persistence.save_text(run_dir, "comparison.md", comp_md)
-        n_with_quality = sum(1 for p in extracted if p.quality.get("evidence_level"))
-        _emit(
-            bus,
-            StepCompleted(
-                step="extract",
-                message=f"{len(extracted)} 篇抽取完成 · {n_with_quality} 篇含质量评估 · 对比矩阵已生成"
-            ),
-        )
+            # Generate comparison matrix from deep extraction (quality signals)
+            comp_rows = build_comparison_matrix(extracted)
+            comp_md = render_comparison_md(comp_rows)
+            persistence.save_step(run_dir, "04_comparison", comp_rows)
+            if comp_md:
+                persistence.save_text(run_dir, "comparison.md", comp_md)
+            n_with_quality = sum(1 for p in extracted if p.quality.get("evidence_level"))
+            _emit(
+                bus,
+                StepCompleted(
+                    step="extract",
+                    message=f"{len(extracted)} 篇抽取完成 · {n_with_quality} 篇含质量评估 · 对比矩阵已生成"
+                ),
+            )
 
         # Step 5: first composition (verifier feedback may raise supplement queries)
         verify_trigger_queries: list[str] = []

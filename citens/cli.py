@@ -229,6 +229,79 @@ def eval(  # noqa: A001
 
 
 @app.command()
+def resume(
+    run_dir: str = typer.Argument(..., help="要续跑的 run 目录（含 steps/04_extracted.json）"),
+    no_supplement: bool = typer.Option(False, "--no-supplement", help="跳过补检循环"),
+    language: str | None = typer.Option(None, "--language", "-l", help="综述输出语言: en/zh"),
+):
+    """Resume an interrupted run: reuse its extracted papers, recompose the review.
+
+    Retrieval (search/filter/snowball/extract) is skipped — the run directory's
+    steps/04_extracted.json becomes the starting pool. Useful when a deep run
+    dies during writing/verification, or when you want to re-write with a
+    different language/model.
+    """
+    import json
+
+    if language:
+        settings.review_language = language
+
+    topic_file = Path(run_dir) / "run.json"
+    if topic_file.is_file():
+        topic = json.loads(topic_file.read_text(encoding="utf-8"))["topic"]
+    else:
+        # run dirs are <topic>-<timestamp>; the slug preserves CJK characters
+        topic = Path(run_dir).name.rsplit("-", 1)[0] or Path(run_dir).name
+    console.print(f"[cyan]resume[/] {run_dir} · topic: {topic}")
+
+    bus = EventBus()
+    bus.subscribe(_make_rich_handler(console))
+    try:
+        run_pipeline(
+            topic,
+            RunOptions(resume_dir=run_dir, allow_supplement=not no_supplement),
+            bus,
+        )
+    except FileNotFoundError as e:
+        console.print(f"[bold red]无法续跑:[/] {e}")
+        raise typer.Exit(code=1) from None
+    except Exception:  # noqa: BLE001
+        console.print("[bold red]续跑失败:[/]")
+        traceback.print_exc()
+        raise typer.Exit(code=1) from None
+
+
+@app.command()
+def reverify(
+    run_dir: str = typer.Argument(..., help="要重新核验的 run 目录"),
+):
+    """Re-verify an existing run's claims against newly available full text.
+
+    Drop the PDFs listed in the run's fetch_list.md into papers/ first — this
+    command re-grounds every claim (full text where available) and rewrites
+    verification.json / provenance.json, without re-running retrieval or
+    writing. Reports the precision delta.
+    """
+    from citens.orchestration.reverify import reverify as _reverify
+
+    bus = EventBus()
+    bus.subscribe(_make_rich_handler(console))
+    try:
+        summary = _reverify(run_dir, bus)
+    except FileNotFoundError as e:
+        console.print(f"[bold red]无法重验:[/] {e}")
+        raise typer.Exit(code=1) from None
+    prev = summary.get("previous_precision")
+    delta = ""
+    if prev is not None:
+        delta = f" (was {prev:.1%})"
+    console.print(
+        f"[green]✓[/] {summary['claims']} claims · {summary['fulltext']} full text · "
+        f"precision {summary['precision']:.1%}{delta}"
+    )
+
+
+@app.command()
 def sjr(
     force: bool = typer.Option(False, "--force", help="重新下载（即使文件已存在）"),
     mirror: bool = typer.Option(
