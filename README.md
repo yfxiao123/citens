@@ -72,15 +72,28 @@ citens run "limit order book modeling" -n 8
 
 Works with any OpenAI-compatible backend — DeepSeek (`LLM_API_BASE=https://api.deepseek.com/v1`), Ollama, OpenRouter, vLLM, Groq — or native Anthropic/Gemini via the `[multi]` extra (LiteLLM).
 
+Useful follow-ups after a run:
+
+```bash
+citens resume runs/<dir>            # an interrupted run continues from its
+                                    #   extracted papers — no re-retrieval
+citens reverify runs/<dir>          # drop fetch_list.md's PDFs into papers/
+                                    #   first: re-verifies every claim against
+                                    #   the new full text, reports the delta
+citens run "..." -l zh              # output language (prose + headings)
+```
+
 Web UI (SSE streaming, live step progress, precision panel):
 
 ```bash
 pip install -e ".[api,pdf]"
 uvicorn citens.api.app:app --port 8000     # open http://localhost:8000
 # or: docker compose up
+# exposing the server beyond localhost? set API_TOKEN (bearer auth on
+# /run & friends — /run spends your LLM credits) and CORS_ORIGINS.
 ```
 
-CLI reference: `citens run | sources | sjr | version` (`citens --help`).
+CLI reference: `citens run | resume | reverify | eval | sources | sjr | version` (`citens --help`).
 
 ## The access layer
 
