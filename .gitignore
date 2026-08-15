@@ -32,3 +32,6 @@ requirements.txt
 
 # downloaded data (license: CC BY-NC, fetched at init time, not redistributed)
 data/sjr/
+
+# local tooling scratch
+.zcode/
