@@ -167,6 +167,68 @@ def sources():
 
 
 @app.command()
+def eval(  # noqa: A001
+    topics: list[str] = typer.Argument(None, help="要评测的主题（默认一组内置主题）"),
+    n: int = typer.Option(8, "-n", "--max-papers", help="每主题论文数"),
+    mode: str = typer.Option("deep_review", "--mode", help="运行模式"),
+    from_runs: str = typer.Option(
+        None, "--from-runs", help="不跑新任务，只汇总已有 run 目录（glob 模式）"
+    ),
+):
+    """Eval harness: run topics, collect citation-precision metrics, write eval/report.md.
+
+    Live LLM + network required — this is the maintainer tool behind the
+    README's precision claims, not a CI step. --from-runs re-renders the
+    table from existing runs offline.
+    """
+    from datetime import date
+
+    from litreview.eval import collect_metrics, render_table
+
+    if from_runs:
+        import glob as _glob
+
+        dirs = _glob.glob(from_runs)
+        rows = [collect_metrics(d) for d in dirs]
+    else:
+        from litreview.models import RunMode
+
+        topic_list = topics or [
+            "limit order book modeling",
+            "graph neural networks for molecule property prediction",
+            "retrieval-augmented generation for question answering",
+        ]
+        rows = []
+        for t in topic_list:
+            console.print(f"\n[bold cyan]== eval run:[/] {t}")
+            meta = run_pipeline(
+                t,
+                RunOptions(
+                    max_papers=n,
+                    mode=RunMode(mode),
+                    allow_supplement=True,
+                ),
+            )
+            rows.append(collect_metrics(meta.run_dir))
+
+    if not rows:
+        console.print("[yellow]没有可汇总的 run[/]")
+        raise typer.Exit()
+
+    table = render_table(rows)
+    out = Path("eval")
+    out.mkdir(exist_ok=True)
+    report = (
+        f"# Eval report — {date.today().isoformat()}\n\n"
+        f"citation precision = (supported + partial) / verifiable claims\n\n"
+        f"{table}\n"
+    )
+    (out / "report.md").write_text(report, encoding="utf-8")
+    console.print(Panel(table, title=f"eval: {len(rows)} runs"))
+    console.print(f"[green]✓[/] 写入 {out / 'report.md'}")
+
+
+@app.command()
 def sjr(
     force: bool = typer.Option(False, "--force", help="重新下载（即使文件已存在）"),
     mirror: bool = typer.Option(

@@ -35,3 +35,6 @@ data/sjr/
 
 # local tooling scratch
 .zcode/
+
+# local eval reports
+eval/

@@ -111,8 +111,18 @@ Precision depends on how much ground text exists. Same topic, same model:
 | abstracts only | ~50 | ~35% |
 | + 1 full text (open PDF) | 53 | 47% |
 | + dropped PDFs & OA fetches (3/8 full text) | 70 | **73%** |
+| + snowballing, defense review, deep_review mode (13 papers) | 65 | **94%** |
 
 The number is computed by an LLM-as-judge with the cited paper's retrieved chunks in view — it's a working measure, not a certification. Claims whose cited paper has no ground text are excluded from the denominator and reported as `unverifiable` instead.
+
+Reproduce it yourself — the eval harness runs a topic set (or summarizes existing runs) and writes a comparison table:
+
+```bash
+litreview eval --from-runs "runs/*"          # offline: table from existing runs
+litreview eval "limit order book modeling" -n 13   # live: run + collect
+```
+
+A full example run (review, verdicts, comparison matrix, fetch list) lives in [`examples/order-book-modeling/`](examples/order-book-modeling/).
 
 ## Project layout
 
