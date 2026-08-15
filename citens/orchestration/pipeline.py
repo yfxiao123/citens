@@ -677,79 +677,120 @@ async def run_pipeline_async(
         )
         meta.themes = [t.name for t in result.themes.themes]
 
-        # Step 6: reflect -> supplement -> recompose (one bounded loop)
+        # Step 6: reflect -> supplement -> recompose, bounded loop with a
+        # saturation stop (keep retrieving only while new papers keep arriving)
         if options.allow_supplement:
             _emit(bus, StepStarted(step="reflect", title="反思与补充"))
-            decision = reflect(result.synthesis, topic, len(extracted))
+            max_rounds = 2 if options.mode == RunMode.DEEP_REVIEW else 1
+            rounds_run = 0
+            saturated = False
+            while rounds_run < max_rounds:
+                rounds_run += 1
+                decision = reflect(result.synthesis, topic, len(extracted))
 
-            # 6a: absence audit — canonical works the retrieved set is missing
-            audit = audit_coverage(topic, [p.title for p in extracted])
-            persistence.save_step(run_dir, "08a_absence_audit", audit)
-            audit_queries = missing_to_queries(audit)
-            absent_n = len(audit.get("absent_canonical_papers", []))
-            if audit_queries:
+                # 6a: absence audit — canonical works the set is missing
+                audit = audit_coverage(topic, [p.title for p in extracted])
+                persistence.save_step(run_dir, "08a_absence_audit", audit)
+                audit_queries = missing_to_queries(audit)
+                absent_n = len(audit.get("absent_canonical_papers", []))
+                if audit_queries:
+                    _emit(
+                        bus,
+                        StepProgress(
+                            step="reflect",
+                            message=f"缺席检测: {absent_n} 篇经典缺失，追加检索",
+                        ),
+                    )
+
+                # merge the three query sources: reflect gaps + absence
+                # audit + verifier-triggered (unsupported-claim evidence)
+                supplement_queries = list(dict.fromkeys(
+                    decision.get("supplementary_keywords", [])
+                    + audit_queries
+                    + verify_trigger_queries
+                ))[:8]
+
+                if not (decision["needs_supplement"] and supplement_queries):
+                    _emit(
+                        bus,
+                        StepCompleted(
+                            step="reflect",
+                            message=decision["rationale"] or "覆盖充分，无需补充",
+                        ),
+                    )
+                    saturated = True
+                    break
+
                 _emit(
                     bus,
                     StepProgress(
                         step="reflect",
-                        message=f"缺席检测: {absent_n} 篇经典缺失，追加检索",
+                        message=f"round {rounds_run}/{max_rounds} 补充检索: "
+                        + ", ".join(supplement_queries),
                     ),
-                )
-
-            # merge all three query sources: reflect gaps + absence audit +
-            # verifier-triggered (unsupported-claim evidence)
-            supplement_queries = list(dict.fromkeys(
-                decision.get("supplementary_keywords", [])
-                + audit_queries
-                + verify_trigger_queries
-            ))[:8]
-
-            if decision["needs_supplement"] and supplement_queries:
-                _emit(
-                    bus,
-                    StepProgress(step="reflect", message="补充检索: " + ", ".join(supplement_queries)),
                 )
                 fresh, all_known = await _supplement_search(
                     supplement_queries, {p.id for p in extracted}, options, topic
                 )
-                if fresh:
-                    _emit(
-                        bus,
-                        StepProgress(step="reflect", message=f"补充到 {len(fresh)} 篇新论文，重新综合"),
-                    )
-                    new_extracted = extract_papers(fresh, topic)
-                    extracted = extracted + new_extracted
-                    meta.filtered_papers = len(extracted)
-                    persistence.save_step(
-                        run_dir,
-                        "08_supplement",
-                        {"new_papers": fresh, "decision": decision, "audit": audit},
-                    )
-                    result = _compose(
-                        extracted,
-                        topic,
-                        run_dir,
-                        bus,
-                        fetch_fulltext=options.fetch_fulltext,
-                        on_supplement_queries=_collect_verify_queries,
-                    )
-                    meta.themes = [t.name for t in result.themes.themes]
-                    _emit(
-                        bus,
-                        StepCompleted(step="reflect", message=f"补充 {len(new_extracted)} 篇并重新综合完成"),
-                    )
-                else:
+                if not fresh:
+                    # saturation: no NEW relevant paper — extra rounds would
+                    # only re-find what the pool already has
                     msg = (
-                        "检索命中但均已在池内（可能是缓存回放），跳过重新综合"
+                        "检索饱和（命中均已在池内），停止补充"
                         if all_known
-                        else "无新论文，跳过重新综合"
+                        else "无新论文，停止补充"
                     )
                     _emit(bus, StepCompleted(step="reflect", message=msg))
-            else:
+                    saturated = True
+                    break
+
                 _emit(
                     bus,
-                    StepCompleted(step="reflect", message=decision["rationale"] or "覆盖充分，无需补充"),
+                    StepProgress(step="reflect", message=f"补充到 {len(fresh)} 篇新论文，重新综合"),
                 )
+                new_extracted = extract_papers(fresh, topic)
+                extracted = extracted + new_extracted
+                meta.filtered_papers = len(extracted)
+                persistence.save_step(
+                    run_dir,
+                    "08_supplement",
+                    {
+                        "round": rounds_run,
+                        "new_papers": fresh,
+                        "decision": decision,
+                        "audit": audit,
+                    },
+                )
+                result = _compose(
+                    extracted,
+                    topic,
+                    run_dir,
+                    bus,
+                    fetch_fulltext=options.fetch_fulltext,
+                    on_supplement_queries=_collect_verify_queries,
+                )
+                meta.themes = [t.name for t in result.themes.themes]
+                _emit(
+                    bus,
+                    StepProgress(
+                        step="reflect",
+                        message=f"round {rounds_run}: 补充 {len(new_extracted)} 篇并重新综合完成",
+                    ),
+                )
+            else:
+                # loop exhausted max_rounds without saturating
+                _emit(
+                    bus,
+                    StepCompleted(
+                        step="reflect",
+                        message=f"达到补检轮数上限（{max_rounds}），仍有缺口可手动继续",
+                    ),
+                )
+            persistence.save_step(
+                run_dir,
+                "09_saturation",
+                {"rounds_run": rounds_run, "max_rounds": max_rounds, "saturated": saturated},
+            )
 
         # finalize
         meta.review_path = result.review_path

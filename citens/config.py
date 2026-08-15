@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     # you drop are picked up by the next run.
     papers_dir: str = "papers"
 
+    # --- API server (citens.api) ----------------------------------------------
+    # Bearer token required on /run, /clarify, /runs, /result when set.
+    # Empty = no auth (localhost dev only). SET THIS before exposing the
+    # server beyond localhost — /run spends your LLM credits.
+    api_token: str = ""
+    # Comma-separated allowed CORS origins (empty = no CORS middleware).
+    cors_origins: str = "http://localhost:8000,http://127.0.0.1:8000"
+
     # --- Metadata / enrichment API keys (optional) --------------------------
     # Used to fill in missing abstracts and find full text by DOI.
     crossref_email: str = ""  # Crossref polite pool (free, no key needed)
