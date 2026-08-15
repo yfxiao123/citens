@@ -82,6 +82,10 @@ def run(
     language: str | None = typer.Option(
         None, "--language", "-l", help="综述输出语言: en/zh (默认取 REVIEW_LANGUAGE 或 en)"
     ),
+    concurrency: int | None = typer.Option(
+        None, "--concurrency", "-c",
+        help="并行 LLM 调用数 (默认取 LLM_CONCURRENCY 或 6)",
+    ),
 ):
     """Generate a literature review for TOPIC."""
     from citens.models import RunMode
@@ -90,6 +94,13 @@ def run(
     src_list = [s.strip() for s in sources.split(",")] if sources else None
     if language:
         settings.review_language = language
+    if concurrency:
+        settings.llm_concurrency = concurrency
+    elif (n or 0) >= 30 and settings.llm_concurrency < 8:
+        console.print(
+            "[yellow]提示: 大规模 run 建议提高并发 (--concurrency 12 或 .env 里 "
+            "LLM_CONCURRENCY=12)，可显著缩短 filter/extract/verify 阶段耗时[/]"
+        )
 
     # Parse mode if provided
     run_mode = None

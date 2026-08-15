@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- Large-run performance: relevance filtering (the ~300-candidate pool of a
+  100-paper target) now runs on the thread pool instead of sequentially;
+  defense rebuttals are parallel too; extraction folds quality grading into
+  the same call (2 calls per paper → 1); filter calls use a 1024-token
+  budget instead of the 4096 default
+- New `--concurrency/-c` flag on `citens run` (+ hint for `-n 30+` runs)
+- Every run now writes `timings.json` (per-stage durations; also on failure),
+  and `RunCompleted` carries total seconds — "why was this slow" is now a
+  file you open, not a guess
+
 ## [0.1.0] — 2026-08-15
 
 First tagged release. Positioning: an open-source literature-review agent

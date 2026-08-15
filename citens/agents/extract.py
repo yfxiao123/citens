@@ -1,17 +1,16 @@
 """Information-extraction agent: deep structured fields from each paper.
 
 Per-paper calls are independent — they run on a thread pool
-(:func:`citens.llm.run_concurrent`) so a 9-paper extract stage takes one
-round-trip instead of nine.
+(:func:`citens.llm.run_concurrent`) so a 100-paper extract stage takes
+~100/concurrency round-trips.
 
-Deep extraction (v2) adds quality assessment: study type, evidence level,
-method rigor, effect direction — feeding both the ranking (retrieval quality)
-and the writer (extraction quality → better-grounded claims).
+Quality assessment (study type, evidence level, method rigor) is folded
+into the SAME call: two prompts over the same abstract doubled the calls
+without adding information (100 papers = 200 calls before, 100 now).
 """
 
 from __future__ import annotations
 
-from citens.agents.quality import assess_paper_quality
 from citens.llm import chat_json, run_concurrent
 from citens.models import ExtractedPaper, ScoredPaper
 
@@ -39,7 +38,14 @@ perspective, method, or evidence does it contribute that others don't",
   "study_type": "one of: meta_analysis, systematic_review, rct, cohort, case_control, \
 cross_sectional, survey, theoretical, simulation, empirical, review, other",
   "sample_or_data": "sample size, dataset name, or data description from abstract",
-  "effect_direction": "one of: positive, negative, mixed, null, not_applicable"
+  "effect_direction": "one of: positive, negative, mixed, null, not_applicable",
+  "evidence_level": 1-4 where: 1 = meta-analysis or systematic review, 2 = RCT or \
+high-quality experimental, 3 = observational (cohort/case-control/cross-sectional/survey), \
+4 = theoretical/model/opinion/case-report",
+  "method_rigor": 1-5 where: 5 = rigorous (clear methodology, adequate data, tests, \
+controls), 3 = adequate with concerns, 1 = unclear or flawed",
+  "temporal_scope": "time period covered by the study (from abstract, if mentioned)",
+  "quality_note": "one-line assessment of methodological strengths/weaknesses"
 }
 
 CRITICAL RULES:
@@ -58,21 +64,16 @@ def _extract_one(paper: ScoredPaper, topic: str, assess_quality: bool = True) ->
         "Extract the deep structured information."
     )
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=3072)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=4096)
     except Exception as e:  # noqa: BLE001
         print(f"    extract failed ({paper.title[:40]}): {e}")
         result = {}
 
-    quality = {}
+    quality: dict = {}
     if assess_quality:
-        # Quick quality assessment from the same abstract
-        ep_preview = ExtractedPaper(
-            **paper.model_dump(exclude={"id"}),
-            research_question=result.get("research_question", ""),
-            methodology=result.get("methodology", ""),
-            key_findings=result.get("key_findings", []),
-        )
-        quality = assess_paper_quality(ep_preview)
+        from citens.agents.quality import _validated_quality
+
+        quality = _validated_quality(result)
 
     return ExtractedPaper(
         **paper.model_dump(exclude={"id"}),

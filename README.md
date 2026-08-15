@@ -137,6 +137,18 @@ citens eval "limit order book modeling" -n 13   # live: run + collect
 
 A full example run (review, verdicts, comparison matrix, fetch list) lives in [`examples/order-book-modeling/`](examples/order-book-modeling/).
 
+## Runtime at scale
+
+Everything LLM-bound is parallel (filter/extract/verify/write/defense run on a thread pool, `LLM_CONCURRENCY`, default 6), extraction folds quality grading into a single call per paper, and both the LLM and search layers are disk-cached — re-runs of the same topic skip repeat calls. A 13-paper deep review takes roughly 8–18 minutes on a fast backend.
+
+For large runs (`-n 50+`), raise concurrency — it's the single biggest lever:
+
+```bash
+citens run "..." -n 100 -c 12        # or LLM_CONCURRENCY=12 in .env
+```
+
+Cost scales with papers × (extract 1 call + claims ~1 call each) × compose rounds; deep_review recomposes the survey after each supplement round by design. Every run writes `timings.json` with per-stage durations — if a run feels slow, that file says exactly where the time went.
+
 ## Project layout
 
 ```

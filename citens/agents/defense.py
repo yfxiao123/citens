@@ -10,7 +10,7 @@ This implements the "Concession Threshold Protocol" inspired by Imbad0202/ARS.
 
 from __future__ import annotations
 
-from citens.llm import chat_json
+from citens.llm import chat_json, run_concurrent
 from citens.models import Claim, Verdict, VerificationResult
 
 SYSTEM_PROMPT = """You are a defense lawyer for academic claims. A verifier has marked a claim as \
@@ -79,29 +79,32 @@ def review_unsupported_claims(
     ver_results: list[VerificationResult],
     source_contexts: dict[int, str],
 ) -> list[dict]:
-    """Review all UNSUPPORTED verdicts and attempt rebuttals.
+    """Review all UNSUPPORTED verdicts and attempt rebuttals (concurrently).
 
     Args:
-        claims: List of all claims
+        claims: List of all claims (parallel to ver_results)
         ver_results: Verification results
         source_contexts: Map from claim index to source context string
 
     Returns:
         List of dicts with 'claim_idx', 'original_verdict', 'defense_result',
-        'overturned' (bool)
+        'overturned' (bool) — in claim order.
     """
-    reviews = []
+    unsupported_pairs = [
+        (idx, claim, verdict)
+        for idx, (claim, verdict) in enumerate(zip(claims, ver_results, strict=False))
+        if verdict.verdict == Verdict.UNSUPPORTED
+    ]
 
-    for idx, (claim, verdict) in enumerate(zip(claims, ver_results, strict=False)):
-        if verdict.verdict == Verdict.UNSUPPORTED:
-            context = source_contexts.get(idx, "")
-            defense = challenge_verdict(claim, verdict, context)
+    def _defend(_i: int, pair: tuple[int, Claim, VerificationResult]) -> dict:
+        idx, claim, verdict = pair
+        context = source_contexts.get(idx, "")
+        defense = challenge_verdict(claim, verdict, context)
+        return {
+            "claim_idx": idx,
+            "original_verdict": verdict.verdict.value,
+            "defense_result": defense,
+            "overturned": not defense["concede"],
+        }
 
-            reviews.append({
-                "claim_idx": idx,
-                "original_verdict": verdict.verdict.value,
-                "defense_result": defense,
-                "overturned": not defense["concede"],
-            })
-
-    return reviews
+    return run_concurrent(_defend, unsupported_pairs)

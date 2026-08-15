@@ -40,10 +40,62 @@ cross_sectional, survey, theoretical, simulation, empirical, review, other",
 }"""
 
 
+def _validated_quality(result: dict) -> dict:
+    """Clamp/whitelist the quality fields of an extraction result.
+
+    Shared by the merged single-call extraction (extract.py) and the
+    standalone :func:`assess_paper_quality`.
+    """
+    # Validate and clamp values
+    evidence_level = result.get("evidence_level", 4)
+    if not isinstance(evidence_level, int) or evidence_level < 1 or evidence_level > 4:
+        evidence_level = 4
+
+    method_rigor = result.get("method_rigor", 3)
+    if not isinstance(method_rigor, int) or method_rigor < 1 or method_rigor > 5:
+        method_rigor = 3
+
+    valid_study_types = {
+        "meta_analysis", "systematic_review", "rct", "cohort", "case_control",
+        "cross_sectional", "survey", "theoretical", "simulation", "empirical",
+        "review", "other"
+    }
+    study_type = result.get("study_type", "other")
+    if study_type not in valid_study_types:
+        study_type = "other"
+
+    valid_directions = {"positive", "negative", "mixed", "null", "not_applicable"}
+    effect_direction = result.get("effect_direction", "not_applicable")
+    if effect_direction not in valid_directions:
+        effect_direction = "not_applicable"
+
+    return {
+        "study_type": study_type,
+        "evidence_level": evidence_level,
+        "method_rigor": method_rigor,
+        "sample_or_data": result.get("sample_or_data", ""),
+        "effect_direction": effect_direction,
+        "temporal_scope": result.get("temporal_scope", ""),
+        "quality_note": result.get("quality_note", ""),
+    }
+
+
+_DEFAULT_QUALITY: dict = {
+    "study_type": "other",
+    "evidence_level": 4,
+    "method_rigor": 3,
+    "sample_or_data": "",
+    "effect_direction": "not_applicable",
+    "temporal_scope": "",
+    "quality_note": "",
+}
+
+
 def assess_paper_quality(paper: ExtractedPaper) -> dict:
     """Assess methodological quality and evidence level from the paper's abstract.
 
-    Returns a dict with study_type, evidence_level, method_rigor, etc.
+    Kept for callers that need quality WITHOUT extraction (e.g. quality-only
+    passes); the extract stage folds these fields into its single call instead.
     """
     user_prompt = (
         f"论文标题: {paper.title}\n"
@@ -54,49 +106,9 @@ def assess_paper_quality(paper: ExtractedPaper) -> dict:
     )
     try:
         result = chat_json(QUALITY_PROMPT, user_prompt, max_tokens=1536)
-
-        # Validate and clamp values
-        evidence_level = result.get("evidence_level", 4)
-        if not isinstance(evidence_level, int) or evidence_level < 1 or evidence_level > 4:
-            evidence_level = 4
-
-        method_rigor = result.get("method_rigor", 3)
-        if not isinstance(method_rigor, int) or method_rigor < 1 or method_rigor > 5:
-            method_rigor = 3
-
-        valid_study_types = {
-            "meta_analysis", "systematic_review", "rct", "cohort", "case_control",
-            "cross_sectional", "survey", "theoretical", "simulation", "empirical",
-            "review", "other"
-        }
-        study_type = result.get("study_type", "other")
-        if study_type not in valid_study_types:
-            study_type = "other"
-
-        valid_directions = {"positive", "negative", "mixed", "null", "not_applicable"}
-        effect_direction = result.get("effect_direction", "not_applicable")
-        if effect_direction not in valid_directions:
-            effect_direction = "not_applicable"
-
-        return {
-            "study_type": study_type,
-            "evidence_level": evidence_level,
-            "method_rigor": method_rigor,
-            "sample_or_data": result.get("sample_or_data", ""),
-            "effect_direction": effect_direction,
-            "temporal_scope": result.get("temporal_scope", ""),
-            "quality_note": result.get("quality_note", ""),
-        }
+        return _validated_quality(result)
     except Exception:  # noqa: BLE001
-        return {
-            "study_type": "other",
-            "evidence_level": 4,
-            "method_rigor": 3,
-            "sample_or_data": "",
-            "effect_direction": "not_applicable",
-            "temporal_scope": "",
-            "quality_note": "",
-        }
+        return dict(_DEFAULT_QUALITY)
 
 
 def build_comparison_matrix(papers: list[ExtractedPaper]) -> list[dict]:

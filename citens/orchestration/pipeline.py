@@ -15,6 +15,8 @@ re-run it on the augmented paper set without duplicating logic.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 import traceback
 from dataclasses import dataclass, field
 
@@ -69,6 +71,32 @@ from citens.models import (
 from citens.ranking import quartile_histogram, rank_papers
 from citens.search import blend_pool, search_papers
 from citens.search.snowball import snowball
+
+
+class StepClock:
+    """Ordered wall-time marks; a stage's duration is the delta to the next mark.
+
+    Cheap enough to leave on every run — timings.json is how you answer
+    "why was this run slow?" after the fact (see the 100-paper case).
+    """
+
+    def __init__(self) -> None:
+        self._marks: list[tuple[str, float]] = [("_start", time.monotonic())]
+
+    def mark(self, name: str) -> None:
+        self._marks.append((name, time.monotonic()))
+
+    def durations(self) -> dict[str, float]:
+        return {
+            f"{prev}->{name}": round(t1 - t0, 1)
+            for (prev, t0), (name, t1) in zip(self._marks, self._marks[1:], strict=False)
+        }
+
+    def total(self) -> float:
+        return round(self._marks[-1][1] - self._marks[0][1], 1)
+
+    def payload(self) -> dict:
+        return {"total_seconds": self.total(), "stages": self.durations()}
 
 
 @dataclass
@@ -151,6 +179,8 @@ def _compose(
     *,
     fetch_fulltext: bool = True,
     on_supplement_queries=None,
+    clock: StepClock | None = None,
+    label: str = "compose",
 ) -> ComposeResult:
     """organize -> synthesize -> write -> verify, persisting all artifacts.
 
@@ -160,13 +190,17 @@ def _compose(
     that could be resolved by targeted retrieval (the caller decides whether
     to actually supplement).
     """
+    if clock is None:
+        clock = StepClock()
     # organize
+    clock.mark(f"{label}:organize")
     _emit(bus, StepStarted(step="organize", title="主题组织"))
     themes = organize_themes(extracted, topic)
     persistence.save_step(run_dir, "05_themes", themes)
     _emit(bus, StepCompleted(step="organize", message=f"{len(themes.themes)} 个主题"))
 
     # synthesize (critical cross-paper analysis)
+    clock.mark(f"{label}:synthesize")
     _emit(bus, StepStarted(step="synthesize", title="批判性综合"))
     synthesis = synthesize(extracted, themes, topic)
     persistence.save_step(run_dir, "06_synthesis", synthesis)
@@ -182,6 +216,7 @@ def _compose(
     )
 
     # grounding: fetch full text where available (the main precision lever)
+    clock.mark(f"{label}:ground")
     _emit(bus, StepStarted(step="ground", title="获取全文（溯源）"))
 
     def _ground_progress(i, total, title):
@@ -230,6 +265,7 @@ def _compose(
     )
 
     # write
+    clock.mark(f"{label}:write")
     _emit(bus, StepStarted(step="write", title="综述撰写"))
 
     def _write_step(name, label=""):
@@ -281,6 +317,7 @@ def _compose(
     ver_results: list[VerificationResult] = []
     precision = 0.0
     if claims:
+        clock.mark(f"{label}:verify")
         _emit(bus, StepStarted(step="verify", title="引用核验"))
 
         def _verify_progress(i, total):
@@ -316,6 +353,7 @@ def _compose(
         # bidirectional verification: defense lawyer challenges unsupported verdicts
         unsupported_count = sum(1 for r in ver_results if r.verdict.value == "unsupported")
         if unsupported_count > 0:
+            clock.mark(f"{label}:defense")
             _emit(bus, StepStarted(step="defense", title="双向核验（辩护律师）"))
             source_contexts: dict[int, str] = {}
             for i, claim in enumerate(claims):
@@ -364,6 +402,7 @@ def _compose(
             )
 
         # health monitoring: detect systematic biases
+        clock.mark(f"{label}:health")
         _emit(bus, StepStarted(step="health", title="对话健康监测"))
         theme_paper_counts = {theme.name: len(theme.paper_indices) for theme in themes.themes}
         absence_audit = audit_coverage(topic, [p.title for p in extracted])
@@ -452,6 +491,7 @@ async def run_pipeline_async(
 
     run_dir = options.resume_dir or persistence.new_run_dir(topic)
     meta = RunMeta(topic=topic, run_dir=run_dir)
+    clock = StepClock()
     _emit(bus, RunStarted(topic=topic))
     if options.resume_dir is None:
         # written before anything can fail, so `citens resume` can recover
@@ -478,6 +518,7 @@ async def run_pipeline_async(
         if not resumed:
             # Step 0: intent detection (auto-detect mode if not specified)
             if options.mode is None:
+                clock.mark("intent")
                 _emit(bus, StepStarted(step="intent", title="检测用户意图"))
                 mode_str = detect_intent(topic, options.filters)
                 options.mode = RunMode(mode_str)
@@ -491,6 +532,7 @@ async def run_pipeline_async(
                     options.max_papers = 5  # fewer papers for quick overview
 
             # Step 1: keywords
+            clock.mark("planner")
             _emit(bus, StepStarted(step="planner", title="生成检索关键词"))
             if options.filters:
                 persistence.save_step(run_dir, "00_filters", options.filters)
@@ -505,6 +547,7 @@ async def run_pipeline_async(
             _emit(bus, StepCompleted(step="planner", message=f"{len(keywords)} 条关键词"))
 
             # Step 2: search (iterative — refine if first round is thin)
+            clock.mark("search")
             _emit(bus, StepStarted(step="search", title="检索论文"))
             cache_key = {"keywords": keywords, "max_results": max_results, "sources": options.sources}
             papers = cache.get("search", cache_key) if options.use_cache else None
@@ -546,6 +589,7 @@ async def run_pipeline_async(
             _emit(bus, StepCompleted(step="search", message=f"{len(papers)} 篇候选"))
 
             # Step 3: filter
+            clock.mark("filter")
             _emit(bus, StepStarted(step="filter", title="论文筛选"))
 
             def _filter_progress(i, total, title):
@@ -584,6 +628,7 @@ async def run_pipeline_async(
 
             # Step 3.2: citation snowballing — expand pool via refs/citations of top papers
             if options.mode != RunMode.QUICK_SCAN:
+                clock.mark("snowball")
                 _emit(bus, StepStarted(step="snowball", title="引用滚雪球"))
                 top_seeds = [p for p in scored[:3] if p.doi]
                 existing = {p.id for p in scored}
@@ -621,6 +666,7 @@ async def run_pipeline_async(
 
             # Step 3.5: enrich missing abstracts via cross-source DOI lookup
             if options.enrich_abstracts:
+                clock.mark("enrich")
                 _emit(bus, StepStarted(step="enrich", title="摘要补全"))
                 missing = sum(1 for p in scored if not p.abstract.strip())
                 if missing:
@@ -638,6 +684,7 @@ async def run_pipeline_async(
                     _emit(bus, StepCompleted(step="enrich", message="无缺失摘要"))
 
             # Step 4: extract
+            clock.mark("extract")
             _emit(bus, StepStarted(step="extract", title="信息抽取"))
 
             def _extract_progress(i, total, title):
@@ -674,12 +721,15 @@ async def run_pipeline_async(
             bus,
             fetch_fulltext=options.fetch_fulltext,
             on_supplement_queries=_collect_verify_queries,
+            clock=clock,
+            label="compose1",
         )
         meta.themes = [t.name for t in result.themes.themes]
 
         # Step 6: reflect -> supplement -> recompose, bounded loop with a
         # saturation stop (keep retrieving only while new papers keep arriving)
         if options.allow_supplement:
+            clock.mark("reflect")
             _emit(bus, StepStarted(step="reflect", title="反思与补充"))
             max_rounds = 2 if options.mode == RunMode.DEEP_REVIEW else 1
             rounds_run = 0
@@ -768,6 +818,8 @@ async def run_pipeline_async(
                     bus,
                     fetch_fulltext=options.fetch_fulltext,
                     on_supplement_queries=_collect_verify_queries,
+                    clock=clock,
+                    label=f"compose{rounds_run + 1}",
                 )
                 meta.themes = [t.name for t in result.themes.themes]
                 _emit(
@@ -793,9 +845,11 @@ async def run_pipeline_async(
             )
 
         # finalize
+        clock.mark("finalize")
         meta.review_path = result.review_path
         meta.citation_precision = round(result.precision, 3)
         persistence.save_json(run_dir, "meta.json", meta)
+        persistence.save_json(run_dir, "timings.json", clock.payload())
         _emit(
             bus,
             RunCompleted(
@@ -809,12 +863,16 @@ async def run_pipeline_async(
                     "claims": len(result.claims),
                     "references": len(result.table),
                     "citation_precision": meta.citation_precision,
+                    "seconds": clock.total(),
                 },
             ),
         )
         return meta
 
     except Exception as e:  # noqa: BLE001
+        clock.mark("failed")
+        with contextlib.suppress(Exception):
+            persistence.save_json(run_dir, "timings.json", clock.payload())
         _emit(bus, RunFailed(message=str(e), step="pipeline"))
         traceback.print_exc()
         raise
