@@ -57,7 +57,11 @@ authors, or numbering not in the list — a conclusion citing unknown work is wo
 
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
 _BOLD_TITLE_RE = re.compile(r"^\s{0,3}\*\*[^*\n]+\*\*\s*$")
-_TAIL_REFS_RE = re.compile(r"\n\s*(\*{0,2}references\*{0,2}|参考文献)\s*\n.*$", re.IGNORECASE)
+# DOTALL: a model-appended references block spans multiple lines — without it
+# only the first entry was stripped and the hallucinated rest survived.
+_TAIL_REFS_RE = re.compile(
+    r"\n\s*(\*{0,2}references\*{0,2}|参考文献)\s*\n.*$", re.IGNORECASE | re.DOTALL
+)
 _TERMINALS = "。．.!?！？；;”\"')]}】》…"
 
 # --- output language (settings.review_language: "en" | "zh") -----------------
