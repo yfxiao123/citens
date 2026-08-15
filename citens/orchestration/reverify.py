@@ -18,7 +18,7 @@ from citens import persistence
 from citens.agents import review_unsupported_claims, verify_claims
 from citens.events import EventBus, StepCompleted, StepStarted
 from citens.grounding import ChunkStore, CitationTable, parse_claims_from_review
-from citens.models import ExtractedPaper
+from citens.models import ExtractedPaper, Verdict
 from citens.orchestration.pipeline import _emit
 
 
@@ -84,22 +84,58 @@ def reverify(run_dir: str, bus: EventBus | None = None) -> dict:
          for c, r in zip(claims, ver_results, strict=False)],
     )
 
-    # defense pass over unsupported claims (now with better ground text)
+    # defense pass over unsupported claims (now with better ground text),
+    # then fold overturns into the final verdicts like the main pipeline
     unsupported = [r for r in ver_results if r.verdict.value == "unsupported"]
+    defense = []
     if unsupported:
         _emit(bus, StepStarted(step="defense", title="双向核验（辩护律师）"))
-        source_contexts = {}
         claims_by_text = {c.text: c for c in claims}
-        for i, r in enumerate(unsupported):
-            c = claims_by_text.get(r.claim_text)
-            pid = table.paper_id(c.citation_indices[0]) if c and c.citation_indices else ""
+        unsupported_claims = [claims_by_text[r.claim_text] for r in unsupported]
+        source_contexts = {}
+        for i, c in enumerate(unsupported_claims):
+            pid = table.paper_id(c.citation_indices[0]) if c.citation_indices else ""
             chunks = chunk_store.chunks_for(pid)
             source_contexts[i] = "\n\n".join(ch.text for ch in chunks[:3])
-        defense = review_unsupported_claims(
-            [c for c in claims if any(r.claim_text == c.text for r in unsupported)],
-            unsupported, source_contexts,
-        )
+        defense = review_unsupported_claims(unsupported_claims, unsupported, source_contexts)
         persistence.save_step(run_dir, "08_defense", defense)
+
+        by_text = {r.claim_text: r for r in ver_results}
+        for defense_review in defense:
+            if not defense_review["overturned"]:
+                continue
+            match = unsupported_claims[defense_review["claim_idx"]]
+            target = by_text.get(match.text)
+            if target is not None:
+                target.verdict = Verdict.PARTIAL
+                target.note = (
+                    f"{target.note} "
+                    f"[defense: {defense_review['defense_result'].get('rebuttal', '')[:200]}]"
+                ).strip()
+        verifiable = [r for r in ver_results if r.verdict.value != "unverifiable"]
+        if verifiable:
+            precision = (
+                sum(1 for r in verifiable if r.verdict.value in ("supported", "partial"))
+                / len(verifiable)
+            )
+        # rewrite artifacts with the post-defense verdicts
+        with open(ver_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {"citation_precision": round(precision, 3),
+                 "previous_precision": old_precision,
+                 "defense_overturned": sum(1 for d in defense if d["overturned"]),
+                 "results": [r.model_dump() for r in ver_results]},
+                f, ensure_ascii=False, indent=2,
+            )
+        persistence.save_json(
+            run_dir, "provenance.json",
+            [{"claim": c.text, "section": c.section,
+              "citations": [{"index": i, "label": table.label(i),
+                             "paper_id": table.paper_id(i)}
+                            for i in c.citation_indices],
+              "verdict": r.verdict.value, "verdict_note": r.note}
+             for c, r in zip(claims, ver_results, strict=False)],
+        )
 
     # refresh meta.json precision if the run ever wrote one
     meta_path = os.path.join(run_dir, "meta.json")

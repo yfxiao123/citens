@@ -63,6 +63,7 @@ from citens.models import (
     RunMode,
     SynthesisResult,
     ThemeStructure,
+    Verdict,
     VerificationResult,
 )
 from citens.ranking import quartile_histogram, rank_papers
@@ -291,10 +292,10 @@ def _compose(
         ver_results, precision = verify_claims(
             claims, table, chunk_store, on_progress=_verify_progress
         )
-        persistence.save_json(
-            run_dir,
-            "verification.json",
-            {
+        verifier_precision = precision
+
+        def _verification_payload() -> dict:
+            return {
                 "citation_precision": round(precision, 3),
                 "total_claims": len(claims),
                 "verifiable_claims": sum(
@@ -307,8 +308,9 @@ def _compose(
                     1 for r in ver_results if r.verdict.value == "unverifiable"
                 ),
                 "results": [r.model_dump() for r in ver_results],
-            },
-        )
+            }
+
+        persistence.save_json(run_dir, "verification.json", _verification_payload())
         _emit(bus, StepCompleted(step="verify", message=f"引用精度 {precision * 100:.0f}%"))
 
         # bidirectional verification: defense lawyer challenges unsupported verdicts
@@ -322,17 +324,43 @@ def _compose(
                 pid = table.paper_id(claim.citation_indices[0]) if claim.citation_indices else ""
                 chunks = chunk_store.chunks_for(pid)
                 source_contexts[i] = "\n\n".join(c.text for c in chunks[:3])
-            
+
             defense_reviews = review_unsupported_claims(claims, ver_results, source_contexts)
             overturned = sum(1 for r in defense_reviews if r["overturned"])
-            
+
+            # second read: an overturned verdict means the verifier misjudged
+            # the claim; downgrade conservatively to partial (defended is not
+            # the same as explicitly supported) and fold into the metric.
+            for defense_review in defense_reviews:
+                if defense_review["overturned"]:
+                    idx = defense_review["claim_idx"]
+                    if 0 <= idx < len(ver_results):
+                        ver_results[idx].verdict = Verdict.PARTIAL
+                        ver_results[idx].note = (
+                            f"{ver_results[idx].note} "
+                            f"[defense: {defense_review['defense_result'].get('rebuttal', '')[:200]}]"
+                        ).strip()
+            verifiable = [r for r in ver_results if r.verdict.value != "unverifiable"]
+            if verifiable:
+                precision = (
+                    sum(1 for r in verifiable if r.verdict.value in ("supported", "partial"))
+                    / len(verifiable)
+                )
+
+            payload = _verification_payload()
+            payload["verifier_precision"] = round(verifier_precision, 3)
+            payload["defense_overturned"] = overturned
+            persistence.save_json(run_dir, "verification.json", payload)
             persistence.save_step(run_dir, "08_defense", defense_reviews)
             _emit(
                 bus,
                 StepCompleted(
                     step="defense",
-                    message=f"辩护律师审查 {len(defense_reviews)} 条 unsupported，推翻 {overturned} 条"
-                )
+                    message=(
+                        f"辩护律师推翻 {overturned} 条 → 精度 "
+                        f"{verifier_precision * 100:.0f}% ⇒ {precision * 100:.0f}%"
+                    )
+                ),
             )
 
         # health monitoring: detect systematic biases
