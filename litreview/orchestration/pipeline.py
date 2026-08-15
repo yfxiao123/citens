@@ -363,7 +363,7 @@ async def _supplement_search(
 
         papers = [Paper(**p) for p in papers]
     papers = blend_pool(papers, cap=8)
-    scored = filter_papers(papers, topic)
+    scored = filter_papers(papers, topic, filters=options.filters)
     fresh = [p for p in scored if p.id not in existing_ids][: options.max_supplement_papers]
     return fresh
 
@@ -399,9 +399,16 @@ async def run_pipeline_async(
 
         # Step 1: keywords
         _emit(bus, StepStarted(step="planner", title="生成检索关键词"))
-        keywords = generate_keywords(topic)
+        if options.filters:
+            persistence.save_step(run_dir, "00_filters", options.filters)
+        keywords = generate_keywords(topic, filters=options.filters)
         meta.keywords = keywords
         persistence.save_step(run_dir, "01_keywords", keywords)
+        if options.filters:
+            _emit(
+                bus,
+                StepProgress(step="planner", message=f"已应用 {len(options.filters)} 条澄清约束"),
+            )
         _emit(bus, StepCompleted(step="planner", message=f"{len(keywords)} 条关键词"))
 
         # Step 2: search (iterative — refine if first round is thin)
@@ -451,7 +458,9 @@ async def run_pipeline_async(
         def _filter_progress(i, total, title):
             _emit(bus, StepProgress(step="filter", message=title, current=i, total=total))
 
-        scored, filter_log = filter_papers(papers, topic, on_progress=_filter_progress, return_log=True)
+        scored, filter_log = filter_papers(
+            papers, topic, filters=options.filters, on_progress=_filter_progress, return_log=True
+        )
         # venue-aware composite ranking (relevance x citations x SJR quartile),
         # applied when deciding which papers survive the cap
         scored = rank_papers(scored)
@@ -492,7 +501,7 @@ async def run_pipeline_async(
                     StepProgress(step="snowball", message=f"滚雪球发现 {len(snowballed)} 篇候选"),
                 )
                 # Filter the snowballed papers too
-                snow_scored = filter_papers(snowballed, topic)
+                snow_scored = filter_papers(snowballed, topic, filters=options.filters)
                 snow_scored = rank_papers(snow_scored)
                 # Only add papers that pass quality bar and aren't already in
                 new_papers = [

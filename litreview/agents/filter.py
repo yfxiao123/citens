@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from litreview.agents.scoping import filters_block, min_year_from_filters
 from litreview.llm import chat_json
 from litreview.models import Paper, ScoredPaper
 
@@ -24,6 +25,7 @@ def filter_papers(
     papers: list[Paper],
     topic: str,
     *,
+    filters: dict | None = None,
     on_progress=None,
     return_log: bool = False,
 ) -> list[ScoredPaper] | tuple[list[ScoredPaper], list[dict]]:
@@ -32,6 +34,8 @@ def filter_papers(
     Args:
         papers: List of candidate papers
         topic: Research topic
+        filters: Pre-run clarification answers — appended to the scoring
+            prompt, plus a deterministic year floor (see scoping.py)
         on_progress: Progress callback
         return_log: If True, return (passed_papers, filter_log) where filter_log
                     contains detailed exclusion reasons for all papers
@@ -39,6 +43,8 @@ def filter_papers(
     Returns:
         List of ScoredPaper with score >= 3, or (passed, log) if return_log=True
     """
+    constraints = filters_block(filters)
+    min_year = min_year_from_filters(filters)
     scored: list[ScoredPaper] = []
     filter_log: list[dict] = []
     total = len(papers)
@@ -46,26 +52,33 @@ def filter_papers(
         if on_progress:
             on_progress(i + 1, total, paper.title[:50])
         user_prompt = (
-            f"研究主题 / Topic: {topic}\n\n"
-            f"论文信息 / Paper:\n{paper.brief()}\n\n"
+            f"研究主题 / Topic: {topic}\n"
+            f"{constraints}"
+            f"\n论文信息 / Paper:\n{paper.brief()}\n\n"
             "Rate relevance and justify."
         )
         try:
             result = chat_json(SYSTEM_PROMPT, user_prompt)
             score = int(result.get("score", 1))
-            reason = result.get("reason", "")
+            reason = str(result.get("reason", ""))
         except Exception as e:  # noqa: BLE001
             print(f"    score failed: {e}")
             score = 2
             reason = "scoring error, defaulting low"
-        
+
+        # Deterministic enforcement of a stated timeframe: an LLM might let a
+        # 1998 paper slip past "近5年"; the parse never does.
+        if min_year and paper.year and paper.year < min_year:
+            score = min(score, 1)
+            reason = f"outside user timeframe (< {min_year}); {reason}".strip()
+
         scored_paper = ScoredPaper(
             **paper.model_dump(exclude={"id"}),
             relevance_score=score,
             filter_reason=reason,
         )
         scored.append(scored_paper)
-        
+
         # Log the decision
         filter_log.append({
             "title": paper.title,
@@ -76,9 +89,9 @@ def filter_papers(
             "reason": reason,
             "passed": score >= 3,
         })
-    
+
     passed = [p for p in scored if p.relevance_score >= 3]
-    
+
     if return_log:
         return passed, filter_log
     return passed

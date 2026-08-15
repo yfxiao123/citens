@@ -13,6 +13,7 @@ v2 adds:
 
 from __future__ import annotations
 
+from litreview.agents.scoping import filters_block
 from litreview.llm import chat_json
 
 SYSTEM_PROMPT = """You are an academic literature-retrieval expert. Given a research topic, \
@@ -57,11 +58,19 @@ Output JSON:
 "reasoning": "why these queries will find what's missing"}"""
 
 
-def generate_keywords(topic: str) -> list[str]:
-    """Return 6-10 English search queries covering all topic dimensions."""
+def generate_keywords(topic: str, filters: dict | None = None) -> list[str]:
+    """Return 6-10 English search queries covering all topic dimensions.
+
+    Args:
+        topic: Research topic (any language; queries are always English).
+        filters: Pre-run clarification answers ({question_id: answer}) —
+            rendered as constraints the queries must honor (sub-focus,
+            timeframe, document type, ...).
+    """
     user_prompt = (
-        f"研究主题 / Topic: {topic}\n\n"
-        "Generate 6-10 diverse English search queries covering methods, "
+        f"研究主题 / Topic: {topic}\n"
+        f"{filters_block(filters)}"
+        "\nGenerate 6-10 diverse English search queries covering methods, "
         "applications, theory, empirical findings, and surveys. "
         "(Translate the topic first if it is not English.)"
     )
