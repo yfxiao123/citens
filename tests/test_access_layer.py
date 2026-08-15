@@ -9,11 +9,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from litreview.config import settings  # noqa: E402
-from litreview.grounding.fetchlist import suggested_filename, write_fetch_list  # noqa: E402
-from litreview.grounding.fulltext import _local_pdf, pdf_slugs, slugify  # noqa: E402
-from litreview.models import Paper  # noqa: E402
-from litreview.net import rewrite_url  # noqa: E402
+from citens.config import settings  # noqa: E402
+from citens.grounding.fetchlist import suggested_filename, write_fetch_list  # noqa: E402
+from citens.grounding.fulltext import _local_pdf, pdf_slugs, slugify  # noqa: E402
+from citens.models import Paper  # noqa: E402
+from citens.net import rewrite_url  # noqa: E402
 
 
 def make_paper(**kw) -> Paper:

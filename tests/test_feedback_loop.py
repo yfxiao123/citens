@@ -9,10 +9,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import litreview.agents.audit as audit_mod  # noqa: E402
-import litreview.agents.clarify as clarify_mod  # noqa: E402
-import litreview.agents.verifier_trigger as vt_mod  # noqa: E402
-from litreview.models import Claim, Verdict, VerificationResult  # noqa: E402
+import citens.agents.audit as audit_mod  # noqa: E402
+import citens.agents.clarify as clarify_mod  # noqa: E402
+import citens.agents.verifier_trigger as vt_mod  # noqa: E402
+from citens.models import Claim, Verdict, VerificationResult  # noqa: E402
 
 # --- absence audit ---------------------------------------------------------
 

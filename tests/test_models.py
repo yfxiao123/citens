@@ -1,6 +1,6 @@
 """Model-layer regression tests (dedup, normalization)."""
 
-from litreview.models import Paper
+from citens.models import Paper
 
 
 def test_authors_dedup_preserves_order():

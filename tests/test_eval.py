@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from litreview.eval import collect_metrics, render_table
+from citens.eval import collect_metrics, render_table
 
 
 def _make_run(tmp_path, *, with_verification=True, with_meta=True):

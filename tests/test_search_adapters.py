@@ -11,10 +11,10 @@ import httpx
 import pytest
 import respx
 
-from litreview.models import Paper
-from litreview.search.crossref import CrossrefSearcher
-from litreview.search.openalex import OpenAlexSearcher
-from litreview.search.semantic_scholar import SemanticScholarSearcher
+from citens.models import Paper
+from citens.search.crossref import CrossrefSearcher
+from citens.search.openalex import OpenAlexSearcher
+from citens.search.semantic_scholar import SemanticScholarSearcher
 
 OPENALEX_WORK = {
     "id": "https://openalex.org/W123",
@@ -135,7 +135,7 @@ async def test_crossref_contract():
 async def test_multi_source_search_gathers_and_dedups():
     """search_papers() merges sources and dedups by DOI, keeping the
     highest-cited variant of each."""
-    from litreview.search.base import search_papers
+    from citens.search.base import search_papers
 
     respx.get("https://api.openalex.org/works").mock(
         return_value=httpx.Response(200, json={"results": [OPENALEX_WORK]})

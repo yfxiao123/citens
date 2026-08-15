@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from litreview.agents.scoping import filters_block, min_year_from_filters
+from citens.agents.scoping import filters_block, min_year_from_filters
 
 
 def test_filters_block_renders_answers():

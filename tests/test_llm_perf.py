@@ -10,8 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import litreview.llm as llm  # noqa: E402
-from litreview.config import settings  # noqa: E402
+import citens.llm as llm  # noqa: E402
+from citens.config import settings  # noqa: E402
 
 
 class FakeBackend:

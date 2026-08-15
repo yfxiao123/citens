@@ -5,7 +5,7 @@ Thanks for considering a contribution!
 ## Development setup
 
 ```bash
-git clone <repo> && cd litreview
+git clone <repo> && cd citens
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev,api,pdf]"
 cp .env.example .env    # then fill in your LLM key
@@ -14,7 +14,7 @@ cp .env.example .env    # then fill in your LLM key
 ## Before submitting
 
 ```bash
-ruff check litreview tests     # lint (line length 100)
+ruff check citens tests     # lint (line length 100)
 pytest tests/ -q               # unit tests — no network, no LLM calls
 ```
 
@@ -26,7 +26,7 @@ anything that touches the network or an LLM).
 - **Every claim the writer produces must stay grounded.** If you touch the
   writer or verifier, rerun an end-to-end topic and include the resulting
   citation precision in your PR description.
-- **Search sources are pluggable** (`litreview/search/`): subclass
+- **Search sources are pluggable** (`citens/search/`): subclass
   `SearchSource`, `@register` it, and add a test with a mocked HTTP response.
 - **No secrets in code or tests.** Keys live in `.env` only.
 - Keep the pipeline runnable at every commit — avoid landing half-stages.
@@ -41,4 +41,4 @@ without a reproducer will be asked for one.
 
 By contributing you agree that your contributions are licensed under the MIT
 license (see [LICENSE](LICENSE)). The SCImago SJR dataset fetched by
-`litreview sjr` is CC BY-NC and must never be committed to the repository.
+`citens sjr` is CC BY-NC and must never be committed to the repository.

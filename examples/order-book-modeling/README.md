@@ -21,8 +21,8 @@ misread the claim's referent).
 Regenerate your own with:
 
 ```bash
-litreview run "limit order book modeling" --mode deep_review -n 13
+citens run "limit order book modeling" --mode deep_review -n 13
 ```
 
 and summarize a set of runs into a comparison table with
-`litreview eval --from-runs "runs/<glob>"`.
+`citens eval --from-runs "runs/<glob>"`.

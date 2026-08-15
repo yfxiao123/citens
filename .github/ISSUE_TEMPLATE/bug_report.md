@@ -10,7 +10,7 @@ labels: bug
 - Python version:
 - OS:
 - LLM provider/model:
-- SJR data present (`litreview sjr` run?): yes/no
+- SJR data present (`citens sjr` run?): yes/no
 - Papers dropped in `PAPERS_DIR`?: yes/no
 
 **What happened**

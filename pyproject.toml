@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "litreview"
+name = "citens"
 version = "0.1.0"
 description = "An open-source literature-review agent that writes critical, citation-grounded surveys — every claim verifiable against its source."
 readme = "README.md"
@@ -57,7 +57,7 @@ dev = [
 ]
 
 [project.scripts]
-litreview = "litreview.cli:app"
+citens = "citens.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/yfxiao123/citens"
@@ -65,7 +65,7 @@ Repository = "https://github.com/yfxiao123/citens"
 Issues = "https://github.com/yfxiao123/citens/issues"
 
 [tool.setuptools.packages.find]
-include = ["litreview*"]
+include = ["citens*"]
 exclude = ["tests*", "resource*", "examples*"]
 
 [tool.ruff]
@@ -73,7 +73,7 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint.per-file-ignores]
-"litreview/cli.py" = ["B008"]  # Typer idiom: Argument/Option as parameter defaults
+"citens/cli.py" = ["B008"]  # Typer idiom: Argument/Option as parameter defaults
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

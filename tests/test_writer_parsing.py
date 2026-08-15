@@ -5,7 +5,7 @@ output (duplicate headings, model-hallucinated reference lists, mid-sentence
 truncations), yet none of it was covered before.
 """
 
-from litreview.agents.writer import (
+from citens.agents.writer import (
     _complete,
     _strip_leading_headings,
     _strip_tail_references,

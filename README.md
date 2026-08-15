@@ -1,11 +1,11 @@
-# CiteLens (litreview)
+# CiteLens (citens)
 
 **An open-source literature-review agent that writes critical, citation-grounded surveys — every claim verifiable against its source.**
 
 Give it a topic. It plans English search queries, fans out over arXiv / Semantic Scholar / OpenAlex / Crossref, reranks the pool by **abstract relevance × citations × journal quartile (SCImago SJR)**, extracts structured findings, then writes a survey with numbered claims — and **verifies each claim against the source text**, reporting a citation-precision score instead of hoping for the best.
 
 ```
-litreview run 订单簿建模 -n 8
+citens run 订单簿建模 -n 8
 ...
 ✓ 8 papers · 3 themes · 70 cited claims
 ✓ citation precision 73%   (3/8 papers grounded on full text)
@@ -66,8 +66,8 @@ runs/<topic>-<timestamp>/
 ```bash
 pip install -e ".[pdf]"            # or ".[api,pdf]" for the web UI
 cp .env.example .env               # fill in LLM_API_KEY (OpenAI-compatible)
-litreview sjr                      # one-time: fetch SCImago journal ranks
-litreview run "limit order book modeling" -n 8
+citens sjr                      # one-time: fetch SCImago journal ranks
+citens run "limit order book modeling" -n 8
 ```
 
 Works with any OpenAI-compatible backend — DeepSeek (`LLM_API_BASE=https://api.deepseek.com/v1`), Ollama, OpenRouter, vLLM, Groq — or native Anthropic/Gemini via the `[multi]` extra (LiteLLM).
@@ -76,11 +76,11 @@ Web UI (SSE streaming, live step progress, precision panel):
 
 ```bash
 pip install -e ".[api,pdf]"
-uvicorn litreview.api.app:app --port 8000     # open http://localhost:8000
+uvicorn citens.api.app:app --port 8000     # open http://localhost:8000
 # or: docker compose up
 ```
 
-CLI reference: `litreview run | sources | sjr | version` (`litreview --help`).
+CLI reference: `citens run | sources | sjr | version` (`citens --help`).
 
 ## The access layer
 
@@ -100,7 +100,7 @@ Retrieval order decides which papers survive. Ranking on raw citations starves f
 rank = 0.6 · (relevance/5)  +  0.2 · min(log10(1+cites)/3, 1)  +  0.2 · venue(SJR quartile)
 ```
 
-`litreview sjr` fetches the SCImago Journal Rank dataset (official field-normalized quartiles via a GitHub mirror; a no-dependency CSV fallback approximates by percentile). The SJR data is **CC BY-NC**, so it's downloaded on demand — never committed or redistributed. Without it, the venue factor is neutral and everything else still works. Every run stores its full ranking breakdown (`steps/03c_ranking.json`) — explainable by construction.
+`citens sjr` fetches the SCImago Journal Rank dataset (official field-normalized quartiles via a GitHub mirror; a no-dependency CSV fallback approximates by percentile). The SJR data is **CC BY-NC**, so it's downloaded on demand — never committed or redistributed. Without it, the venue factor is neutral and everything else still works. Every run stores its full ranking breakdown (`steps/03c_ranking.json`) — explainable by construction.
 
 ## Citation precision, honestly
 
@@ -118,8 +118,8 @@ The number is computed by an LLM-as-judge with the cited paper's retrieved chunk
 Reproduce it yourself — the eval harness runs a topic set (or summarizes existing runs) and writes a comparison table:
 
 ```bash
-litreview eval --from-runs "runs/*"          # offline: table from existing runs
-litreview eval "limit order book modeling" -n 13   # live: run + collect
+citens eval --from-runs "runs/*"          # offline: table from existing runs
+citens eval "limit order book modeling" -n 13   # live: run + collect
 ```
 
 A full example run (review, verdicts, comparison matrix, fetch list) lives in [`examples/order-book-modeling/`](examples/order-book-modeling/).
@@ -127,7 +127,7 @@ A full example run (review, verdicts, comparison matrix, fetch list) lives in [`
 ## Project layout
 
 ```
-litreview/
+citens/
 ├── cli.py                     # Typer CLI
 ├── api/                       # FastAPI + SSE + static UI
 ├── orchestration/pipeline.py  # stages, events, run-dir persistence
@@ -150,13 +150,13 @@ litreview/
 
 ## License
 
-MIT. The runtime-fetched SCImago dataset is CC BY-NC (attributed to SCImago Lab; fetched by `litreview sjr`, never redistributed here).
+MIT. The runtime-fetched SCImago dataset is CC BY-NC (attributed to SCImago Lab; fetched by `citens sjr`, never redistributed here).
 
 ---
 
 ## 中文简介
 
-**CiteLens（包名 `litreview`）**：输入一个研究主题，自动完成「关键词规划 → 四源并发检索（arXiv / Semantic Scholar / OpenAlex / Crossref）→ 期刊分区×引用×相关性的复合排序 → LLM 筛选 → 摘要交叉补全 → 结构化抽取 → 主题组织 → 批判性综合（共识/矛盾/空白）→ 带引用撰写 → 逐条核验 → 反思补充检索」，产出一份**每条论断都可回溯到原文**的综述。
+**CiteLens（包名 `citens`）**：输入一个研究主题，自动完成「关键词规划 → 四源并发检索（arXiv / Semantic Scholar / OpenAlex / Crossref）→ 期刊分区×引用×相关性的复合排序 → LLM 筛选 → 摘要交叉补全 → 结构化抽取 → 主题组织 → 批判性综合（共识/矛盾/空白）→ 带引用撰写 → 逐条核验 → 反思补充检索」，产出一份**每条论断都可回溯到原文**的综述。
 
 与“摘要拼接器”们的三点不同：
 
@@ -164,6 +164,6 @@ MIT. The runtime-fetched SCImago dataset is CC BY-NC (attributed to SCImago Lab;
 2. **批判立场**：综合 agent 显式提取跨论文的共识、矛盾与研究空白；反思 agent 发现覆盖缺口后补检并重写——不是罗列，是论证。
 3. **你的权限就是 agent 的权限**：校园代理/EZproxy 重写/手动投递 PDF 三档接入（见 [The access layer](#the-access-layer)），对拿不到全文的论文诚实标注，绝不冒充“已核验”。
 
-快速开始：`pip install -e ".[pdf]"` → 填 `.env` → `litreview sjr` → `litreview run 主题 -n 8`；Web 界面 `uvicorn litreview.api.app:app`。
+快速开始：`pip install -e ".[pdf]"` → 填 `.env` → `citens sjr` → `citens run 主题 -n 8`；Web 界面 `uvicorn citens.api.app:app`。
 
 示例产物见 [`examples/order-book-modeling/`](examples/order-book-modeling/)（主题「订单簿建模」，8 篇论文，70 条论断，引用精度 73%）。

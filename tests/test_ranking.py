@@ -8,9 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from litreview.config import settings  # noqa: E402
-from litreview.models import ScoredPaper  # noqa: E402
-from litreview.ranking import (  # noqa: E402
+from citens.config import settings  # noqa: E402
+from citens.models import ScoredPaper  # noqa: E402
+from citens.ranking import (  # noqa: E402
     SJRIndex,
     citation_factor,
     quartile_histogram,
@@ -98,7 +98,7 @@ def test_scores():
 def test_rank_papers_without_sjr_data(tmp_path, monkeypatch):
     # no SJR file -> venue factor neutral, ranking still works
     monkeypatch.setattr(settings, "sjr_csv_path", str(tmp_path / "missing.csv"))
-    import litreview.ranking as rk
+    import citens.ranking as rk
 
     rk._index, rk._index_loaded = None, False  # reset singleton
 
@@ -114,7 +114,7 @@ def test_rank_papers_without_sjr_data(tmp_path, monkeypatch):
 
 def test_rank_papers_venue_boost(tmp_path, monkeypatch):
     idx = _load_index(tmp_path)
-    import litreview.ranking as rk
+    import citens.ranking as rk
 
     monkeypatch.setattr(rk, "get_sjr_index", lambda: idx)
     preprint = make_p(relevance_score=5, citation_count=500, title="arXiv preprint", doi="10.1/p")

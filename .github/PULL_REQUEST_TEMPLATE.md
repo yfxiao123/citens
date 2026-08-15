@@ -4,7 +4,7 @@
 
 ## Verification
 
-- [ ] `ruff check litreview tests` passes
+- [ ] `ruff check citens tests` passes
 - [ ] `pytest tests/ -q` passes
 - [ ] New behavior covered by a test
 - [ ] If writer/verifier touched: end-to-end run citation precision (before → after)

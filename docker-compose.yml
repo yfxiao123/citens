@@ -1,5 +1,5 @@
 services:
-  litreview:
+  citens:
     build: .
     ports:
       - "8000:8000"
@@ -8,4 +8,4 @@ services:
     volumes:
       - ./runs:/app/runs          # generated reviews & artifacts
       - ./papers:/app/papers      # drop your paywalled PDFs here (see fetch_list.md)
-      - ./data:/app/data          # SJR dataset (litreview sjr) & cache
+      - ./data:/app/data          # SJR dataset (citens sjr) & cache

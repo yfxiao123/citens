@@ -4,12 +4,12 @@ The [n] in prose, the references list, the BibTeX and the verifier verdicts
 all key off CitationTable; drift here silently corrupts the trust story.
 """
 
-from litreview.grounding.citations import (
+from citens.grounding.citations import (
     CitationTable,
     build_provenance,
     parse_claims_from_review,
 )
-from litreview.models import Paper, Verdict, VerificationResult
+from citens.models import Paper, Verdict, VerificationResult
 
 REVIEW = """# Topic
 

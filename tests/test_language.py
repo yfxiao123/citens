@@ -3,8 +3,8 @@ and heading localization (no more accidental zh-intro/en-body mix)."""
 
 import pytest
 
-from litreview.agents import writer
-from litreview.config import settings
+from citens.agents import writer
+from citens.config import settings
 
 
 @pytest.fixture()
