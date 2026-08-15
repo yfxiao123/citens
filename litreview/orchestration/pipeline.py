@@ -350,8 +350,13 @@ async def _supplement_search(
     existing_ids: set[str],
     options: RunOptions,
     topic: str,
-) -> list:
-    """Gap-targeted supplementary retrieval -> filter -> new papers only."""
+) -> tuple[list, bool]:
+    """Gap-targeted supplementary retrieval -> filter -> new papers only.
+
+    Returns (fresh_papers, all_known): all_known=True means relevant papers
+    WERE found but every one is already in the pool (typical on cache replay
+    after the pool changed) — different from a genuine no-hit.
+    """
     cache_key = {"keywords": keywords, "max_results": 20, "sources": options.sources, "supplement": True}
     papers = cache.get("search", cache_key) if options.use_cache else None
     if papers is None:
@@ -365,7 +370,8 @@ async def _supplement_search(
     papers = blend_pool(papers, cap=8)
     scored = filter_papers(papers, topic, filters=options.filters)
     fresh = [p for p in scored if p.id not in existing_ids][: options.max_supplement_papers]
-    return fresh
+    all_known = len(fresh) == 0 and len(scored) > 0
+    return fresh, all_known
 
 
 async def run_pipeline_async(
@@ -616,7 +622,7 @@ async def run_pipeline_async(
                     bus,
                     StepProgress(step="reflect", message="补充检索: " + ", ".join(supplement_queries)),
                 )
-                fresh = await _supplement_search(
+                fresh, all_known = await _supplement_search(
                     supplement_queries, {p.id for p in extracted}, options, topic
                 )
                 if fresh:
@@ -646,7 +652,12 @@ async def run_pipeline_async(
                         StepCompleted(step="reflect", message=f"补充 {len(new_extracted)} 篇并重新综合完成"),
                     )
                 else:
-                    _emit(bus, StepCompleted(step="reflect", message="无新论文，跳过重新综合"))
+                    msg = (
+                        "检索命中但均已在池内（可能是缓存回放），跳过重新综合"
+                        if all_known
+                        else "无新论文，跳过重新综合"
+                    )
+                    _emit(bus, StepCompleted(step="reflect", message=msg))
             else:
                 _emit(
                     bus,
