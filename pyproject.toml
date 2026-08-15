@@ -60,9 +60,9 @@ dev = [
 litreview = "litreview.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/OWNER/citens"
-Repository = "https://github.com/OWNER/citens"
-Issues = "https://github.com/OWNER/citens/issues"
+Homepage = "https://github.com/yfxiao123/citens"
+Repository = "https://github.com/yfxiao123/citens"
+Issues = "https://github.com/yfxiao123/citens/issues"
 
 [tool.setuptools.packages.find]
 include = ["litreview*"]
