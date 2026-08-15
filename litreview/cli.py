@@ -68,6 +68,9 @@ def run(
     n: int | None = typer.Option(None, "-n", "--max-papers", help="最终保留论文数"),
     max_results: int | None = typer.Option(None, "--max-results", help="候选池目标数"),
     sources: str | None = typer.Option(None, "--sources", help="逗号分隔检索源"),
+    mode: str | None = typer.Option(
+        None, "--mode", help="运行模式: quick_scan/deep_review/interactive (默认自动检测)"
+    ),
     no_cache: bool = typer.Option(False, "--no-cache", help="禁用缓存"),
     no_fulltext: bool = typer.Option(
         False, "--no-fulltext", help="不获取全文（仅用摘要溯源，精度较低）"
@@ -77,8 +80,19 @@ def run(
     ),
 ):
     """Generate a literature review for TOPIC."""
+    from litreview.models import RunMode
+
     topic_str = " ".join(topic) if topic else "大语言模型在金融领域的应用"
     src_list = [s.strip() for s in sources.split(",")] if sources else None
+    
+    # Parse mode if provided
+    run_mode = None
+    if mode:
+        try:
+            run_mode = RunMode(mode)
+        except ValueError:
+            console.print(f"[red]无效的 mode: {mode}，可选值: quick_scan/deep_review/interactive[/]")
+            raise typer.Exit(code=1) from None
 
     bus = EventBus()
     bus.subscribe(_make_rich_handler(console))
@@ -88,6 +102,7 @@ def run(
         sources=src_list,
         use_cache=not no_cache,
         fetch_fulltext=not no_fulltext,
+        mode=run_mode,
     )
     # pre-run clarification (interactive) — shape the search before it starts
     if not no_clarify:

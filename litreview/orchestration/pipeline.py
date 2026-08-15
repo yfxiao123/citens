@@ -21,16 +21,21 @@ from dataclasses import dataclass, field
 from litreview import cache, persistence
 from litreview.agents import (
     audit_coverage,
+    check_health,
+    detect_intent,
     extract_papers,
     filter_papers,
     generate_keywords,
     missing_to_queries,
     organize_themes,
     reflect,
+    review_unsupported_claims,
     synthesize,
     verify_claims,
     write_review_body,
 )
+from litreview.agents.planner import refine_queries
+from litreview.agents.quality import build_comparison_matrix, render_comparison_md
 from litreview.config import settings
 from litreview.events import (
     Event,
@@ -50,9 +55,16 @@ from litreview.grounding import (
     parse_claims_from_review,
     write_fetch_list,
 )
-from litreview.models import ExtractedPaper, RunMeta, ThemeStructure
+from litreview.models import (
+    ClaimIntentManifest,
+    ExtractedPaper,
+    RunMeta,
+    RunMode,
+    ThemeStructure,
+)
 from litreview.ranking import quartile_histogram, rank_papers
 from litreview.search import blend_pool, search_papers
+from litreview.search.snowball import snowball
 
 
 @dataclass
@@ -67,6 +79,7 @@ class RunOptions:
     enrich_abstracts: bool = True
     extra: dict = field(default_factory=dict)
     filters: dict = field(default_factory=dict)  # pre-run clarifications (see clarify.py)
+    mode: RunMode | None = None  # adaptive mode (auto-detected if None)
 
     def resolved_max_results(self) -> int:
         return self.max_results or settings.default_max_results
@@ -197,6 +210,36 @@ def _compose(
         StepCompleted(step="write", message=f"综述生成完成 · {len(claims)} 条带引用论断"),
     )
 
+    # claim intent manifest: map claims to synthesis intents
+    intent_to_claims = {}
+    for i, claim in enumerate(claims):
+        # Each claim implicitly supports one of the synthesis themes
+        # For now, use a simple heuristic: map to the first consensus item mentioned
+        for j, consensus in enumerate(synthesis.consensus):
+            if any(word.lower() in claim.text.lower() for word in consensus.split()[:3]):
+                intent_key = f"consensus_{j}"
+                if intent_key not in intent_to_claims:
+                    intent_to_claims[intent_key] = []
+                intent_to_claims[intent_key].append(i)
+                break
+        else:
+            # Default to gaps or contradictions if no consensus match
+            if synthesis.gaps:
+                intent_key = "gap_0"
+            elif synthesis.contradictions:
+                intent_key = "contradiction_0"
+            else:
+                intent_key = "general"
+            if intent_key not in intent_to_claims:
+                intent_to_claims[intent_key] = []
+            intent_to_claims[intent_key].append(i)
+    
+    claim_manifest = ClaimIntentManifest(
+        intents=synthesis.consensus + synthesis.gaps + synthesis.contradictions,
+        intent_to_claims=intent_to_claims
+    )
+    persistence.save_step(run_dir, "07_claim_manifest", claim_manifest.model_dump())
+
     # verify (citation precision)
     ver_results = []
     precision = 0.0
@@ -231,6 +274,46 @@ def _compose(
             },
         )
         _emit(bus, StepCompleted(step="verify", message=f"引用精度 {precision * 100:.0f}%"))
+
+        # bidirectional verification: defense lawyer challenges unsupported verdicts
+        unsupported_count = sum(1 for r in ver_results if r.verdict.value == "unsupported")
+        if unsupported_count > 0:
+            _emit(bus, StepStarted(step="defense", title="双向核验（辩护律师）"))
+            source_contexts = {}
+            for i, claim in enumerate(claims):
+                chunks = chunk_store.chunks_for(claim.citation_indices[0] if claim.citation_indices else "")
+                source_contexts[i] = "\n\n".join(c.text for c in chunks[:3])
+            
+            defense_reviews = review_unsupported_claims(claims, ver_results, source_contexts)
+            overturned = sum(1 for r in defense_reviews if r["overturned"])
+            
+            persistence.save_step(run_dir, "08_defense", defense_reviews)
+            _emit(
+                bus,
+                StepCompleted(
+                    step="defense",
+                    message=f"辩护律师审查 {len(defense_reviews)} 条 unsupported，推翻 {overturned} 条"
+                )
+            )
+
+        # health monitoring: detect systematic biases
+        _emit(bus, StepStarted(step="health", title="对话健康监测"))
+        theme_paper_counts = {theme.name: len(theme.paper_indices) for theme in themes.themes}
+        absence_audit = audit_coverage([p.title for p in extracted])
+        health_report = check_health(synthesis, ver_results, absence_audit, theme_paper_counts)
+        persistence.save_step(run_dir, "08_health", health_report)
+        
+        issues = health_report.get("issues", [])
+        if issues:
+            _emit(
+                bus,
+                StepCompleted(
+                    step="health",
+                    message=f"检测到 {len(issues)} 个系统性偏差: {', '.join(issues)}"
+                )
+            )
+        else:
+            _emit(bus, StepCompleted(step="health", message="管线健康，未检测到系统性偏差"))
 
         # verifier feedback -> targeted supplementary retrieval for
         # unsupported claims (the "unsupported means missing evidence" loop)
@@ -299,6 +382,20 @@ async def run_pipeline_async(
     _emit(bus, RunStarted(topic=topic))
 
     try:
+        # Step 0: intent detection (auto-detect mode if not specified)
+        if options.mode is None:
+            _emit(bus, StepStarted(step="intent", title="检测用户意图"))
+            mode_str = detect_intent(topic, options.filters)
+            options.mode = RunMode(mode_str)
+            persistence.save_step(run_dir, "00_intent", {"mode": mode_str})
+            _emit(bus, StepCompleted(step="intent", message=f"运行模式: {mode_str}"))
+        
+        # Apply mode-specific defaults
+        if options.mode == RunMode.QUICK_SCAN:
+            options.allow_supplement = False  # skip reflection for quick scans
+            if options.max_papers is None:
+                options.max_papers = 5  # fewer papers for quick overview
+
         # Step 1: keywords
         _emit(bus, StepStarted(step="planner", title="生成检索关键词"))
         keywords = generate_keywords(topic)
@@ -306,7 +403,7 @@ async def run_pipeline_async(
         persistence.save_step(run_dir, "01_keywords", keywords)
         _emit(bus, StepCompleted(step="planner", message=f"{len(keywords)} 条关键词"))
 
-        # Step 2: search
+        # Step 2: search (iterative — refine if first round is thin)
         _emit(bus, StepStarted(step="search", title="检索论文"))
         cache_key = {"keywords": keywords, "max_results": max_results, "sources": options.sources}
         papers = cache.get("search", cache_key) if options.use_cache else None
@@ -318,6 +415,29 @@ async def run_pipeline_async(
             from litreview.models import Paper
 
             papers = [Paper(**p) for p in papers]
+
+        # Iterative refinement: if pool is thin, refine queries and search again
+        min_pool = max_papers * 2 if max_papers else 15
+        if len(papers) < min_pool and options.mode != RunMode.QUICK_SCAN:
+            _emit(
+                bus,
+                StepProgress(step="search", message=f"首轮 {len(papers)} 篇不足，迭代扩展检索…"),
+            )
+            found_titles = [p.title for p in papers[:10]]
+            refined = refine_queries(topic, keywords, found_titles, known_gaps=[])
+            if refined:
+                _emit(
+                    bus,
+                    StepProgress(step="search", message=f"补充查询: {', '.join(refined[:3])}"),
+                )
+                more = await search_papers(refined, max_results=min(max_results, 30), sources=options.sources)
+                # Merge and deduplicate
+                from litreview.search import deduplicate
+
+                papers = deduplicate(papers + more)
+                keywords = keywords + refined  # track all queries used
+                meta.keywords = keywords
+
         if max_papers:
             papers = blend_pool(papers, cap=max(max_papers * 3, 12))
         meta.total_papers = len(papers)
@@ -330,7 +450,7 @@ async def run_pipeline_async(
         def _filter_progress(i, total, title):
             _emit(bus, StepProgress(step="filter", message=title, current=i, total=total))
 
-        scored = filter_papers(papers, topic, on_progress=_filter_progress)
+        scored, filter_log = filter_papers(papers, topic, on_progress=_filter_progress, return_log=True)
         # venue-aware composite ranking (relevance x citations x SJR quartile),
         # applied when deciding which papers survive the cap
         scored = rank_papers(scored)
@@ -349,6 +469,8 @@ async def run_pipeline_async(
                 for p in scored
             ],
         )
+        # Save filter log with exclusion reasons
+        persistence.save_step(run_dir, "03_filter_log", filter_log)
         if max_papers and len(scored) > max_papers:
             scored = scored[:max_papers]
         meta.filtered_papers = len(scored)
@@ -356,6 +478,43 @@ async def run_pipeline_async(
         hist = quartile_histogram(scored)
         hist_msg = " · ".join(f"{k}:{v}" for k, v in sorted(hist.items()))
         _emit(bus, StepCompleted(step="filter", message=f"{len(scored)} 篇通过（{hist_msg}）"))
+
+        # Step 3.2: citation snowballing — expand pool via refs/citations of top papers
+        if options.mode != RunMode.QUICK_SCAN:
+            _emit(bus, StepStarted(step="snowball", title="引用滚雪球"))
+            top_seeds = [p for p in scored[:3] if p.doi]
+            existing = {p.id for p in scored}
+            snowballed = await snowball(top_seeds, existing, limit_per_paper=6)
+            if snowballed:
+                _emit(
+                    bus,
+                    StepProgress(step="snowball", message=f"滚雪球发现 {len(snowballed)} 篇候选"),
+                )
+                # Filter the snowballed papers too
+                snow_scored = filter_papers(snowballed, topic)
+                snow_scored = rank_papers(snow_scored)
+                # Only add papers that pass quality bar and aren't already in
+                new_papers = [
+                    p for p in snow_scored
+                    if p.id not in existing and p.relevance_score >= 3
+                ][:options.max_supplement_papers]
+                if new_papers:
+                    scored = scored + new_papers
+                    meta.filtered_papers = len(scored)
+                    persistence.save_step(
+                        run_dir, "03s_snowball", {"added": new_papers, "total_found": len(snowballed)}
+                    )
+                    _emit(
+                        bus,
+                        StepCompleted(
+                            step="snowball",
+                            message=f"滚雪球补充 {len(new_papers)} 篇（来源: 引用图）"
+                        ),
+                    )
+                else:
+                    _emit(bus, StepCompleted(step="snowball", message="滚雪球无新增相关论文"))
+            else:
+                _emit(bus, StepCompleted(step="snowball", message="无可用引用图数据"))
 
         # Step 3.5: enrich missing abstracts via cross-source DOI lookup
         if options.enrich_abstracts:
@@ -383,7 +542,21 @@ async def run_pipeline_async(
 
         extracted = extract_papers(scored, topic, on_progress=_extract_progress)
         persistence.save_step(run_dir, "04_extracted", extracted)
-        _emit(bus, StepCompleted(step="extract", message=f"{len(extracted)} 篇抽取完成"))
+
+        # Generate comparison matrix from deep extraction (quality signals)
+        comp_rows = build_comparison_matrix(extracted)
+        comp_md = render_comparison_md(comp_rows)
+        persistence.save_step(run_dir, "04_comparison", comp_rows)
+        if comp_md:
+            persistence.save_text(run_dir, "comparison.md", comp_md)
+        n_with_quality = sum(1 for p in extracted if p.quality.get("evidence_level"))
+        _emit(
+            bus,
+            StepCompleted(
+                step="extract",
+                message=f"{len(extracted)} 篇抽取完成 · {n_with_quality} 篇含质量评估 · 对比矩阵已生成"
+            ),
+        )
 
         # Step 5: first composition (verifier feedback may raise supplement queries)
         verify_trigger_queries: list[str] = []

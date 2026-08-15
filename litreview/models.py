@@ -99,6 +99,7 @@ class ExtractedPaper(ScoredPaper):
     key_findings: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     relevance_to_topic: str = ""
+    quality: dict = Field(default_factory=dict)  # evidence level, method rigor, etc.
 
 
 # --- Theme organization --------------------------------------------------
@@ -152,6 +153,19 @@ class Claim(BaseModel):
     text: str
     citation_indices: list[int] = Field(default_factory=list)
     section: str = ""
+    intent: str = ""  # what this claim is trying to prove (from claim_intent_manifest)
+
+
+class ClaimIntentManifest(BaseModel):
+    """Pre-declared intents that the review aims to prove.
+
+    Inspired by Imbad0202/ARS's claim_intent_manifest. Each intent is mapped
+    to the claims that attempt to support it, enabling intent-claim alignment checks.
+    """
+
+    intents: list[str] = Field(default_factory=list)  # what the review aims to prove
+    intent_to_claims: dict[str, list[int]] = Field(default_factory=dict)  # intent -> claim indices
+    alignment_notes: dict[str, str] = Field(default_factory=dict)  # intent -> alignment status
 
 
 class Verdict(str, Enum):
@@ -161,11 +175,20 @@ class Verdict(str, Enum):
     UNVERIFIABLE = "unverifiable"  # cited source has no ground text (e.g. no abstract)
 
 
+class RunMode(str, Enum):
+    """Adaptive pipeline modes based on user intent."""
+
+    QUICK_SCAN = "quick_scan"  # Fast overview, 1-2 rounds, summary output
+    DEEP_REVIEW = "deep_review"  # Full methodology, multi-round reflection
+    INTERACTIVE = "interactive"  # User-driven exploration with mid-stream adjustments
+
+
 class VerificationResult(BaseModel):
     claim_text: str
     verdict: Verdict
     citation_indices: list[int] = Field(default_factory=list)
     note: str = ""
+    defense_result: dict | None = None  # bidirectional verification result
 
 
 class SynthesisResult(BaseModel):

@@ -25,9 +25,22 @@ def filter_papers(
     topic: str,
     *,
     on_progress=None,
-) -> list[ScoredPaper]:
-    """Score every paper; return those with score >= 3 as ScoredPaper."""
+    return_log: bool = False,
+) -> list[ScoredPaper] | tuple[list[ScoredPaper], list[dict]]:
+    """Score every paper; return those with score >= 3 as ScoredPaper.
+
+    Args:
+        papers: List of candidate papers
+        topic: Research topic
+        on_progress: Progress callback
+        return_log: If True, return (passed_papers, filter_log) where filter_log
+                    contains detailed exclusion reasons for all papers
+
+    Returns:
+        List of ScoredPaper with score >= 3, or (passed, log) if return_log=True
+    """
     scored: list[ScoredPaper] = []
+    filter_log: list[dict] = []
     total = len(papers)
     for i, paper in enumerate(papers):
         if on_progress:
@@ -45,12 +58,27 @@ def filter_papers(
             print(f"    score failed: {e}")
             score = 2
             reason = "scoring error, defaulting low"
-        scored.append(
-            ScoredPaper(
-                **paper.model_dump(exclude={"id"}),
-                relevance_score=score,
-                filter_reason=reason,
-            )
+        
+        scored_paper = ScoredPaper(
+            **paper.model_dump(exclude={"id"}),
+            relevance_score=score,
+            filter_reason=reason,
         )
+        scored.append(scored_paper)
+        
+        # Log the decision
+        filter_log.append({
+            "title": paper.title,
+            "authors": paper.authors[:3],
+            "year": paper.year,
+            "doi": paper.doi,
+            "score": score,
+            "reason": reason,
+            "passed": score >= 3,
+        })
+    
     passed = [p for p in scored if p.relevance_score >= 3]
+    
+    if return_log:
+        return passed, filter_log
     return passed
