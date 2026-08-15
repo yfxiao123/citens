@@ -32,12 +32,32 @@ def _polite_params() -> dict:
     return {}
 
 
+async def _openalex_work_id(doi: str) -> str | None:
+    """Resolve a DOI to its OpenAlex ID (needed for the cites: filter)."""
+    if not doi:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                f"{_OPENALEX_WORKS}/https://doi.org/{doi}",
+                params={"select": "id", **_polite_params()},
+            )
+            if resp.status_code != 200:
+                return None
+            return resp.json().get("id")
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def _openalex_cited_by(doi: str, limit: int = 10) -> list[dict]:
     """Papers that CITE the given DOI (forward snowball) via OpenAlex."""
     if not doi:
         return []
+    work_id = await _openalex_work_id(doi)
+    if not work_id:
+        return []
     params = {
-        "filter": f"cites:{doi}",
+        "filter": f"cites:{work_id}",
         "per_page": min(limit, 25),
         "select": "id,title,authorships,publication_year,abstract_inverted_index,"
         "cited_by_count,doi,primary_location",

@@ -299,7 +299,7 @@ def _compose(
         # health monitoring: detect systematic biases
         _emit(bus, StepStarted(step="health", title="对话健康监测"))
         theme_paper_counts = {theme.name: len(theme.paper_indices) for theme in themes.themes}
-        absence_audit = audit_coverage([p.title for p in extracted])
+        absence_audit = audit_coverage(topic, [p.title for p in extracted])
         health_report = check_health(synthesis, ver_results, absence_audit, theme_paper_counts)
         persistence.save_step(run_dir, "08_health", health_report)
         

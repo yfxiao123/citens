@@ -46,7 +46,11 @@ def reflect(
         f"已识别的覆盖空白 / Coverage gaps:\n{gaps_text}\n\n"
         "Decide whether a supplementary retrieval round is warranted."
     )
-    result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+    try:
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+    except Exception:  # noqa: BLE001
+        print("    reflect failed: unparseable LLM JSON")
+        result = {}
     return {
         "needs_supplement": bool(result.get("needs_supplement", False)),
         "rationale": result.get("rationale", ""),

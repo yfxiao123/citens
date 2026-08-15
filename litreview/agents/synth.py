@@ -52,7 +52,11 @@ def synthesize(
         f"论文 / Papers:{''.join(parts)}\n\n"
         "Identify consensus, contradictions, and gaps across these papers."
     )
-    result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=3072, strong=True)
+    try:
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=3072, strong=True)
+    except Exception:  # noqa: BLE001
+        print("    synth failed: unparseable LLM JSON")
+        result = {}
     return SynthesisResult(
         consensus=result.get("consensus", []) or [],
         contradictions=result.get("contradictions", []) or [],

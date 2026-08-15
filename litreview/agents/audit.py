@@ -59,7 +59,11 @@ def audit_coverage(
         "Audit: which canonical works are MISSING from this set? "
         "Only real, well-known works — never invent."
     )
-    result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+    try:
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+    except Exception:  # noqa: BLE001
+        # reasoning models occasionally emit unparseable JSON; degrade gracefully
+        return {"absent_canonical_papers": [], "missing_venue_areas": [], "audit_note": "audit failed, skipped"}
     papers = result.get("absent_canonical_papers", [])
     papers = [p for p in papers if isinstance(p, dict) and str(p.get("title", "")).strip()]
     return {
