@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import traceback
 from pathlib import Path
 
@@ -71,6 +72,9 @@ def run(
     no_fulltext: bool = typer.Option(
         False, "--no-fulltext", help="不获取全文（仅用摘要溯源，精度较低）"
     ),
+    no_clarify: bool = typer.Option(
+        False, "--no-clarify", help="跳过跑前澄清问题（直接运行）"
+    ),
 ):
     """Generate a literature review for TOPIC."""
     topic_str = " ".join(topic) if topic else "大语言模型在金融领域的应用"
@@ -85,12 +89,50 @@ def run(
         use_cache=not no_cache,
         fetch_fulltext=not no_fulltext,
     )
+    # pre-run clarification (interactive) — shape the search before it starts
+    if not no_clarify:
+        options.filters = _clarify_interactive(topic_str)
     try:
         run_pipeline(topic_str, options, bus)
     except Exception:  # noqa: BLE001
         console.print("[bold red]运行失败:[/]")
         traceback.print_exc()
         raise typer.Exit(code=1) from None
+
+
+def _clarify_interactive(topic: str) -> dict:
+    """Ask the user 2-4 clarifying questions before the run (CLI, blocking).
+
+    Returns the chosen answers as {question_id: answer}. Requires a TTY;
+    falls back to no filters (run proceeds) when stdin is not interactive.
+    """
+    from litreview.agents.clarify import generate_clarifying_questions
+
+    if not sys.stdin.isatty():
+        return {}
+    questions = generate_clarifying_questions(topic)
+    if not questions:
+        return {}
+    filters: dict[str, str] = {}
+    console.print("\n[bold cyan]跑前澄清 / Pre-run clarification[/]（Enter 使用默认值）")
+    for q in questions:
+        opts = q["options"]
+        default = q.get("default") or opts[0]
+        shown = "  ".join(f"{i + 1}. {o}" for i, o in enumerate(opts))
+        console.print(f"\n[bold]{q['question']}[/]\n{shown}")
+        try:
+            raw = input(f"[默认 {default}] > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not raw:
+            chosen = default
+        else:
+            try:
+                chosen = opts[int(raw) - 1] if 1 <= int(raw) <= len(opts) else raw
+            except ValueError:
+                chosen = raw
+        filters[q["id"]] = chosen
+    return filters
 
 
 @app.command()

@@ -60,6 +60,7 @@
     <input type="text" id="topic" placeholder="e.g. 订单簿建模 / limit order book modeling" value="">
     <label>最终论文数 / max papers</label>
     <input type="number" id="maxp" value="8" min="3" max="30">
+    <div id="clarify"></div>
     <label>选项 / options</label>
     <select id="fulltext">
       <option value="1">获取全文（引用精度更高）</option>
@@ -98,6 +99,34 @@ function renderMd(md) {
   return "<pre>" + md.replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c])) + "</pre>";
 }
 
+async function loadClarify() {
+  const topic = $("topic").value.trim();
+  const box = $("clarify");
+  if (!topic) { box.innerHTML = ""; return; }
+  try {
+    const r = await fetch("/clarify?topic=" + encodeURIComponent(topic));
+    const j = await r.json();
+    const qs = j.questions || [];
+    if (!qs.length) { box.innerHTML = ""; return; }
+    box.innerHTML = qs.map(q => `
+      <label>${q.question}</label>
+      <select data-qid="${q.id}">
+        ${q.options.map(o => `<option value="${o}" ${o===q.default?"selected":""}>${o}</option>`).join("")}
+      </select>`).join("");
+  } catch { box.innerHTML = ""; }
+}
+
+function collectFilters() {
+  const f = {};
+  document.querySelectorAll("#clarify select[data-qid]").forEach(sel => {
+    f[sel.dataset.qid] = sel.value;
+  });
+  return f;
+}
+
+$("topic").addEventListener("change", loadClarify);
+$("topic").addEventListener("blur", loadClarify);
+
 async function run() {
   const topic = $("topic").value.trim();
   if (!topic) { alert("请输入研究主题 / enter a topic"); return; }
@@ -110,6 +139,7 @@ async function run() {
     topic,
     max_papers: parseInt($("maxp").value, 10) || 8,
     fetch_fulltext: $("fulltext").value === "1",
+    filters: collectFilters(),
   };
   try {
     const resp = await fetch("/run", {

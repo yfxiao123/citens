@@ -20,9 +20,11 @@ from dataclasses import dataclass, field
 
 from litreview import cache, persistence
 from litreview.agents import (
+    audit_coverage,
     extract_papers,
     filter_papers,
     generate_keywords,
+    missing_to_queries,
     organize_themes,
     reflect,
     synthesize,
@@ -64,6 +66,7 @@ class RunOptions:
     fetch_fulltext: bool = True
     enrich_abstracts: bool = True
     extra: dict = field(default_factory=dict)
+    filters: dict = field(default_factory=dict)  # pre-run clarifications (see clarify.py)
 
     def resolved_max_results(self) -> int:
         return self.max_results or settings.default_max_results
@@ -97,11 +100,15 @@ def _compose(
     bus: EventBus | None,
     *,
     fetch_fulltext: bool = True,
+    on_supplement_queries=None,
 ) -> ComposeResult:
     """organize -> synthesize -> write -> verify, persisting all artifacts.
 
     Returns the final table / claims / precision so the outer flow can decide
-    on reflection and assemble RunMeta.
+    on reflection and assemble RunMeta. `on_supplement_queries`, if given, is
+    invoked with (queries, message) when verification finds unsupported claims
+    that could be resolved by targeted retrieval (the caller decides whether
+    to actually supplement).
     """
     # organize
     _emit(bus, StepStarted(step="organize", title="主题组织"))
@@ -224,6 +231,23 @@ def _compose(
             },
         )
         _emit(bus, StepCompleted(step="verify", message=f"引用精度 {precision * 100:.0f}%"))
+
+        # verifier feedback -> targeted supplementary retrieval for
+        # unsupported claims (the "unsupported means missing evidence" loop)
+        if on_supplement_queries:
+            from litreview.agents.verifier_trigger import collect_unsupported_queries
+
+            vq = collect_unsupported_queries(claims, ver_results, topic)
+            if vq:
+                persistence.save_step(run_dir, "08b_verify_trigger", vq)
+                _emit(
+                    bus,
+                    StepProgress(
+                        step="verify",
+                        message=f"核验发现 {len(vq)} 条待补充检索（unsupported 论断溯源）",
+                    ),
+                )
+                on_supplement_queries(vq, f"{len(vq)} 条核验触发补充检索")
 
     persistence.save_json(run_dir, "provenance.json", build_provenance(claims, table, ver_results))
 
@@ -361,21 +385,56 @@ async def run_pipeline_async(
         persistence.save_step(run_dir, "04_extracted", extracted)
         _emit(bus, StepCompleted(step="extract", message=f"{len(extracted)} 篇抽取完成"))
 
-        # Step 5: first composition
-        result = _compose(extracted, topic, run_dir, bus, fetch_fulltext=options.fetch_fulltext)
+        # Step 5: first composition (verifier feedback may raise supplement queries)
+        verify_trigger_queries: list[str] = []
+
+        def _collect_verify_queries(queries, _msg):
+            verify_trigger_queries.extend(queries)
+
+        result = _compose(
+            extracted,
+            topic,
+            run_dir,
+            bus,
+            fetch_fulltext=options.fetch_fulltext,
+            on_supplement_queries=_collect_verify_queries,
+        )
         meta.themes = [t.name for t in result.themes.themes]
 
         # Step 6: reflect -> supplement -> recompose (one bounded loop)
         if options.allow_supplement:
             _emit(bus, StepStarted(step="reflect", title="反思与补充"))
             decision = reflect(result.synthesis, topic, len(extracted))
-            if decision["needs_supplement"] and decision["supplementary_keywords"]:
+
+            # 6a: absence audit — canonical works the retrieved set is missing
+            audit = audit_coverage(topic, [p.title for p in extracted])
+            persistence.save_step(run_dir, "08a_absence_audit", audit)
+            audit_queries = missing_to_queries(audit)
+            absent_n = len(audit.get("absent_canonical_papers", []))
+            if audit_queries:
                 _emit(
                     bus,
-                    StepProgress(step="reflect", message="补充检索: " + ", ".join(decision["supplementary_keywords"])),
+                    StepProgress(
+                        step="reflect",
+                        message=f"缺席检测: {absent_n} 篇经典缺失，追加检索",
+                    ),
+                )
+
+            # merge all three query sources: reflect gaps + absence audit +
+            # verifier-triggered (unsupported-claim evidence)
+            supplement_queries = list(dict.fromkeys(
+                decision.get("supplementary_keywords", [])
+                + audit_queries
+                + verify_trigger_queries
+            ))[:8]
+
+            if decision["needs_supplement"] and supplement_queries:
+                _emit(
+                    bus,
+                    StepProgress(step="reflect", message="补充检索: " + ", ".join(supplement_queries)),
                 )
                 fresh = await _supplement_search(
-                    decision["supplementary_keywords"], {p.id for p in extracted}, options, topic
+                    supplement_queries, {p.id for p in extracted}, options, topic
                 )
                 if fresh:
                     _emit(
@@ -385,9 +444,18 @@ async def run_pipeline_async(
                     new_extracted = extract_papers(fresh, topic)
                     extracted = extracted + new_extracted
                     meta.filtered_papers = len(extracted)
-                    persistence.save_step(run_dir, "08_supplement", {"new_papers": fresh, "decision": decision})
+                    persistence.save_step(
+                        run_dir,
+                        "08_supplement",
+                        {"new_papers": fresh, "decision": decision, "audit": audit},
+                    )
                     result = _compose(
-                        extracted, topic, run_dir, bus, fetch_fulltext=options.fetch_fulltext
+                        extracted,
+                        topic,
+                        run_dir,
+                        bus,
+                        fetch_fulltext=options.fetch_fulltext,
+                        on_supplement_queries=_collect_verify_queries,
                     )
                     meta.themes = [t.name for t in result.themes.themes]
                     _emit(
@@ -397,7 +465,10 @@ async def run_pipeline_async(
                 else:
                     _emit(bus, StepCompleted(step="reflect", message="无新论文，跳过重新综合"))
             else:
-                _emit(bus, StepCompleted(step="reflect", message=decision["rationale"] or "覆盖充分，无需补充"))
+                _emit(
+                    bus,
+                    StepCompleted(step="reflect", message=decision["rationale"] or "覆盖充分，无需补充"),
+                )
 
         # finalize
         meta.review_path = result.review_path
