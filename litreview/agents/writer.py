@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 
+from litreview.config import settings
 from litreview.llm import chat, run_concurrent
 from litreview.models import ExtractedPaper, SynthesisResult, ThemeStructure
 
@@ -21,7 +22,7 @@ the following research topic.
 1. Establish background and significance.
 2. Surface the open problems.
 3. State the review's purpose and structure.
-4. Use "本综述"/"this review", never "本研究".
+4. Refer to the survey as "this review", never "this paper"/"本研究".
 5. Fluent, scholarly prose."""
 
 SECTION_PROMPT = """You are an academic survey writer. Using the theme info and paper list below, \
@@ -58,6 +59,44 @@ _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
 _BOLD_TITLE_RE = re.compile(r"^\s{0,3}\*\*[^*\n]+\*\*\s*$")
 _TAIL_REFS_RE = re.compile(r"\n\s*(\*{0,2}references\*{0,2}|参考文献)\s*\n.*$", re.IGNORECASE)
 _TERMINALS = "。．.!?！？；;”\"')]}】》…"
+
+# --- output language (settings.review_language: "en" | "zh") -----------------
+# The prose language is injected into every writer prompt; the section
+# headings are localized to match, so a run is uniformly one language instead
+# of the accidental Chinese-intro/English-body mix.
+_ZH_ALIASES = {"zh", "cn", "chinese", "中文", "ch"}
+_ZH_LANG_LINE = "输出语言：全文使用中文撰写，学术书面语；术语首次出现时在括号内附英文原文。"
+_EN_LANG_LINE = "Output language: write all prose in English."
+
+_HEADINGS = {
+    "zh": {
+        "intro": "引言",
+        "crit": "批判性综合",
+        "conclusion": "总结与展望",
+        "refs": "参考文献",
+    },
+    "en": {
+        "intro": "Introduction",
+        "crit": "Critical Synthesis",
+        "conclusion": "Conclusion and Outlook",
+        "refs": "References",
+    },
+}
+
+
+def _lang() -> str:
+    v = (settings.review_language or "en").strip().lower()
+    return "zh" if v in _ZH_ALIASES else "en"
+
+
+def lang_instruction() -> str:
+    """One line appended to every writer system prompt."""
+    return _ZH_LANG_LINE if _lang() == "zh" else _EN_LANG_LINE
+
+
+def localized_heading(key: str) -> str:
+    """Localized section heading ("intro" | "crit" | "conclusion" | "refs")."""
+    return _HEADINGS[_lang()][key]
 
 
 def _strip_leading_headings(text: str) -> str:
@@ -154,8 +193,9 @@ def write_review_body(
         )
 
     # --- build all section jobs (kind, label, system, user, budget) ----------
+    lang_line = lang_instruction()
     jobs: list[dict] = [
-        {"kind": "intro", "label": "intro", "system": INTRO_PROMPT,
+        {"kind": "intro", "label": "intro", "system": INTRO_PROMPT + "\n" + lang_line,
          "user": f"研究主题 / Topic: {topic}", "budget": 4096}
     ]
 
@@ -175,7 +215,7 @@ def write_review_body(
         )
         theme_jobs.append(
             {"kind": "theme", "label": f"theme-{ti+1}", "name": theme.name,
-             "system": SECTION_PROMPT, "user": section_prompt, "budget": 6144}
+             "system": SECTION_PROMPT + "\n" + lang_line, "user": section_prompt, "budget": 6144}
         )
     jobs.extend(theme_jobs)
 
@@ -187,7 +227,7 @@ def write_review_body(
         )
         jobs.append(
             {"kind": "crit", "label": "critical-synthesis",
-             "system": CRIT_SYNTH_PROMPT, "user": synth_prompt, "budget": 4096}
+             "system": CRIT_SYNTH_PROMPT + "\n" + lang_line, "user": synth_prompt, "budget": 4096}
         )
 
     summary = "".join(f"- {t.name}: {t.description}\n" for t in themes.themes)
@@ -195,7 +235,7 @@ def write_review_body(
     if synthesis and synthesis.gaps:
         gaps = "研究空白 / Research gaps:\n" + "".join(f"- {g}\n" for g in synthesis.gaps)
     jobs.append(
-        {"kind": "conclusion", "label": "conclusion", "system": CONCLUSION_PROMPT,
+        {"kind": "conclusion", "label": "conclusion", "system": CONCLUSION_PROMPT + "\n" + lang_line,
          "user": (
              f"研究主题 / Topic: {topic}\n\n主题结构 / Themes:\n{summary}\n{gaps}\n"
              f"可引用论文 / Citable papers (use EXACT [index]):"
@@ -213,7 +253,7 @@ def write_review_body(
     bodies = run_concurrent(_run, jobs)
 
     intro = _strip_leading_headings(bodies[0])
-    sections.append(f"## 引言 / Introduction\n\n{intro}\n")
+    sections.append(f"## {localized_heading('intro')}\n\n{intro}\n")
 
     for job, body in zip(theme_jobs, bodies[1 : 1 + len(theme_jobs)], strict=False):
         body = _strip_tail_references(_strip_leading_headings(body))
@@ -225,11 +265,11 @@ def write_review_body(
     offset = 1 + len(theme_jobs)
     if offset < len(bodies):  # critical synthesis present
         crit = _strip_tail_references(_strip_leading_headings(bodies[offset]))
-        sections.append(f"## 批判性综合 / Critical Synthesis\n\n{crit}\n")
+        sections.append(f"## {localized_heading('crit')}\n\n{crit}\n")
         offset += 1
     if offset < len(bodies):
         conclusion = _strip_tail_references(_strip_leading_headings(bodies[offset]))
-        sections.append(f"## 总结与展望 / Conclusion\n\n{conclusion}\n")
+        sections.append(f"## {localized_heading('conclusion')}\n\n{conclusion}\n")
 
     return "\n".join(sections)
 

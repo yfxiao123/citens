@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from litreview import __version__
+from litreview.config import settings
 from litreview.events import (
     EventBus,
     RunCompleted,
@@ -78,13 +79,18 @@ def run(
     no_clarify: bool = typer.Option(
         False, "--no-clarify", help="跳过跑前澄清问题（直接运行）"
     ),
+    language: str | None = typer.Option(
+        None, "--language", "-l", help="综述输出语言: en/zh (默认取 REVIEW_LANGUAGE 或 en)"
+    ),
 ):
     """Generate a literature review for TOPIC."""
     from litreview.models import RunMode
 
     topic_str = " ".join(topic) if topic else "大语言模型在金融领域的应用"
     src_list = [s.strip() for s in sources.split(",")] if sources else None
-    
+    if language:
+        settings.review_language = language
+
     # Parse mode if provided
     run_mode = None
     if mode:

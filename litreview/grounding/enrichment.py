@@ -29,7 +29,7 @@ def _openalex_by_doi(doi: str) -> str:
             r = client.get(f"https://api.openalex.org/works/https://doi.org/{doi}")
             if r.status_code != 200:
                 return ""
-            return OpenAlexSearcher._decode_abstract(r.json().get("abstract_inverted_index"))
+            return OpenAlexSearcher.decode_abstract(r.json().get("abstract_inverted_index"))
     except Exception:  # noqa: BLE001
         return ""
 

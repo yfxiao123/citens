@@ -111,7 +111,7 @@ def _to_paper(work: dict, direction: str, from_doi: str) -> Paper | None:
     from litreview.search.openalex import OpenAlexSearcher
 
     try:
-        paper = OpenAlexSearcher._to_paper(work)
+        paper = OpenAlexSearcher.to_paper(work)
         if not paper.title or not paper.title.strip():
             return None
         # Mark provenance in the source field for auditability

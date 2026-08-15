@@ -50,16 +50,20 @@ class OpenAlexSearcher(SearchSource):
         }
         resp = await client.get(self.BASE_URL, params=params)
         resp.raise_for_status()
-        return [self._to_paper(w) for w in resp.json().get("results", [])]
+        return [self.to_paper(w) for w in resp.json().get("results", [])]
 
     @staticmethod
-    def _to_paper(work: dict) -> Paper:
+    def to_paper(work: dict) -> Paper:
+        """Convert an OpenAlex work record to a Paper.
+
+        Public because snowball.py and enrichment.py reuse the same conversion.
+        """
         authors: list[str] = []
         for a in work.get("authorships", []):
             name = (a.get("author") or {}).get("display_name", "")
             if name:
                 authors.append(name)
-        abstract = OpenAlexSearcher._decode_abstract(work.get("abstract_inverted_index"))
+        abstract = OpenAlexSearcher.decode_abstract(work.get("abstract_inverted_index"))
         loc = work.get("primary_location") or {}
         source_obj = loc.get("source") or {}
         source_name = source_obj.get("display_name", "") or "OpenAlex"
@@ -82,7 +86,7 @@ class OpenAlexSearcher(SearchSource):
         )
 
     @staticmethod
-    def _decode_abstract(inverted_index: dict | None) -> str:
+    def decode_abstract(inverted_index: dict | None) -> str:
         if not inverted_index:
             return ""
         words: dict[int, str] = {}

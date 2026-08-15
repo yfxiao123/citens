@@ -44,6 +44,30 @@ class Paper(BaseModel):
     pdf_url: str | None = None  # open-access full-text PDF, if known
     venue: str = ""  # journal / conference / repository name, when known
 
+    @field_validator("authors", mode="before")
+    @classmethod
+    def _dedupe_authors(cls, v):
+        """Deduplicate author names, order-preserving.
+
+        OpenAlex emits one ``authorships`` entry per (author, affiliation), so a
+        single author with three affiliations appears three times — e.g.
+        "Bence Toth, Bence Toth, Bence Toth et al." in the rendered references.
+        Case-insensitive match on the collapsed name.
+        """
+        if not v:
+            return []
+        seen: set[str] = set()
+        out: list[str] = []
+        for name in v:
+            if name is None:
+                continue
+            s = " ".join(str(name).split())
+            key = s.lower()
+            if s and key not in seen:
+                seen.add(key)
+                out.append(s)
+        return out
+
     @field_validator("doi", mode="before")
     @classmethod
     def _normalize_doi(cls, v):

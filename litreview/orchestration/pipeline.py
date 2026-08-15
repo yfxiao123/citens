@@ -36,6 +36,7 @@ from litreview.agents import (
 )
 from litreview.agents.planner import refine_queries
 from litreview.agents.quality import build_comparison_matrix, render_comparison_md
+from litreview.agents.writer import localized_heading
 from litreview.config import settings
 from litreview.events import (
     Event,
@@ -199,7 +200,7 @@ def _compose(
         _emit(bus, StepProgress(step="write", message=label or name))
 
     body = write_review_body(extracted, themes, topic, synthesis=synthesis, on_step=_write_step)
-    review = body + "\n## 参考文献 / References\n\n" + table.references_md() + "\n"
+    review = body + f"\n## {localized_heading('refs')}\n\n" + table.references_md() + "\n"
     review_path = persistence.save_text(run_dir, "review.md", review)
     persistence.save_text(run_dir, "references.bib", table.to_bibtex())
 

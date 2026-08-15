@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     default_max_papers: int = 15  # final papers kept after filtering (0 = no cap)
     enrich_abstracts: bool = True  # cross-source DOI enrichment for missing abstracts
     output_dir: str = "runs"
+    # Output language of the review prose AND section headings: "en" or "zh".
+    # Anything not recognized as Chinese falls back to English.
+    review_language: str = "en"
 
     # --- Venue-aware ranking -------------------------------------------------
     # Composite retrieval score = w_rel*(relevance/5) + w_cit*citation_factor
