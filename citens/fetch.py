@@ -86,7 +86,7 @@ def fetch_run(run_dir: str) -> dict:
         browser = pw.chromium.launch(headless=False)
         ctx = browser.new_context(accept_downloads=True)
         if cookies:
-            ctx.add_cookies(cookies)
+            ctx.add_cookies(cookies)  # type: ignore[arg-type]  # dict records are valid SetCookieParams
         page = ctx.new_page()
 
         # capture downloads anywhere in the context (new tabs included)
