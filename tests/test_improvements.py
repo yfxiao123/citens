@@ -330,3 +330,19 @@ def test_sync_client_attaches_ezproxy_cookie(monkeypatch):
     client2 = net_mod.sync_client("https://arxiv.org/pdf/x.pdf")
     assert "Cookie" not in client2.headers
     client2.close()
+
+
+def test_cookie_jar_suffix_match(tmp_path, monkeypatch):
+    from citens import net as net_mod
+    from citens.config import Settings
+
+    fake = Settings(cookie_jar_path=str(tmp_path / "cookies.json"))
+    monkeypatch.setattr(net_mod, "settings", fake)
+    net_mod.save_cookie_jar({"sciencedirect.com": "sd_session=abc", "com": "evil=1"})
+    # exact + suffix match, longest wins; unrelated host untouched
+    c1 = net_mod.sync_client("https://www.sciencedirect.com/science/article/pii/x")
+    assert c1.headers.get("Cookie") == "sd_session=abc"
+    c1.close()
+    c2 = net_mod.sync_client("https://arxiv.org/pdf/1")
+    assert "Cookie" not in c2.headers
+    c2.close()

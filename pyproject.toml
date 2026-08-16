@@ -48,6 +48,9 @@ pdf = ["markitdown[pdf]>=0.0.1"]
 # The default OpenAI-compatible backend already covers OpenAI/DeepSeek/Ollama/
 # OpenRouter/vLLM/Groq without this extra.
 multi = ["litellm>=1.40"]
+# `citens login`: headed-browser SSO flow that harvests session cookies
+# (password never touches config — it goes into the browser only).
+login = ["playwright>=1.40"]
 dev = [
     "ruff>=0.4",
     "mypy>=1.10",

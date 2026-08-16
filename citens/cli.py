@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import traceback
 from pathlib import Path
@@ -241,6 +242,55 @@ def eval(  # noqa: A001
     (out / "report.md").write_text(report, encoding="utf-8")
     console.print(Panel(table, title=f"eval: {len(rows)} runs"))
     console.print(f"[green]✓[/] 写入 {out / 'report.md'}")
+
+
+@app.command()
+def login(
+    url: str = typer.Option(
+        "https://www.sciencedirect.com", "--url", help="要登录的站点（默认 ScienceDirect）"
+    ),
+):
+    """打开浏览器完成学校统一身份认证，把会话 Cookie 存入 data/cookies.json。
+
+    密码只进浏览器、不进任何配置或代码；之后的 run 会自动带上这些
+    Cookie 抓付费全文。会话过期后重跑一次本命令即可。
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        console.print(
+            "[yellow]![/] 需要 playwright: pip install 'citens[login]' "
+            "&& playwright install chromium"
+        )
+        raise typer.Exit(code=1) from None
+
+    from citens.net import save_cookie_jar
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=False)
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.goto(url)
+        console.print("[cyan]在打开的浏览器窗口里完成统一身份认证登录。[/]")
+        console.print("看到目标站点正常页面后，回到这里按回车收 Cookie…")
+        with contextlib.suppress(EOFError):
+            input()
+        cookies = ctx.cookies()
+        browser.close()
+
+    jar: dict[str, str] = {}
+    for c in cookies:
+        if not c.get("name") or not c.get("value"):
+            continue
+        host = (c.get("domain") or "").lstrip(".").lower()
+        if not host:
+            continue
+        jar.setdefault(host, []).append(f"{c['name']}={c['value']}")
+    jar = {h: "; ".join(v) for h, v in jar.items()}
+    save_cookie_jar(jar)
+    hosts = ", ".join(sorted(jar)[:6])
+    console.print(f"[green]✓[/] 已保存 {len(jar)} 个域的会话 Cookie（{hosts}…）")
+    console.print("  之后 citens run 抓这些域的全文时会自动携带；过期后重跑 citens login。")
 
 
 @app.command()

@@ -94,12 +94,59 @@ def _ezproxy_headers(url: str) -> dict[str, str]:
     return {}
 
 
+def load_cookie_jar() -> dict[str, str]:
+    """Host -> raw Cookie header, written by ``citens login``."""
+    import json
+    from pathlib import Path
+
+    p = Path(settings.cookie_jar_path)
+    if not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+    except Exception:  # noqa: BLE001 — a corrupt jar must not break fetching
+        return {}
+
+
+def save_cookie_jar(jar: dict[str, str]) -> None:
+    import json
+    from pathlib import Path
+
+    p = Path(settings.cookie_jar_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(jar, indent=2), encoding="utf-8")
+
+
+def _jar_headers(url: str) -> dict[str, str]:
+    """Longest-suffix host match against the cookie jar.
+
+    Shibboleth/SDAuth sessions live on the PUBLISHER's domain (e.g.
+    sciencedirect.com), not a proxy host — the jar covers that case.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return {}
+    best = ""
+    for dom in load_cookie_jar():
+        d = dom.lower().lstrip(".")
+        if (host == d or host.endswith("." + d)) and len(d) > len(best):
+            best = d
+    if not best:
+        return {}
+    return {"Cookie": load_cookie_jar()[best]}
+
+
 def sync_client(url: str | None = None, **kwargs) -> httpx.Client:
     """A sync httpx.Client configured with timeout/redirects + proxy (if any)."""
     kwargs.setdefault("timeout", 60)
     kwargs.setdefault("follow_redirects", True)
     if url:
-        headers = {**_ezproxy_headers(url), **(kwargs.pop("headers", {}) or {})}
+        headers = {
+            **_jar_headers(url),
+            **_ezproxy_headers(url),
+            **(kwargs.pop("headers", {}) or {}),
+        }
         if headers:
             kwargs["headers"] = headers
     proxy = proxy_url_for(url)

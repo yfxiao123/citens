@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     # -> Cookie). EZproxy authenticates by session cookie, so URL rewriting
     # alone bounces off-campus fetches to a login page. Rotates on re-login.
     ezproxy_cookie: str = ""
+    # Per-host session cookies written by `citens login` (host -> Cookie header).
+    cookie_jar_path: str = "data/cookies.json"
     # Drop folder for manually downloaded PDFs (see fetch_list.md emitted by a
     # run). Full-text lookup checks here BEFORE hitting the network, so files
     # you drop are picked up by the next run.
