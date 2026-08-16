@@ -64,18 +64,25 @@ def fetch_pdf_via_browser(url: str, timeout_ms: int = 45000) -> bytes | None:
     a full page navigation second (executes the challenge JS, catches
     attachment-style downloads). None if playwright is unavailable or the
     fetch yields no PDF.
+
+    Runs HEADED by default: IEEE (and several publishers) fingerprint
+    headless Chromium and serve 418/block pages — a visible window is the
+    price of entitlement. Set CITENS_HEADLESS=1 to force headless.
     """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         return None
 
+    import os
     from typing import Any
 
     cookies: list[Any] = _jar_to_playwright_cookies()
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+            browser = pw.chromium.launch(
+                headless=os.environ.get("CITENS_HEADLESS", "") == "1"
+            )
             try:
                 ctx = browser.new_context(accept_downloads=True)
                 if cookies:

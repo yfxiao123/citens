@@ -303,14 +303,32 @@ def login(
             console.print(f"  [{i}/{len(sites)}] {site}")
 
         def _entitled(page) -> bool:
-            """Heuristic: an entitled article page offers a real PDF download."""
-            for sel in (
-                "a:has-text('Download PDF')",
-                "a[data-track-action='download pdf']",
-                "a:has-text('PDF')",
-                "a[title='PDF']",
-                "a:has-text('Get full text')",
+            """Heuristic: an entitled article page offers a real PDF download.
+
+            These sites are heavy SPAs — the DOM hydrates seconds after
+            'load', so button-text selectors alone fire too early. Wait for
+            hydration, then check HTML-level PDF hrefs (stamp.jsp,
+            content/pdf, pdf-direct) AND button text.
+            """
+            import time as _t
+
+            _t.sleep(4)  # SPA hydration (IEEE/Springer/SD render post-load)
+            try:
+                html = page.content()
+            except Exception:  # noqa: BLE001
+                return False
+            for marker in (
+                "stamp.jsp",          # IEEE
+                "/content/pdf/",      # Springer
+                "/pdf-direct/",       # Wiley
+                "/doi/pdf/",          # T&F / SAGE
+                "pdfft",              # ScienceDirect
+                "Download PDF",
+                "Download article",
             ):
+                if marker in html:
+                    return True
+            for sel in ("a:has-text('PDF')", "a[title='PDF']"):
                 try:
                     if page.locator(sel).count() > 0:
                         return True
@@ -458,6 +476,33 @@ def resume(
         console.print("[bold red]续跑失败:[/]")
         traceback.print_exc()
         raise typer.Exit(code=1) from None
+
+
+@app.command()
+def fetch(
+    run_dir: str = typer.Argument(..., help="要补全文的 run 目录"),
+):
+    """在可见浏览器里补齐该 run 缺失的付费 PDF（半自动）。
+
+    逐篇打开文章页（带 login 会话），自动点击 PDF 下载控件；点不动时
+    你在窗口里手动点，下载自动存入 papers/。完成后运行
+    citens reverify <run目录> 重跑核验看精度提升。
+    """
+    from citens.fetch import fetch_run
+
+    try:
+        summary = fetch_run(run_dir)
+    except FileNotFoundError as e:
+        console.print(f"[bold red]无法补全文:[/] {e}")
+        raise typer.Exit(code=1) from None
+    if not summary.get("missing"):
+        console.print("[green]✓[/] 该 run 无缺失全文（或有本地 PDF/缓存）")
+        return
+    console.print(
+        f"[green]✓[/] 缺失 {summary['missing']} 篇 · 本次下载 {summary['downloaded']} 篇"
+    )
+    if summary["downloaded"]:
+        console.print(f"  下一步: citens reverify {run_dir}")
 
 
 @app.command()
