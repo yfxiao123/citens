@@ -313,6 +313,44 @@ def reverify(
 
 
 @app.command()
+def audit(
+    run_dir: str = typer.Argument(..., help="要审核的 run 目录"),
+    ingest: str = typer.Option("", "--ingest", help="填好的审核清单路径: 回收人工判定并计算一致率"),
+):
+    """Generate (or ingest) a human audit sheet for a run's claims.
+
+    No --ingest: writes 审核清单.md — every claim with its machine verdict,
+    cited papers, and a fill-in 人工判定 slot (s/p/u).
+
+    With --ingest: parses the filled sheet, computes human-vs-machine
+    agreement / leniency, and writes audit_result.json.
+    """
+    from citens.audit import generate_audit_sheet, ingest_audit
+
+    if not ingest:
+        path = generate_audit_sheet(run_dir)
+        console.print(f"[green]✓[/] 审核清单已生成: {path}")
+        console.print("  填写每条'人工判定:'为 s/p/u 后, 运行:")
+        console.print(f"  citens audit {run_dir} --ingest {path}")
+        return
+    try:
+        report = ingest_audit(run_dir, ingest)
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[bold red]审核失败:[/] {e}")
+        raise typer.Exit(code=1) from None
+    console.print(
+        f"[green]✓[/] 人工判定 {report['judged']}/{report['of_total']} 条 · "
+        f"一致率 {report['agreement_rate'] * 100:.0f}% · "
+        f"机器偏宽 {report['machine_lenient']} 条 / 偏严 {report['machine_strict']} 条"
+    )
+    console.print(
+        f"  人工grounded率 {report['human_grounded_rate'] * 100:.0f}% vs "
+        f"机器自报精度 {report['machine_reported_precision'] * 100:.0f}% · "
+        f"明细见 audit_result.json"
+    )
+
+
+@app.command()
 def sjr(
     force: bool = typer.Option(False, "--force", help="重新下载（即使文件已存在）"),
     mirror: bool = typer.Option(

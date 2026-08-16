@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     elsevier_api_key: str = ""  # dev.elsevier.com
     ieee_api_key: str = ""  # IEEE Xplore
     core_api_key: str = ""  # api.core.ac.uk (free key; OA fulltext aggregator)
+    # Chunk retrieval for grounding: "bm25" (default) | "keyword" | "embedding".
+    # "embedding" additionally needs EMBEDDING_MODEL and degrades to bm25 on failure.
+    retriever: str = "bm25"
+    embedding_model: str = ""  # e.g. text-embedding-3-small (OpenAI-compatible)
 
     # --- Defaults for a run (overridable via CLI / RunOptions) ---------------
     default_max_results: int = 60  # candidate pool target before filtering

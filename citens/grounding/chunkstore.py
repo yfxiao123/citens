@@ -14,16 +14,9 @@ text or only an abstract.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Sequence
 
 from citens.models import Chunk, ChunkKind, Paper
-
-_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{3,}")
-
-
-def _tokens(text: str) -> set[str]:
-    return {m.group(0).lower() for m in _TOKEN_RE.finditer(text or "")}
 
 
 class ChunkStore:
@@ -100,19 +93,15 @@ class ChunkStore:
         return chunks[0].text if chunks else ""
 
     def retrieve(self, paper_id: str, query: str, k: int = 4) -> list[Chunk]:
-        """Top-k chunks relevant to `query` (keyword overlap); always leads with
-        the abstract chunk when present."""
+        """Top-k chunks relevant to `query`; always leads with the abstract
+        chunk when present (ranking itself is the pluggable retriever — see
+        citens.grounding.retrieval)."""
         chunks = self._by_paper.get(paper_id, [])
         if not chunks:
             return []
-        qtokens = _tokens(query)
-        ranked = chunks
-        if qtokens:
-            ranked = sorted(
-                chunks,
-                key=lambda c: len(qtokens & _tokens(c.text)),
-                reverse=True,
-            )
+        from citens.grounding.retrieval import get_retriever
+
+        ranked = get_retriever().rank(chunks, query, k) if len(chunks) > 1 else chunks[:k]
         result: list[Chunk] = []
         abs_chunk = next((c for c in chunks if c.kind == ChunkKind.ABSTRACT), None)
         if abs_chunk:

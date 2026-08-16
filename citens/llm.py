@@ -20,6 +20,7 @@ Performance/cost layout:
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Protocol, runtime_checkable
@@ -83,6 +84,12 @@ class OpenAICompatBackend:
         if response_json:
             kwargs["response_format"] = {"type": "json_object"}
         resp = self._client.chat.completions.create(**kwargs)
+        if getattr(resp, "usage", None):
+            record_usage(
+                self._model,
+                resp.usage.prompt_tokens or 0,
+                resp.usage.completion_tokens or 0,
+            )
         return resp.choices[0].message.content or ""
 
 
@@ -128,10 +135,37 @@ class LiteLLMBackend:
         if response_json:
             kwargs["response_format"] = {"type": "json_object"}
         resp = litellm.completion(**kwargs)
+        if getattr(resp, "usage", None):
+            record_usage(
+                self._model,
+                getattr(resp.usage, "prompt_tokens", 0) or 0,
+                getattr(resp.usage, "completion_tokens", 0) or 0,
+            )
         return resp.choices[0].message.content or ""
 
 
 _backends: dict[str, LLMBackend] = {}
+
+# --- usage telemetry ---------------------------------------------------------
+# Backends record every completion's token usage here; RunLog attributes
+# records to pipeline stages by timestamp (see runlog.token_usage_by_stage).
+import threading  # noqa: E402
+
+_usage_lock = threading.Lock()
+_usage_records: list[dict] = []
+
+
+def record_usage(model: str, prompt: int, completion: int) -> None:
+    with _usage_lock:
+        _usage_records.append(
+            {"ts": time.time(), "model": model, "prompt": prompt, "completion": completion}
+        )
+
+
+def usage_records() -> list[dict]:
+    """Snapshot of recorded usage events (thread-safe copy)."""
+    with _usage_lock:
+        return list(_usage_records)
 
 
 def get_backend(model: str | None = None) -> LLMBackend:

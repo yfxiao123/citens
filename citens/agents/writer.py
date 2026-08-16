@@ -175,6 +175,7 @@ def write_review_body(
     *,
     synthesis: SynthesisResult | None = None,
     on_step=None,
+    evidence_for=None,
 ) -> str:
     """Generate the review BODY (title + intro + theme sections + critical
     synthesis + conclusion).
@@ -183,6 +184,11 @@ def write_review_body(
     thread pool and assembled in reading order. The references section is
     intentionally NOT included here; the pipeline appends it from the
     CitationTable.
+
+    ``evidence_for(theme) -> str``, when given, supplies full-text evidence
+    excerpts for a theme's papers (from the ChunkStore): the writer grounds
+    its claims in them instead of abstract extracts alone — fewer
+    unsupported claims at the SOURCE, before any verifier pass.
     """
     sections: list[str] = [f"# {topic}\n"]
 
@@ -217,9 +223,25 @@ def write_review_body(
             f"{synth_context}"
             f"包含论文 / Papers (index in [brackets]):{_papers_block(indexed)}\n"
         )
+        system_prompt = SECTION_PROMPT + "\n" + lang_line
+        if evidence_for is not None:
+            excerpts = evidence_for(theme)
+            if excerpts:
+                section_prompt += (
+                    "\n全文证据摘录 / Full-text evidence excerpts (verbatim from the "
+                    "papers' full texts where available):\n"
+                    f"{excerpts}\n"
+                )
+                system_prompt += (
+                    "\nEVIDENCE RULE: the excerpts above are verbatim source text. "
+                    "Ground factual claims in them whenever they cover the point — "
+                    "specifics (numbers, methods, findings) must come from the "
+                    "excerpts or the paper extracts, never invented. Cite the "
+                    "paper's [index] for every such claim.\n"
+                )
         theme_jobs.append(
             {"kind": "theme", "label": f"theme-{ti+1}", "name": theme.name,
-             "system": SECTION_PROMPT + "\n" + lang_line, "user": section_prompt, "budget": 6144}
+             "system": system_prompt, "user": section_prompt, "budget": 6144}
         )
     jobs.extend(theme_jobs)
 

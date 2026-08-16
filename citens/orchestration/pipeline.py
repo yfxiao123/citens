@@ -70,6 +70,7 @@ from citens.models import (
     VerificationResult,
 )
 from citens.ranking import quartile_histogram, rank_papers
+from citens.runlog import RunLog
 from citens.search import (
     blend_pool,
     deduplicate,
@@ -85,13 +86,17 @@ class StepClock:
 
     Cheap enough to leave on every run — timings.json is how you answer
     "why was this run slow?" after the fact (see the 100-paper case).
+    Also mirrors every mark into the run's append-only log when one is given.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, runlog: RunLog | None = None) -> None:
         self._marks: list[tuple[str, float]] = [("_start", time.monotonic())]
+        self.runlog = runlog
 
     def mark(self, name: str) -> None:
         self._marks.append((name, time.monotonic()))
+        if self.runlog is not None:
+            self.runlog.mark(name)
 
     def durations(self) -> dict[str, float]:
         return {
@@ -298,7 +303,34 @@ def _compose(
     def _write_step(name, label=""):
         _emit(bus, StepProgress(step="write", message=label or name))
 
-    body = write_review_body(extracted, themes, topic, synthesis=synthesis, on_step=_write_step)
+    def _evidence_for(theme) -> str:
+        """Full-text excerpts for a theme's papers (write-time grounding)."""
+        from citens.models import ChunkKind
+
+        parts: list[str] = []
+        budget = 6000  # chars per theme — enough signal, bounded prompt cost
+        for idx in theme.paper_indices:
+            if not 0 <= idx < len(extracted):
+                continue
+            p = extracted[idx]
+            chunks = [
+                c for c in chunk_store.retrieve(
+                    p.id, f"{theme.name} {theme.description}", k=2
+                )
+                if c.kind == ChunkKind.FULLTEXT
+            ]
+            for c in chunks:
+                excerpt = c.text[:800]
+                parts.append(f"[{idx}] {p.title[:60]} — {excerpt}")
+                budget -= len(excerpt)
+                if budget <= 0:
+                    return "\n\n".join(parts)
+        return "\n\n".join(parts)
+
+    body = write_review_body(
+        extracted, themes, topic, synthesis=synthesis, on_step=_write_step,
+        evidence_for=_evidence_for,
+    )
     review = body + f"\n## {localized_heading('refs')}\n\n" + table.references_md() + "\n"
     review_path = persistence.save_text(run_dir, "review.md", review)
     persistence.save_text(run_dir, "references.bib", table.to_bibtex())
@@ -615,7 +647,15 @@ async def run_pipeline_async(
 
     run_dir = options.resume_dir or persistence.new_run_dir(topic)
     meta = RunMeta(topic=topic, run_dir=run_dir)
-    clock = StepClock()
+    runlog = RunLog(run_dir)
+    clock = StepClock(runlog=runlog)
+    runlog.append(
+        "run_start",
+        topic=topic,
+        mode=str(options.mode) if options.mode else "auto",
+        max_results=max_results,
+        max_papers=max_papers,
+    )
     _emit(bus, RunStarted(topic=topic))
     if options.resume_dir is None:
         # written before anything can fail, so `citens resume` can recover
@@ -777,6 +817,7 @@ async def run_pipeline_async(
             if max_papers:
                 papers = blend_pool(papers, cap=max(max_papers * 3, 12))
             meta.total_papers = len(papers)
+            runlog.snapshot("search", papers=len(papers), queries=keywords)
             persistence.save_step(run_dir, "02_papers", papers)
             _emit(bus, StepCompleted(step="search", message=f"{len(papers)} 篇候选"))
 
@@ -813,6 +854,7 @@ async def run_pipeline_async(
             if max_papers and len(scored) > max_papers:
                 scored = scored[:max_papers]
             meta.filtered_papers = len(scored)
+            runlog.snapshot("filter", papers=len(scored))
             persistence.save_step(run_dir, "03_filtered", scored)
             hist = quartile_histogram(scored)
             hist_msg = " · ".join(f"{k}:{v}" for k, v in sorted(hist.items()))
@@ -1007,15 +1049,23 @@ async def run_pipeline_async(
                 new_extracted = extract_papers(fresh, topic)
                 extracted = extracted + new_extracted
                 meta.filtered_papers = len(extracted)
+                # unique name per round — the old fixed name lost round 1
+                # when round 2 overwrote it
                 persistence.save_step(
                     run_dir,
-                    "08_supplement",
+                    f"08_supplement_r{rounds_run}",
                     {
                         "round": rounds_run,
                         "new_papers": fresh,
                         "decision": decision,
                         "audit": audit,
                     },
+                )
+                runlog.snapshot(
+                    "supplement",
+                    round=rounds_run,
+                    added=[p.title for p in fresh],
+                    total=len(extracted),
                 )
                 result = _compose(
                     extracted,
@@ -1053,10 +1103,17 @@ async def run_pipeline_async(
 
         # finalize
         clock.mark("finalize")
+        # the final paper set (post-supplement) was previously only in memory —
+        # persist it so audit tools and resume don't have to reconstruct it
+        persistence.save_step(run_dir, "09_final_papers", extracted)
+        usage = runlog.finalize()
         meta.review_path = result.review_path
         meta.citation_precision = round(result.precision, 3)
         persistence.save_json(run_dir, "meta.json", meta)
-        persistence.save_json(run_dir, "timings.json", clock.payload())
+        timings = clock.payload()
+        timings["token_usage_by_stage"] = usage.get("token_usage_by_stage", {})
+        timings["total_tokens"] = usage.get("total_tokens", 0)
+        persistence.save_json(run_dir, "timings.json", timings)
         _emit(
             bus,
             RunCompleted(
