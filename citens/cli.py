@@ -244,15 +244,16 @@ def eval(  # noqa: A001
     console.print(f"[green]✓[/] 写入 {out / 'report.md'}")
 
 
-# Default publisher tour for `citens login`: after the FIRST SSO login the
-# IdP session auto-logs-in the rest, so one browser session covers them all.
+# Default publisher tour for `citens login`: ARTICLE deep links, not homepages —
+# the institutional entitlement handshake (SP-initiated SSO) only fires when an
+# actual paywalled article is requested; a homepage visit sets no usable token.
 _LOGIN_SITES = [
-    "https://www.sciencedirect.com",
-    "https://link.springer.com",
-    "https://onlinelibrary.wiley.com",
-    "https://www.tandfonline.com",
-    "https://journals.sagepub.com",
-    "https://ieeexplore.ieee.org",
+    "https://www.sciencedirect.com/science/article/pii/S0304405X1000102X",
+    "https://link.springer.com/article/10.1007/s11579-012-0082-5",
+    "https://onlinelibrary.wiley.com/doi/10.1111/mafi.12413",
+    "https://www.tandfonline.com/doi/full/10.1080/14697688.2016.1154244",
+    "https://journals.sagepub.com/doi/10.1177/00220574231213461",
+    "https://ieeexplore.ieee.org/document/8777151",
 ]
 
 
@@ -289,7 +290,10 @@ def login(
         ctx = browser.new_context()
         page = ctx.new_page()
         sites = url or (_LOGIN_SITES if all_sites else _LOGIN_SITES[:1])
-        console.print(f"[cyan]将依次访问 {len(sites)} 个站点；在第一个弹出统一身份认证时登录。[/]")
+        console.print(
+            f"[cyan]将依次打开 {len(sites)} 篇付费文章（非首页——机构授权只在文章页触发）。[/]"
+        )
+        console.print("第一个弹出统一身份认证时登录；之后若出现'选择机构'页选南京大学。")
         for i, site in enumerate(sites, 1):
             try:
                 page.goto(site, timeout=60000)
@@ -297,7 +301,7 @@ def login(
                 console.print(f"  [yellow]{site} 加载异常（跳过）:[/] {e}")
                 continue
             console.print(f"  [{i}/{len(sites)}] {site}")
-        console.print("确认各站点已正常打开（已登录状态）后，回到这里按回车收 Cookie…")
+        console.print("确认各文章页显示为[已下载权限]状态（有 PDF 下载按钮）后，回这里按回车收 Cookie…")
         with contextlib.suppress(EOFError):
             input()
         cookies = ctx.cookies()
@@ -305,6 +309,7 @@ def login(
 
     per_host: dict[str, list[str]] = {}
     for c in cookies:
+        # empty-value cookies (e.g. sim-inst-token="") carry no entitlement
         if not c.get("name") or not c.get("value"):
             continue
         host = (c.get("domain") or "").lstrip(".").lower()
