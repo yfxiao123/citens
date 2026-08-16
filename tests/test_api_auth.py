@@ -5,13 +5,12 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from citens.api.app import app
+from citens.config import settings
+
 
 @pytest.fixture()
 def client(monkeypatch):
-    from citens.api.app import app
-
-    from citens.config import settings
-
     monkeypatch.setattr(settings, "api_token", "s3cret")
     # CORS off for these tests (only auth behavior)
     monkeypatch.setattr(settings, "cors_origins", "")
@@ -21,10 +20,6 @@ def client(monkeypatch):
 
 @pytest.fixture()
 def open_client(monkeypatch):
-    from citens.api.app import app
-
-    from citens.config import settings
-
     monkeypatch.setattr(settings, "api_token", "")
     monkeypatch.setattr(settings, "cors_origins", "")
     with TestClient(app) as c:

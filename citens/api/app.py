@@ -17,11 +17,9 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -61,10 +59,10 @@ def _require_token(
 
 class RunRequest(BaseModel):
     topic: str = Field(..., min_length=2, description="research topic")
-    max_papers: Optional[int] = None
-    max_results: Optional[int] = None
-    sources: Optional[list[str]] = None
-    mode: Optional[str] = None  # quick_scan/deep_review/interactive (auto-detect if None)
+    max_papers: int | None = None
+    max_results: int | None = None
+    sources: list[str] | None = None
+    mode: str | None = None  # quick_scan/deep_review/interactive (auto-detect if None)
     fetch_fulltext: bool = True
     enrich_abstracts: bool = True
     allow_supplement: bool = True
