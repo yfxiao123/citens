@@ -73,6 +73,9 @@ def run(
         None, "--mode", help="运行模式: quick_scan/deep_review/interactive (默认自动检测)"
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="禁用缓存"),
+    no_pool: bool = typer.Option(
+        False, "--no-pool", help="不注入/回写 citens collect 的文献池"
+    ),
     no_fulltext: bool = typer.Option(
         False, "--no-fulltext", help="不获取全文（仅用摘要溯源，精度较低）"
     ),
@@ -118,6 +121,7 @@ def run(
         max_papers=n,
         sources=src_list,
         use_cache=not no_cache,
+        use_pool=not no_pool,
         fetch_fulltext=not no_fulltext,
         mode=run_mode,
     )
@@ -237,6 +241,46 @@ def eval(  # noqa: A001
     (out / "report.md").write_text(report, encoding="utf-8")
     console.print(Panel(table, title=f"eval: {len(rows)} runs"))
     console.print(f"[green]✓[/] 写入 {out / 'report.md'}")
+
+
+@app.command()
+def collect(
+    topic: str = typer.Argument(..., help="研究领域（中文或英文）"),
+    target: int = typer.Option(100, "-n", help="文献池目标条数"),
+    queries: str = typer.Option("", "--queries", help="追加自定义查询（逗号分隔）"),
+    no_author: bool = typer.Option(False, "--no-author", help="跳过作者深耕信号补全"),
+):
+    """按系统综述的方式建立该领域的文献池（只记录，不下载全文）。
+
+    多批次关键词（维度覆盖 + 综述定向查询）→ 逐查询检索并去重 →
+    记录细分领域/作者/年份/摘要/关键词/被引/期刊 → 补全一作深耕信号
+    （works/h-index）→ 持久化到 data/litdb/<主题>.jsonl。
+    之后 citens run 同主题会自动注入文献池，全文在筛选后分批获取。
+    """
+    from citens.collect import collect as _collect
+
+    extra = [q.strip() for q in queries.split(",") if q.strip()] if queries else None
+
+    def _prog(msg):
+        console.print(f"  • {msg}")
+
+    with console.status("检索并记录文献…", spinner="dots"):
+        summary = _collect(
+            topic, target=target, extra_queries=extra,
+            enrich_authors=not no_author, on_progress=_prog,
+        )
+    console.print(
+        f"[green]✓[/] 本轮发现 {summary['found']} 篇 · 新增 {summary['added']} 篇 · "
+        f"文献池累计 {summary['pool_total']} 篇"
+    )
+    console.print(f"  文献池: {summary['pool_path']}")
+    top = list(summary["subfields"].items())[:6]
+    if top:
+        console.print("  细分领域分布: " + " · ".join(f"{k} {v}" for k, v in top))
+    dead = [q for q, n in summary["query_hits"].items() if n == 0]
+    if dead:
+        console.print(f"  [yellow]零命中查询:[/] {', '.join(dead[:5])}")
+    console.print("  下次 citens run 该主题时自动注入文献池（--no-pool 可关闭）。")
 
 
 @app.command()

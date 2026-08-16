@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     default_max_papers: int = 15  # final papers kept after filtering (0 = no cap)
     enrich_abstracts: bool = True  # cross-source DOI enrichment for missing abstracts
     output_dir: str = "runs"
+    # Persistent literature pools built by `citens collect` (JSONL per topic).
+    litdb_dir: str = "data/litdb"
     # Output language of the review prose AND section headings: "en" or "zh".
     # Anything not recognized as Chinese falls back to English.
     review_language: str = "en"
@@ -98,6 +100,9 @@ class Settings(BaseSettings):
     rank_weight_relevance: float = 0.6
     rank_weight_citations: float = 0.2
     rank_weight_venue: float = 0.2
+    # First-author engagement (works/h-index from `citens collect`); excluded
+    # from the composite (weights renormalized) when the metadata is unknown.
+    rank_weight_author: float = 0.15
     # SCImago journal-rank CSV (semicolon-delimited). Downloaded once via
     # `citens sjr` — CC BY-NC licensed, so it is fetched, not shipped.
     sjr_csv_path: str = "data/sjr/sjr.csv"

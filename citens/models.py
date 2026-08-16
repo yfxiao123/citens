@@ -43,6 +43,13 @@ class Paper(BaseModel):
     doi: str | None = None
     pdf_url: str | None = None  # open-access full-text PDF, if known
     venue: str = ""  # journal / conference / repository name, when known
+    keywords: list[str] = Field(default_factory=list)  # author/indexer keywords
+    subfield: str = ""  # fine-grained field tag (assigned at pool collection)
+    # Author-engagement signals (filled by citens collect; 0 = unknown).
+    # A first author with many works / a high h-index is 深耕此领域 —
+    # one more quality proxy beyond paper-level citations.
+    first_author_h_index: int = 0
+    first_author_works: int = 0
 
     @field_validator("authors", mode="before")
     @classmethod

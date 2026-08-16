@@ -117,6 +117,9 @@ class RunOptions:
     max_papers: int | None = None
     sources: list[str] | None = None
     use_cache: bool = True
+    # Seed the candidate pool from `citens collect`'s persistent literature
+    # pool when one exists (record-first workflow), and write new finds back.
+    use_pool: bool = True
     allow_supplement: bool = True
     max_supplement_papers: int = 4
     fetch_fulltext: bool = True
@@ -813,6 +816,27 @@ async def run_pipeline_async(
             # candidacy for canonical works the keyword search missed).
             if seed_papers:
                 papers = deduplicate(papers + seed_papers)
+
+            # Literature pool (citens collect): inject accumulated records —
+            # they carry subfield/keywords/author-engagement metadata — and
+            # write this run's finds back so the pool grows with every run.
+            if options.use_pool:
+                from citens.collect import append_pool, pool_path, read_pool
+
+                if pool_path(topic).is_file():
+                    pooled = read_pool(topic)
+                    if pooled:
+                        papers = deduplicate(papers + pooled)
+                        _emit(
+                            bus,
+                            StepProgress(
+                                step="search",
+                                message=f"文献池注入 {len(pooled)} 条（citens collect 累积）",
+                            ),
+                        )
+                added_to_pool = append_pool(topic, papers)
+                if added_to_pool:
+                    runlog.snapshot("pool_writeback", added=added_to_pool)
 
             if max_papers:
                 papers = blend_pool(papers, cap=max(max_papers * 3, 12))

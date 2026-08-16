@@ -45,7 +45,8 @@ class OpenAlexSearcher(SearchSource):
             "sort": "relevance_score:desc",
             "select": (
                 "id,title,authorships,publication_year,abstract_inverted_index,"
-                "cited_by_count,doi,primary_location,open_access,relevance_score"
+                "cited_by_count,doi,primary_location,open_access,relevance_score,"
+                "topics,keywords"
             ),
         }
         resp = await client.get(self.BASE_URL, params=params)
@@ -72,6 +73,19 @@ class OpenAlexSearcher(SearchSource):
         oa = work.get("open_access") or {}
         if not pdf_url and oa.get("oa_url"):
             pdf_url = oa["oa_url"].strip()
+        # Subfield: OpenAlex's own taxonomy beats guessing (topics carry the
+        # indexer-assigned field/subfield of this work).
+        subfield = ""
+        for t in work.get("topics") or []:
+            sf = (t.get("subfield") or {}).get("display_name", "")
+            if sf:
+                subfield = sf
+                break
+        keywords = [
+            kw.get("display_name", "")
+            for kw in work.get("keywords") or []
+            if kw.get("display_name")
+        ][:12]
         return Paper(
             title=work.get("title", ""),
             authors=authors,
@@ -83,6 +97,8 @@ class OpenAlexSearcher(SearchSource):
             doi=work.get("doi"),
             pdf_url=pdf_url,
             venue=source_name if source_name != "OpenAlex" else "",
+            keywords=keywords,
+            subfield=subfield,
         )
 
     @staticmethod

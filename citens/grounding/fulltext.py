@@ -28,7 +28,7 @@ from citens.models import Paper
 from citens.net import rewrite_url, sync_client
 
 _ARXIV_ID_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5}|[a-z\-]+/\.[0-9]+)", re.IGNORECASE)
-_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")  # keep CJK (zh topics)
 _CHUNK_SIZE = 1200
 _HEADERS = {"User-Agent": "CiteLens/0.1 (open literature-review agent)"}
 _md = None  # lazy MarkItDown singleton

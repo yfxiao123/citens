@@ -221,6 +221,21 @@ def citation_factor(citations: int) -> float:
     return min(math.log10(1 + max(citations, 0)) / 3.0, 1.0)
 
 
+def author_depth_factor(h_index: int, works: int) -> float | None:
+    """Author-engagement score in [0,1]; None when the signal is unknown.
+
+    log-scaled on the first author's works count, nudged by h-index: a first
+    author with 100+ field works and h 30+ saturates. Unknown (0/0) returns
+    None so ranking can EXCLUDE the factor instead of punishing the paper for
+    missing metadata.
+    """
+    if works <= 0 and h_index <= 0:
+        return None
+    w = min(math.log10(1 + max(works, 1)) / 2.0, 1.0)  # 100 works saturates
+    h = min(h_index / 40.0, 1.0)
+    return 0.6 * w + 0.4 * h
+
+
 def rank_papers(papers: Sequence[ScoredPaper]) -> list[ScoredPaper]:
     """Fill venue_quartile/rank_score on copies, sorted by rank_score desc.
 
@@ -237,11 +252,18 @@ def rank_papers(papers: Sequence[ScoredPaper]) -> list[ScoredPaper]:
         rel = p.relevance_score / 5.0
         cit = citation_factor(p.citation_count)
         ven = venue_score(q)
-        score = (
-            settings.rank_weight_relevance * rel
-            + settings.rank_weight_citations * cit
-            + settings.rank_weight_venue * ven
-        )
+        # weighted composite, renormalized over the factors a paper actually
+        # has (author depth is optional metadata; its absence must not hurt)
+        parts = [
+            (settings.rank_weight_relevance, rel),
+            (settings.rank_weight_citations, cit),
+            (settings.rank_weight_venue, ven),
+        ]
+        dep = author_depth_factor(p.first_author_h_index, p.first_author_works)
+        if dep is not None:
+            parts.append((settings.rank_weight_author, dep))
+        wsum = sum(w for w, _ in parts)
+        score = sum(w * f for w, f in parts) / wsum if wsum else 0.0
         ranked.append(
             p.model_copy(update={"venue_quartile": q, "rank_score": round(score, 4)})
         )
