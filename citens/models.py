@@ -46,10 +46,15 @@ class Paper(BaseModel):
     keywords: list[str] = Field(default_factory=list)  # author/indexer keywords
     subfield: str = ""  # fine-grained field tag (assigned at pool collection)
     # Author-engagement signals (filled by citens collect; 0 = unknown).
-    # A first author with many works / a high h-index is 深耕此领域 —
-    # one more quality proxy beyond paper-level citations.
+    # first_author_works is the author's TOTAL output (merged-author artifact
+    # prone); author_field_works counts works matching the TOPIC — the real
+    # 深耕此领域 signal, preferred by ranking when present.
     first_author_h_index: int = 0
     first_author_works: int = 0
+    author_field_works: int = 0  # in-topic works of first/last author
+    # provenance / type flags (filled at collection)
+    matched_queries: list[str] = Field(default_factory=list)  # queries that hit this record
+    is_review: bool = False  # indexed as a survey/review (OpenAlex type:review)
 
     @field_validator("authors", mode="before")
     @classmethod

@@ -249,6 +249,9 @@ def collect(
     target: int = typer.Option(100, "-n", help="文献池目标条数"),
     queries: str = typer.Option("", "--queries", help="追加自定义查询（逗号分隔）"),
     no_author: bool = typer.Option(False, "--no-author", help="跳过作者深耕信号补全"),
+    audit_recall: bool = typer.Option(
+        False, "--audit-recall", help="建池后用 top 综述的参考文献算池覆盖率"
+    ),
 ):
     """按系统综述的方式建立该领域的文献池（只记录，不下载全文）。
 
@@ -281,6 +284,20 @@ def collect(
     if dead:
         console.print(f"  [yellow]零命中查询:[/] {', '.join(dead[:5])}")
     console.print("  下次 citens run 该主题时自动注入文献池（--no-pool 可关闭）。")
+
+    if audit_recall:
+        from citens.collect import audit_recall as _audit
+
+        rep = _audit(topic)
+        if rep["reviews_checked"]:
+            cov = rep["coverage"]
+            cov_msg = f"{cov * 100:.0f}%" if cov is not None else "n/a"
+            console.print(
+                f"  [cyan]召回审计:[/] {rep['reviews_checked']} 篇综述的参考文献 "
+                f"{rep['in_pool']}/{rep['refs_checked']} 已在池内（覆盖 {cov_msg}）"
+            )
+        else:
+            console.print("  [yellow]召回审计:[/] 池内暂无带 DOI 的综述记录")
 
 
 @app.command()

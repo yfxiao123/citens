@@ -57,32 +57,41 @@ class BM25Retriever:
         self.b = b
 
     def rank(self, chunks: Sequence[Chunk], query: str, k: int) -> list[Chunk]:
-        docs = [_terms(c.text) for c in chunks]
-        n = len(docs)
-        if n == 0:
-            return []
-        avgdl = sum(len(d) for d in docs) / n
-        df: dict[str, int] = {}
-        for d in docs:
-            for t in set(d):
-                df[t] = df.get(t, 0) + 1
-        qterms = _terms(query)
-        scores: list[float] = []
-        for d in docs:
-            tf: dict[str, int] = {}
-            for t in d:
-                tf[t] = tf.get(t, 0) + 1
-            s = 0.0
-            for t in qterms:
-                if t not in tf:
-                    continue
-                idf = math.log(1 + (n - df[t] + 0.5) / (df[t] + 0.5))
-                s += idf * tf[t] * (self.k1 + 1) / (
-                    tf[t] + self.k1 * (1 - self.b + self.b * len(d) / avgdl)
-                )
-            scores.append(s)
-        order = sorted(range(n), key=lambda i: scores[i], reverse=True)
+        order = bm25_rank_texts([c.text for c in chunks], query, k1=self.k1, b=self.b)
         return [chunks[i] for i in order[:k]]
+
+
+def bm25_rank_texts(
+    texts: list[str], query: str, *, k1: float = 1.5, b: float = 0.75
+) -> list[int]:
+    """Indices of ``texts`` sorted by BM25 relevance to ``query`` (desc).
+
+    Generic text-level BM25 shared by chunk retrieval and the literature
+    pool's deterministic pre-recall (rank pool records before LLM screening).
+    """
+    docs = [_terms(t) for t in texts]
+    n = len(docs)
+    if n == 0:
+        return []
+    avgdl = sum(len(d) for d in docs) / n
+    df: dict[str, int] = {}
+    for d in docs:
+        for t in set(d):
+            df[t] = df.get(t, 0) + 1
+    qterms = _terms(query)
+    scores: list[float] = []
+    for d in docs:
+        tf: dict[str, int] = {}
+        for t in d:
+            tf[t] = tf.get(t, 0) + 1
+        s = 0.0
+        for t in qterms:
+            if t not in tf:
+                continue
+            idf = math.log(1 + (n - df[t] + 0.5) / (df[t] + 0.5))
+            s += idf * tf[t] * (k1 + 1) / (tf[t] + k1 * (1 - b + b * len(d) / avgdl))
+        scores.append(s)
+    return sorted(range(n), key=lambda i: scores[i], reverse=True)
 
 
 class EmbeddingRetriever:

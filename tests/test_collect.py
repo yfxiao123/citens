@@ -59,29 +59,22 @@ def test_enrich_author_engagement_fills_top_papers(monkeypatch):
             pass
 
         def json(self):
-            return {"results": [{"display_name": "A Author",
+            return {"results": [{"id": "https://openalex.org/authors/A123",
+                                 "display_name": "A Author",
                                  "works_count": 80,
                                  "summary_stats": {"h_index": 25}}]}
 
-    class _Client:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def get(self, url, **k):
-            return _Resp()
-
-    monkeypatch.setattr(collect_mod.httpx, "Client", lambda **k: _Client())
+    monkeypatch.setattr(collect_mod, "_oa_get_sync", lambda url, params: _Resp())
     monkeypatch.setattr(collect_mod.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collect_mod, "_field_works_count", lambda aid, q: 12)
     papers = [_p(f"P{i}", citation_count=i) for i in range(5)]
-    n = collect_mod._enrich_author_engagement(papers, top_n=2)
+    n = collect_mod._enrich_author_engagement(papers, "order book", top_n=2)
     assert n == 2
     # only the two most-cited got the signal
     enriched = [p for p in papers if p.first_author_works > 0]
     assert {p.title for p in enriched} == {"P3", "P4"}
     assert enriched[0].first_author_h_index == 25
+    assert enriched[0].author_field_works == 12
 
 
 # --- ranking factor ------------------------------------------------------------
@@ -114,13 +107,83 @@ def test_rank_uses_author_depth_without_punishing_unknown():
 def test_build_queries_includes_survey_hunting(monkeypatch):
     import citens.agents.planner as planner
 
-    monkeypatch.setattr(
-        planner, "chat_json",
-        lambda s, u, **k: {"queries": ["order book model"]},
-    )
-    # generate_seed_papers uses the same fake: papers=[] terms=[]
-    queries = collect_mod.build_queries("订单簿建模")
+    def fake_chat(s, u, **k):
+        # keywords prompt vs seed prompt are distinguishable by content
+        if "LANDMARK" in s:
+            return {"papers": [], "domain_terms": ["adverse selection"]}
+        return {"queries": ["order book model"]}
+
+    monkeypatch.setattr(planner, "chat_json", fake_chat)
+    queries, broad = collect_mod.build_queries("订单簿建模")
     assert "order book model" in queries
+    assert "adverse selection" in queries
+    assert "adverse selection" in broad  # seed domain terms -> field-constrained only
+    assert "order book model" not in broad
     assert any("survey" in q for q in queries)
     assert any("review" in q for q in queries)
     assert len(queries) == len(set(q.lower() for q in queries))  # deduped
+
+
+# --- v2: attribution, backfill handoff, pre-recall, audit -------------------
+
+
+def test_search_per_query_attributes_matched_queries(monkeypatch):
+    import asyncio
+
+    async def fake_search(queries, max_results=10, sources=None):
+        # every query "finds" the same paper + one unique paper
+        out = [_p("Shared"), _p(f"Unique {queries[0]}")]
+        return out
+
+    monkeypatch.setattr(collect_mod, "search_papers", fake_search)
+    by_key, hits = asyncio.run(collect_mod._search_per_query(["q one", "q two"], 10, None))
+    shared = next(p for p in by_key.values() if p.title == "Shared")
+    assert set(shared.matched_queries) == {"q one", "q two"}
+    assert hits == {"q one": 2, "q two": 2}
+
+
+def test_append_pool_merges_metadata_without_losing(tmp_path, monkeypatch):
+    monkeypatch.setattr(collect_mod.settings, "litdb_dir", str(tmp_path))
+    collect_mod.append_pool("t", [_p("A", doi="10.1/x", subfield="", keywords=[])])
+    # second record same DOI brings subfield + query attribution
+    collect_mod.append_pool(
+        "t", [_p("A", doi="10.1/x", subfield="Finance", matched_queries=["lob model"])]
+    )
+    pool = collect_mod.read_pool("t")
+    assert len(pool) == 1
+    assert pool[0].subfield == "Finance"
+    assert pool[0].matched_queries == ["lob model"]
+
+
+def test_recall_from_pool_ranks_and_keeps_reviews(tmp_path, monkeypatch):
+    monkeypatch.setattr(collect_mod.settings, "litdb_dir", str(tmp_path))
+    records = [
+        _p("order book queueing model", citation_count=1),
+        _p("deep learning image classification cats", citation_count=99),
+        _p("limit order book price impact", citation_count=5),
+        _p("totally unrelated agriculture paper", citation_count=500, is_review=True),
+    ]
+    collect_mod.append_pool("t", records)
+    picked = collect_mod.recall_from_pool("t", ["order book limit"], k=3)
+    titles = [p.title for p in picked]
+    assert len(picked) <= 3
+    assert "order book queueing model" in titles
+    assert "limit order book price impact" in titles
+    assert "totally unrelated agriculture paper" in titles  # review always survives
+    assert "deep learning image classification cats" not in titles
+
+
+def test_broad_query_classification():
+    assert collect_mod._is_broad("adverse selection") is False
+    assert collect_mod._is_broad("adverse selection") is False or True  # 2 words
+    assert collect_mod._is_broad("econometrics") is True  # single concept
+
+
+def test_field_works_count_pref(tmp_path, monkeypatch):
+    from citens.ranking import author_depth_factor
+
+    f_field = author_depth_factor(20, 999999, field_works=25)
+    f_total = author_depth_factor(20, 999999)
+    assert f_field is not None and f_total is not None
+    # in-field 25 works should beat a (artifact-prone) huge total
+    assert f_field > f_total

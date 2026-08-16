@@ -821,17 +821,23 @@ async def run_pipeline_async(
             # they carry subfield/keywords/author-engagement metadata — and
             # write this run's finds back so the pool grows with every run.
             if options.use_pool:
-                from citens.collect import append_pool, pool_path, read_pool
+                from citens.collect import append_pool, pool_path, recall_from_pool
 
                 if pool_path(topic).is_file():
-                    pooled = read_pool(topic)
+                    # pre-recall keeps LLM screening cost flat as the pool
+                    # grows: BM25 picks the top slice (reviews always pass),
+                    # the rest stays a deep reservoir
+                    pooled = recall_from_pool(topic, keywords, max_results * 2)
                     if pooled:
                         papers = deduplicate(papers + pooled)
                         _emit(
                             bus,
                             StepProgress(
                                 step="search",
-                                message=f"文献池注入 {len(pooled)} 条（citens collect 累积）",
+                                message=(
+                                    f"文献池预召回 {len(pooled)} 条"
+                                    f"（citens collect 累积池）"
+                                ),
                             ),
                         )
                 added_to_pool = append_pool(topic, papers)

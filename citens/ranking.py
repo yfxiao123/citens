@@ -221,14 +221,19 @@ def citation_factor(citations: int) -> float:
     return min(math.log10(1 + max(citations, 0)) / 3.0, 1.0)
 
 
-def author_depth_factor(h_index: int, works: int) -> float | None:
+def author_depth_factor(h_index: int, works: int, field_works: int = 0) -> float | None:
     """Author-engagement score in [0,1]; None when the signal is unknown.
 
-    log-scaled on the first author's works count, nudged by h-index: a first
-    author with 100+ field works and h 30+ saturates. Unknown (0/0) returns
-    None so ranking can EXCLUDE the factor instead of punishing the paper for
-    missing metadata.
+    ``field_works`` (in-topic works, from citens collect) is the real
+    深耕此领域 signal and is preferred; the total-works fallback is
+    merged-author-artifact prone (OpenAlex merges same-named authors).
+    Unknown (all zero) returns None so ranking can EXCLUDE the factor
+    instead of punishing the paper for missing metadata.
     """
+    if field_works > 0:
+        w = min(math.log10(1 + field_works) / math.log10(31), 1.0)  # 30 in-field works saturates
+        h = min(h_index / 40.0, 1.0)
+        return 0.7 * w + 0.3 * h
     if works <= 0 and h_index <= 0:
         return None
     w = min(math.log10(1 + max(works, 1)) / 2.0, 1.0)  # 100 works saturates
@@ -259,7 +264,9 @@ def rank_papers(papers: Sequence[ScoredPaper]) -> list[ScoredPaper]:
             (settings.rank_weight_citations, cit),
             (settings.rank_weight_venue, ven),
         ]
-        dep = author_depth_factor(p.first_author_h_index, p.first_author_works)
+        dep = author_depth_factor(
+            p.first_author_h_index, p.first_author_works, p.author_field_works
+        )
         if dep is not None:
             parts.append((settings.rank_weight_author, dep))
         wsum = sum(w for w, _ in parts)
