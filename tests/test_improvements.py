@@ -309,3 +309,24 @@ def test_arxiv_title_lookup_parses_atom(monkeypatch):
         url="https://example.com/whatever",
     )
     assert ft._arxiv_pdf_url(paper) == "https://arxiv.org/pdf/2301.12345.pdf"
+
+
+# --- EZproxy cookie riding ----------------------------------------------------
+
+
+def test_sync_client_attaches_ezproxy_cookie(monkeypatch):
+    from citens import net as net_mod
+    from citens.config import Settings
+
+    fake = Settings(
+        ezproxy_prefix="https://libproxy.nju.edu.cn/login?url=",
+        ezproxy_cookie="EZProxy=abc123; other=x",
+    )
+    monkeypatch.setattr(net_mod, "settings", fake)
+    client = net_mod.sync_client("https://libproxy.nju.edu.cn/login?url=https%3A%2F%2Fsciencedirect.com")
+    assert client.headers.get("Cookie") == "EZProxy=abc123; other=x"
+    client.close()
+    # other hosts untouched
+    client2 = net_mod.sync_client("https://arxiv.org/pdf/x.pdf")
+    assert "Cookie" not in client2.headers
+    client2.close()

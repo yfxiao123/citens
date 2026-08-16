@@ -77,10 +77,31 @@ def rewrite_url(url: str) -> str:
     return f"{prefix}{quote(url, safe='')}"
 
 
+def _ezproxy_headers(url: str) -> dict[str, str]:
+    """Cookie for the EZproxy host when the user lent us their SSO session.
+
+    Off-campus EZproxy authenticates by session cookie; the rewritten URL
+    alone just bounces to an SSO login page (HTML, rejected downstream).
+    """
+    prefix = settings.ezproxy_prefix.strip()
+    cookie = settings.ezproxy_cookie.strip()
+    if not prefix or not cookie:
+        return {}
+    prefix_host = (urlparse(prefix).hostname or "").lower()
+    host = (urlparse(url).hostname or "").lower()
+    if prefix_host and host == prefix_host:
+        return {"Cookie": cookie}
+    return {}
+
+
 def sync_client(url: str | None = None, **kwargs) -> httpx.Client:
     """A sync httpx.Client configured with timeout/redirects + proxy (if any)."""
     kwargs.setdefault("timeout", 60)
     kwargs.setdefault("follow_redirects", True)
+    if url:
+        headers = {**_ezproxy_headers(url), **(kwargs.pop("headers", {}) or {})}
+        if headers:
+            kwargs["headers"] = headers
     proxy = proxy_url_for(url)
     if proxy:
         try:  # httpx >= 0.28

@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # same network). Example: https://lib.univ.edu.cn/login?url=
     # Leave empty to disable rewriting.
     ezproxy_prefix: str = ""
+    # Raw Cookie header for the EZproxy host, copied from your browser after
+    # SSO login (DevTools -> Network -> any libproxy request -> request headers
+    # -> Cookie). EZproxy authenticates by session cookie, so URL rewriting
+    # alone bounces off-campus fetches to a login page. Rotates on re-login.
+    ezproxy_cookie: str = ""
     # Drop folder for manually downloaded PDFs (see fetch_list.md emitted by a
     # run). Full-text lookup checks here BEFORE hitting the network, so files
     # you drop are picked up by the next run.
