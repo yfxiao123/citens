@@ -14,19 +14,19 @@ dist/
 build/
 
 # run artifacts & caches
-runs/
-output/
+/runs/
+/output/
 .cache/
 
 # user-dropped PDFs (auto-created at runtime, content is user-local)
-papers/
+/papers/
 
 # course materials & legacy code (not part of the OSS repo)
 课程大作业.docx
 resource/
 src/
-app.py
-webui.py
+/app.py
+/webui.py
 requirements.txt
 1407.5684.pdf
 
