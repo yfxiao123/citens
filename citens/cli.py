@@ -301,9 +301,46 @@ def login(
                 console.print(f"  [yellow]{site} 加载异常（跳过）:[/] {e}")
                 continue
             console.print(f"  [{i}/{len(sites)}] {site}")
-        console.print("确认各文章页显示为[已下载权限]状态（有 PDF 下载按钮）后，回这里按回车收 Cookie…")
-        with contextlib.suppress(EOFError):
-            input()
+
+        def _entitled(page) -> bool:
+            """Heuristic: an entitled article page offers a real PDF download."""
+            for sel in (
+                "a:has-text('Download PDF')",
+                "a[data-track-action='download pdf']",
+                "a:has-text('PDF')",
+                "a[title='PDF']",
+                "a:has-text('Get full text')",
+            ):
+                try:
+                    if page.locator(sel).count() > 0:
+                        return True
+                except Exception:  # noqa: BLE001
+                    continue
+            return False
+
+        # verify entitlement per site; give the user a fix loop
+        for _round in range(3):
+            missing = []
+            for site in sites:
+                try:
+                    page.goto(site, timeout=60000, wait_until="load")
+                    okflag = _entitled(page)
+                except Exception:  # noqa: BLE001
+                    okflag = False
+                mark = "[green]✓[/]" if okflag else "[red]✗[/]"
+                console.print(f"  {mark} {site[:70]}")
+                if not okflag:
+                    missing.append(site)
+            if not missing:
+                break
+            console.print(
+                f"[yellow]上述 {len(missing)} 家未获得下载权限。[/]在浏览器中打开这些文章页，"
+                "点击 'Access through your institution / Log in via an institution'，"
+                "选择南京大学完成登录（学校会话已在，无需再输密码），"
+                "确认出现 PDF 下载按钮后，回这里按回车重新校验。"
+            )
+            with contextlib.suppress(EOFError):
+                input()
         cookies = ctx.cookies()
         browser.close()
 

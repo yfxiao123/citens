@@ -179,24 +179,35 @@ def _convert_pdf_file(path: str) -> str | None:
         return None
 
 
+def _pdf_bytes_to_text(content: bytes) -> str | None:
+    if not content or content[:5] != b"%PDF-":
+        return None
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as fh:
+        fh.write(content)
+        tmp = fh.name
+    try:
+        return _convert_pdf_file(tmp)
+    finally:
+        os.unlink(tmp)
+
+
 def _download_and_convert(url: str) -> str | None:
     try:
         url = rewrite_url(url)  # ride the user's EZproxy/declared access
         with sync_client(url, timeout=60, headers=_HEADERS) as client:
             r = client.get(url)
-        if r.status_code != 200 or len(r.content) < 2000:
-            return None
-        ctype = r.headers.get("content-type", "").lower()
-        if "pdf" not in ctype and not url.lower().endswith(".pdf") and r.content[:5] != b"%PDF-":
-            # not a PDF (likely an HTML landing page) — skip
-            return None
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as fh:
-            fh.write(r.content)
-            tmp = fh.name
-        try:
-            return _convert_pdf_file(tmp)
-        finally:
-            os.unlink(tmp)
+        if r.status_code == 200 and len(r.content) >= 2000:
+            ctype = r.headers.get("content-type", "").lower()
+            if "pdf" in ctype or url.lower().endswith(".pdf") or r.content[:5] == b"%PDF-":
+                return _pdf_bytes_to_text(r.content)
+        # publishers front PDF endpoints with a JS bot challenge — replay
+        # the SSO cookie jar through a real browser when we hit one
+        from citens.grounding.browserfetch import fetch_pdf_via_browser, looks_like_challenge
+
+        if r.status_code == 200 and looks_like_challenge(r.content):
+            body = fetch_pdf_via_browser(url)
+            return _pdf_bytes_to_text(body) if body else None
+        return None
     except Exception:  # noqa: BLE001
         return None
 

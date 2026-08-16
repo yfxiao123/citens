@@ -118,32 +118,46 @@ def save_cookie_jar(jar: dict[str, str]) -> None:
     p.write_text(json.dumps(jar, indent=2), encoding="utf-8")
 
 
-def _jar_headers(url: str) -> dict[str, str]:
-    """Longest-suffix host match against the cookie jar.
+def _jar_cookies() -> httpx.Cookies:
+    """The harvested SSO jar as a real cookie jar (per-cookie domains).
 
-    Shibboleth/SDAuth sessions live on the PUBLISHER's domain (e.g.
-    sciencedirect.com), not a proxy host — the jar covers that case.
+    Publisher entitlement flows CROSS DOMAINS by redirect (link.springer.com
+    -> springernature.com idp -> back with a token); a static Cookie header
+    for one host dies at the first hop. A populated httpx cookie jar sends
+    the right cookies at every hop automatically.
     """
-    host = (urlparse(url).hostname or "").lower()
-    if not host:
-        return {}
-    best = ""
-    for dom in load_cookie_jar():
-        d = dom.lower().lstrip(".")
-        if (host == d or host.endswith("." + d)) and len(d) > len(best):
-            best = d
-    if not best:
-        return {}
-    return {"Cookie": load_cookie_jar()[best]}
+    cookies = httpx.Cookies()
+    for host, header in load_cookie_jar().items():
+        for pair in header.split("; "):
+            if "=" not in pair:
+                continue
+            name, value = pair.split("=", 1)
+            # leading dot => domain cookie (covers subdomains like
+            # www.sciencedirect.com); without it cookielib does exact-host only
+            dom = host.lstrip(".").lower()
+            try:
+                cookies.set(name, value, domain=f".{dom}")
+            except Exception:  # noqa: BLE001 — a malformed entry skips silently
+                continue
+    return cookies
 
 
 def sync_client(url: str | None = None, **kwargs) -> httpx.Client:
-    """A sync httpx.Client configured with timeout/redirects + proxy (if any)."""
+    """A sync httpx.Client configured with timeout/redirects + proxy (if any).
+
+    Loads the SSO cookie jar (when present) as native cookies so redirect
+    chains through publisher/IdP domains keep their sessions.
+    """
     kwargs.setdefault("timeout", 60)
     kwargs.setdefault("follow_redirects", True)
+    jar = _jar_cookies()
+    if len(jar.jar):
+        existing = kwargs.pop("cookies", None)
+        merged = httpx.Cookies(existing) if existing else httpx.Cookies()
+        merged.update(jar)
+        kwargs["cookies"] = merged
     if url:
         headers = {
-            **_jar_headers(url),
             **_ezproxy_headers(url),
             **(kwargs.pop("headers", {}) or {}),
         }
