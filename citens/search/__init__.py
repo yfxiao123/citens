@@ -10,6 +10,7 @@ from citens.search.base import (
     deduplicate,
     register,
     search_papers,
+    search_papers_with_health,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "deduplicate",
     "register",
     "search_papers",
+    "search_papers_with_health",
 ]

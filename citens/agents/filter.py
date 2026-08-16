@@ -1,9 +1,9 @@
 """Relevance-filtering agent: score each candidate paper 1-5, keep >= 3.
 
-Scoring calls are independent — they run on the thread pool
-(:func:`citens.llm.run_concurrent`). At a 100-paper target the candidate
-pool is ~300 papers; sequential scoring would take the majority of the
-whole run.
+Scoring runs in BATCHES (default 8 papers per LLM call) on the thread pool
+(:func:`citens.llm.run_concurrent`) — a 300-paper candidate pool costs ~40
+calls, not 300. Papers a batch fails to score (parse gaps, truncation) fall
+back to a single-paper call, so a bad batch never drops papers silently.
 """
 
 from __future__ import annotations
@@ -27,6 +27,23 @@ one paper's metadata, you must:
 
 Output JSON:
 {"score": 3, "reason": "This paper directly addresses the topic's core method..."}"""
+
+BATCH_SYSTEM_PROMPT = """You are an academic literature-screening expert. You are given a research \
+topic and SEVERAL candidate papers (numbered). For EACH paper, rate relevance 1-5:
+   5 = directly on-topic, core literature
+   4 = highly relevant
+   3 = partially relevant
+   2 = tangentially related
+   1 = irrelevant
+and give a 20-50 word justification. Judge every paper independently on its own merits.
+
+Output JSON with one entry per paper (use the given paper_index):
+{"results": [
+  {"paper_index": 0, "score": 4, "reason": "..."},
+  {"paper_index": 1, "score": 2, "reason": "..."}
+]}"""
+
+_BATCH_SIZE = 8
 
 
 @overload
@@ -77,25 +94,7 @@ def filter_papers(
     min_year = min_year_from_filters(filters)
     total = len(papers)
 
-    def _score_one(_i: int, paper: Paper) -> tuple[ScoredPaper, dict]:
-        user_prompt = (
-            f"研究主题 / Topic: {topic}\n"
-            f"{constraints}"
-            f"\n论文信息 / Paper:\n{paper.brief()}\n\n"
-            "Rate relevance and justify."
-        )
-        try:
-            # A score + short reason is tiny; the small budget keeps reasoning
-            # models from padding generation. chat_json retries larger if the
-            # thinking squeezes the JSON out.
-            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=1024)
-            score = int(result.get("score", 1))
-            reason = str(result.get("reason", ""))
-        except Exception as e:  # noqa: BLE001
-            print(f"    score failed: {e}")
-            score = 2
-            reason = "scoring error, defaulting low"
-
+    def _to_scored(paper: Paper, score: int, reason: str) -> tuple[ScoredPaper, dict]:
         # Deterministic enforcement of a stated timeframe: an LLM might let a
         # 1998 paper slip past "近5年"; the parse never does.
         if min_year and paper.year and paper.year < min_year:
@@ -118,17 +117,81 @@ def filter_papers(
         }
         return scored_paper, log_entry
 
+    def _score_one(paper: Paper) -> tuple[ScoredPaper, dict]:
+        user_prompt = (
+            f"研究主题 / Topic: {topic}\n"
+            f"{constraints}"
+            f"\n论文信息 / Paper:\n{paper.brief()}\n\n"
+            "Rate relevance and justify."
+        )
+        try:
+            # A score + short reason is tiny; the small budget keeps reasoning
+            # models from padding generation. chat_json retries larger if the
+            # thinking squeezes the JSON out.
+            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=1024)
+            score = int(result.get("score", 1))
+            reason = str(result.get("reason", ""))
+        except Exception as e:  # noqa: BLE001
+            print(f"    score failed: {e}")
+            score = 2
+            reason = "scoring error, defaulting low"
+        return _to_scored(paper, score, reason)
+
+    def _score_batch(batch: list[Paper]) -> list[tuple[ScoredPaper, dict]]:
+        """Score one batch in a single call; per-paper fallback for gaps."""
+        paper_lines = "\n\n".join(
+            f"--- Paper {i} ---\n{p.brief()}" for i, p in enumerate(batch)
+        )
+        user_prompt = (
+            f"研究主题 / Topic: {topic}\n"
+            f"{constraints}"
+            f"\n候选论文 / Candidate papers:\n{paper_lines}\n\n"
+            f"Rate ALL {len(batch)} papers."
+        )
+        by_index: dict[int, dict] = {}
+        try:
+            result = chat_json(BATCH_SYSTEM_PROMPT, user_prompt, max_tokens=4096)
+            for entry in result.get("results", []):
+                if isinstance(entry, dict) and "paper_index" in entry:
+                    try:
+                        by_index[int(entry["paper_index"])] = entry
+                    except (TypeError, ValueError):
+                        continue
+        except Exception as e:  # noqa: BLE001
+            print(f"    batch scoring failed ({e}); falling back to per-paper")
+
+        out: list[tuple[ScoredPaper, dict]] = []
+        for i, paper in enumerate(batch):
+            entry = by_index.get(i)
+            if entry is None:
+                out.append(_score_one(paper))
+                continue
+            try:
+                score = int(entry.get("score", 1))
+            except (TypeError, ValueError):
+                score = 1
+            reason = str(entry.get("reason", ""))
+            out.append(_to_scored(paper, score, reason))
+        return out
+
+    if not papers:
+        return ([], []) if return_log else []
+
+    batches = [papers[s : s + _BATCH_SIZE] for s in range(0, total, _BATCH_SIZE)]
+
     done = 0
 
-    def _on_done(_i, _paper, _result):
+    def _on_done(_i, batch, _result):
         nonlocal done
-        done += 1
+        done += len(batch)
         if on_progress:
-            on_progress(done, total, _paper.title[:50])
+            on_progress(done, total, f"批次 {_i + 1}/{len(batches)}")
 
-    results = run_concurrent(_score_one, list(papers), on_done=_on_done)
-    scored = [r[0] for r in results]
-    filter_log = [r[1] for r in results]
+    results = run_concurrent(
+        lambda _i, b: _score_batch(b), batches, on_done=_on_done
+    )
+    scored = [r[0] for pair in results for r in pair]
+    filter_log = [r[1] for pair in results for r in pair]
 
     passed = [p for p in scored if p.relevance_score >= 3]
 

@@ -40,6 +40,11 @@ cross_sectional, survey, theoretical, simulation, empirical, review, other",
 }"""
 
 
+def _s(v) -> str:
+    """LLM JSON values come back as null often enough to matter."""
+    return v if isinstance(v, str) else ""
+
+
 def _validated_quality(result: dict) -> dict:
     """Clamp/whitelist the quality fields of an extraction result.
 
@@ -73,10 +78,10 @@ def _validated_quality(result: dict) -> dict:
         "study_type": study_type,
         "evidence_level": evidence_level,
         "method_rigor": method_rigor,
-        "sample_or_data": result.get("sample_or_data", ""),
+        "sample_or_data": _s(result.get("sample_or_data")),
         "effect_direction": effect_direction,
-        "temporal_scope": result.get("temporal_scope", ""),
-        "quality_note": result.get("quality_note", ""),
+        "temporal_scope": _s(result.get("temporal_scope")),
+        "quality_note": _s(result.get("quality_note")),
     }
 
 

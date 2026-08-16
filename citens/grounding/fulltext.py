@@ -81,6 +81,77 @@ def _arxiv_pdf_url(paper: Paper) -> str | None:
     m = _ARXIV_ID_RE.search(paper.url or "")
     if m:
         return f"https://arxiv.org/pdf/{m.group(1)}.pdf"
+    return _arxiv_title_lookup(paper)
+
+
+def _norm_words(title: str) -> set[str]:
+    import re as _re
+
+    return {t for t in _re.split(r"[^a-z0-9]+", title.lower()) if len(t) > 2}
+
+
+def _arxiv_title_lookup(paper: Paper) -> str | None:
+    """Find the paper's arXiv preprint by title (Atom API, top hits).
+
+    Many paywalled journal papers have a free arXiv version whose URL never
+    appears in the metadata we collected — a title match recovers the PDF.
+    Guards against weak matches (min token overlap) since the API ranks by
+    relevance, not equality.
+    """
+    title = (paper.title or "").strip()
+    if len(title) < 10:
+        return None
+    try:
+        with sync_client(timeout=20, headers=_HEADERS) as client:
+            r = client.get(
+                "https://export.arxiv.org/api/query",
+                params={"search_query": f'ti:"{title}"', "max_results": 3},
+            )
+            r.raise_for_status()
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(r.text)
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        want = _norm_words(title)
+        for entry in root.findall("a:entry", ns):
+            hit = (entry.findtext("a:title", "", ns) or "").strip()
+            got = _norm_words(hit)
+            if want and got and len(want & got) / min(len(want), len(got)) >= 0.8:
+                entry_id = (entry.findtext("a:id", "", ns) or "").strip()
+                m = _ARXIV_ID_RE.search(entry_id.replace("/abs/", "/pdf/"))
+                if m:
+                    return f"https://arxiv.org/pdf/{m.group(1)}.pdf"
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _core_pdf_url(doi: str) -> str | None:
+    """Open-access PDF via CORE (aggregates repositories worldwide).
+
+    Needs CORE_API_KEY (free registration); disabled when unset.
+    """
+    key = settings.core_api_key
+    if not key or not doi:
+        return None
+    try:
+        with sync_client(timeout=20, headers=_HEADERS) as client:
+            r = client.get(
+                "https://api.core.ac.uk/v3/search/works",
+                params={"q": f'doi:"{doi}"', "limit": 3},
+                headers={**_HEADERS, "Authorization": f"Bearer {key}"},
+            )
+            r.raise_for_status()
+            for hit in r.json().get("results", []):
+                for loc in hit.get("locations", []):
+                    pdf = (loc.get("pdfUrl") or "").strip()
+                    if pdf:
+                        return pdf
+    except Exception:  # noqa: BLE001
+        return None
     return None
 
 
@@ -157,6 +228,9 @@ def fetch_fulltext(paper: Paper) -> str | None:
         upw = _unpaywall_pdf_url(paper.doi)
         if upw:
             candidates.append(upw)
+        core = _core_pdf_url(paper.doi)
+        if core:
+            candidates.append(core)
 
     text = None
     for url in candidates:

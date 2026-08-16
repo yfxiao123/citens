@@ -45,6 +45,14 @@ class ChunkStore:
         for i, paper in enumerate(papers):
             if on_progress:
                 on_progress(i + 1, len(papers), paper.title[:40])
+            if self.has(paper.id):
+                # already grounded in a previous compose round (the reflect
+                # loop re-runs build over the whole augmented set) — keep the
+                # existing chunks; re-fetching and re-parsing PDFs per round
+                # was pure repeated work
+                if any(c.kind == ChunkKind.FULLTEXT for c in self._by_paper[paper.id]):
+                    n_full += 1
+                continue
             chunks: list[Chunk] = []
             if fetch_full:
                 try:

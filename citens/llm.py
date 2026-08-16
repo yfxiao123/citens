@@ -204,10 +204,15 @@ def chat_json(
     """
     max_tokens = max_tokens or settings.llm_max_tokens_default
 
-    def _call(budget: int) -> str:
+    def _call(budget: int, nudge: bool = False) -> str:
+        prompt = user_prompt
+        if nudge:
+            # some backends answer with prose despite response_format; an
+            # explicit instruction usually recovers a parseable reply
+            prompt += "\n\nRespond with ONLY the JSON object. No prose, no code fences."
         return chat(
             system_prompt,
-            user_prompt,
+            prompt,
             temperature=temperature,
             max_tokens=budget,
             response_json=True,
@@ -218,9 +223,17 @@ def chat_json(
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        bigger = max(max_tokens * 2, 8192)
-        raw = _strip_fences(_call(bigger))
-        return json.loads(raw)
+        pass
+    # retry 1: same budget, explicit JSON-only nudge (prose answers are the
+    # most common non-truncation parse failure)
+    try:
+        return json.loads(_strip_fences(_call(max_tokens, nudge=True)))
+    except json.JSONDecodeError:
+        pass
+    # retry 2: bigger budget (reasoning models whose thinking squeezes the
+    # output to empty/truncated JSON)
+    bigger = max(max_tokens * 2, 8192)
+    return json.loads(_strip_fences(_call(bigger)))
 
 
 def run_concurrent(

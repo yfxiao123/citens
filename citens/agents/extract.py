@@ -1,12 +1,14 @@
 """Information-extraction agent: deep structured fields from each paper.
 
-Per-paper calls are independent — they run on a thread pool
-(:func:`citens.llm.run_concurrent`) so a 100-paper extract stage takes
-~100/concurrency round-trips.
+Papers are extracted in BATCHES (default 4 per LLM call) on the thread pool
+(:func:`citens.llm.run_concurrent`) — a 100-paper extract stage costs ~25
+calls instead of 100. A paper the batch response omits (parse gaps,
+truncation) falls back to a single-paper call, so extraction never silently
+drops fields.
 
-Quality assessment (study type, evidence level, method rigor) is folded
-into the SAME call: two prompts over the same abstract doubled the calls
-without adding information (100 papers = 200 calls before, 100 now).
+Quality assessment (study type, evidence level, method rigor) is folded into
+the SAME call: two prompts over the same abstract doubled the calls without
+adding information.
 """
 
 from __future__ import annotations
@@ -54,7 +56,42 @@ significance when the abstract mentions them. "Method X outperforms Y by 15% on 
 dataset Z" is good; "Method X is effective" is bad.
 2. Methodology must name the specific technique, not just the broad category.
 3. Limitations include both author-acknowledged and evident-from-abstract issues.
-4. Only extract what the abstract actually says — do NOT infer or fabricate."""
+4. Only extract what the abstract actually says — do NOT infer or fabricate.
+
+When given SEVERAL numbered papers at once, extract EVERY paper independently \
+and return one entry per paper:
+{"papers": [{"paper_index": 0, ...same fields as above...},
+            {"paper_index": 1, ...}]}"""
+
+_BATCH_SIZE = 4
+_BATCH_MAX_TOKENS = 12288
+
+
+def _s(v) -> str:
+    """LLM JSON fields come back as null / non-strings often enough to matter."""
+    return v if isinstance(v, str) else ""
+
+
+def _lst(v) -> list:
+    return v if isinstance(v, list) else []
+
+
+def _build_extracted(paper: ScoredPaper, result: dict, assess_quality: bool) -> ExtractedPaper:
+    quality: dict = {}
+    if assess_quality:
+        from citens.agents.quality import _validated_quality
+
+        quality = _validated_quality(result)
+
+    return ExtractedPaper(
+        **paper.model_dump(exclude={"id"}),
+        research_question=_s(result.get("research_question")),
+        methodology=_s(result.get("methodology")),
+        key_findings=_lst(result.get("key_findings")),
+        limitations=_lst(result.get("limitations")),
+        relevance_to_topic=_s(result.get("relevance_to_topic")),
+        quality=quality,
+    )
 
 
 def _extract_one(paper: ScoredPaper, topic: str, assess_quality: bool = True) -> ExtractedPaper:
@@ -68,22 +105,41 @@ def _extract_one(paper: ScoredPaper, topic: str, assess_quality: bool = True) ->
     except Exception as e:  # noqa: BLE001
         print(f"    extract failed ({paper.title[:40]}): {e}")
         result = {}
+    return _build_extracted(paper, result, assess_quality)
 
-    quality: dict = {}
-    if assess_quality:
-        from citens.agents.quality import _validated_quality
 
-        quality = _validated_quality(result)
-
-    return ExtractedPaper(
-        **paper.model_dump(exclude={"id"}),
-        research_question=result.get("research_question", ""),
-        methodology=result.get("methodology", ""),
-        key_findings=result.get("key_findings", []),
-        limitations=result.get("limitations", []),
-        relevance_to_topic=result.get("relevance_to_topic", ""),
-        quality=quality,
+def _extract_batch(
+    batch: list[ScoredPaper], topic: str, assess_quality: bool = True
+) -> list[ExtractedPaper]:
+    """Extract one batch in a single call; per-paper fallback for gaps."""
+    paper_lines = "\n\n".join(
+        f"--- Paper {i} ---\n{p.brief()}" for i, p in enumerate(batch)
     )
+    user_prompt = (
+        f"研究主题 / Topic: {topic}\n\n"
+        f"候选论文 / Papers:\n{paper_lines}\n\n"
+        f"Extract the deep structured information for ALL {len(batch)} papers."
+    )
+    by_index: dict[int, dict] = {}
+    try:
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=_BATCH_MAX_TOKENS)
+        for entry in result.get("papers", []):
+            if isinstance(entry, dict) and "paper_index" in entry:
+                try:
+                    by_index[int(entry["paper_index"])] = entry
+                except (TypeError, ValueError):
+                    continue
+    except Exception as e:  # noqa: BLE001
+        print(f"    batch extract failed ({e}); falling back to per-paper")
+
+    out: list[ExtractedPaper] = []
+    for i, paper in enumerate(batch):
+        entry = by_index.get(i)
+        if entry is None:
+            out.append(_extract_one(paper, topic, assess_quality))
+        else:
+            out.append(_build_extracted(paper, entry, assess_quality))
+    return out
 
 
 def extract_papers(
@@ -93,7 +149,7 @@ def extract_papers(
     on_progress=None,
     assess_quality: bool = True,
 ) -> list[ExtractedPaper]:
-    """Extract deep structured fields for each filtered paper (concurrently).
+    """Extract deep structured fields for each filtered paper (batched, concurrent).
 
     Args:
         papers: Filtered papers to extract from
@@ -102,11 +158,19 @@ def extract_papers(
         assess_quality: If True, also assess evidence level and method rigor
     """
     total = len(papers)
+    if total == 0:
+        return []
+    batches = [papers[s : s + _BATCH_SIZE] for s in range(0, total, _BATCH_SIZE)]
 
-    def on_done(i, paper, _result):
+    done = 0
+
+    def on_done(_i, batch, _result):
+        nonlocal done
+        done += len(batch)
         if on_progress:
-            on_progress(i + 1, total, paper.title[:50])
+            on_progress(done, total, f"批次 {_i + 1}/{len(batches)}（{len(batch)} 篇）")
 
-    return run_concurrent(
-        lambda i, p: _extract_one(p, topic, assess_quality), list(papers), on_done=on_done
+    results = run_concurrent(
+        lambda _i, b: _extract_batch(b, topic, assess_quality), batches, on_done=on_done
     )
+    return [p for pair in results for p in pair]

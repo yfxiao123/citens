@@ -162,3 +162,80 @@ def verify_claims(
     else:
         precision = 0.0
     return results, precision
+
+
+SPOT_CHECK_PROMPT = """You are a STRICT citation auditor doing a second pass. A previous verifier \
+judged these claims "supported". Your job is to catch LENIENT judgments: claims that \
+were passed but should have been "partial" or "unsupported".
+
+Apply a HARSHER standard than a first pass:
+- "confirm":   the claim is solidly grounded — no overstatement at all.
+- "downgrade": the claim overstates, adds ungrounded specifics, or stretches the \
+source; it should have been "partial" or "unsupported".
+
+Output JSON only:
+{"results": [{"claim_index": 0, "verdict": "confirm", "note": "..."}]}"""
+
+
+def spot_check_supported(
+    claims: list[Claim],
+    ver_results: list[VerificationResult],
+    table: CitationTable,
+    chunk_store: ChunkStore,
+    *,
+    sample_size: int = 8,
+) -> dict:
+    """Re-audit a sample of "supported" verdicts under a stricter standard.
+
+    The rewrite loop can inflate precision by making claims vaguer and having
+    the same judge pass them — this is the counterweight. Returns a summary
+    dict (never raises; a failed audit is reported, not fatal).
+    """
+    import random
+
+    supported_idx = [
+        i for i, r in enumerate(ver_results)
+        if r.verdict.value == "supported" and i < len(claims)
+    ]
+    if not supported_idx:
+        return {"sampled": 0, "downgraded": 0, "agreement_rate": None}
+
+    sample = sorted(random.sample(supported_idx, min(sample_size, len(supported_idx))))
+    context_lines: list[str] = []
+    claim_lines: list[str] = []
+    for j, i in enumerate(sample):
+        claim = claims[i]
+        claim_lines.append(f"Claim {j}: {claim.text}")
+        for cite in claim.citation_indices[:3]:
+            pid = table.paper_id(cite)
+            chunks = chunk_store.chunks_for(pid)[:3]
+            if chunks:
+                body = "\n".join(c.text for c in chunks)
+                context_lines.append(f"[{cite}] {table.label(cite)}\n{body}\n")
+
+    try:
+        raw = chat_json(
+            SPOT_CHECK_PROMPT,
+            "Ground text of cited papers:\n"
+            + "\n".join(context_lines[:20])
+            + "\n\nClaims previously judged 'supported':\n"
+            + "\n".join(claim_lines)
+            + f"\n\nAudit all {len(sample)} claims.",
+            max_tokens=2048,
+            strong=True,
+        )
+        verdicts = {int(r.get("claim_index", -1)): r for r in raw.get("results", [])}
+    except Exception as e:  # noqa: BLE001
+        return {"sampled": 0, "downgraded": 0, "agreement_rate": None, "error": str(e)[:200]}
+
+    downgraded = sum(
+        1
+        for j in range(len(sample))
+        if verdicts.get(j, {}).get("verdict", "confirm") == "downgrade"
+    )
+    return {
+        "sampled": len(sample),
+        "downgraded": downgraded,
+        "agreement_rate": round(1 - downgraded / len(sample), 3) if sample else None,
+        "claim_indices": sample,
+    }

@@ -32,11 +32,12 @@ from citens.agents import (
     organize_themes,
     reflect,
     review_unsupported_claims,
+    rewrite_unsupported_claims,
     synthesize,
     verify_claims,
     write_review_body,
 )
-from citens.agents.planner import refine_queries
+from citens.agents.planner import discover_terms, generate_seed_papers, refine_queries
 from citens.agents.quality import build_comparison_matrix, render_comparison_md
 from citens.agents.writer import localized_heading
 from citens.config import settings
@@ -69,7 +70,13 @@ from citens.models import (
     VerificationResult,
 )
 from citens.ranking import quartile_histogram, rank_papers
-from citens.search import blend_pool, search_papers
+from citens.search import (
+    blend_pool,
+    deduplicate,
+    search_papers,
+    search_papers_with_health,
+)
+from citens.search.seeds import resolve_seeds
 from citens.search.snowball import snowball
 
 
@@ -115,7 +122,16 @@ class RunOptions:
     resume_dir: str | None = None  # existing run dir: reuse its extracted papers
 
     def resolved_max_results(self) -> int:
-        return self.max_results or settings.default_max_results
+        # The candidate pool must stay well above the final cap, or the filter
+        # stage is a no-op (60 candidates for -n 100 selects nothing). When the
+        # user raises the paper count without touching pool size, scale the
+        # pool along (only when max_results was left at its default).
+        if self.max_results:
+            return self.max_results
+        base = settings.default_max_results
+        if self.max_papers:
+            base = max(base, self.max_papers * 4)
+        return base
 
     def resolved_max_papers(self) -> int | None:
         if self.max_papers is None:
@@ -181,6 +197,7 @@ def _compose(
     on_supplement_queries=None,
     clock: StepClock | None = None,
     label: str = "compose",
+    chunk_store: ChunkStore | None = None,
 ) -> ComposeResult:
     """organize -> synthesize -> write -> verify, persisting all artifacts.
 
@@ -192,6 +209,15 @@ def _compose(
     """
     if clock is None:
         clock = StepClock()
+
+    def _recompute_precision() -> float:
+        verifiable = [r for r in ver_results if r.verdict.value != "unverifiable"]
+        if not verifiable:
+            return 0.0
+        return sum(
+            1 for r in verifiable if r.verdict.value in ("supported", "partial")
+        ) / len(verifiable)
+
     # organize
     clock.mark(f"{label}:organize")
     _emit(bus, StepStarted(step="organize", title="主题组织"))
@@ -222,7 +248,8 @@ def _compose(
     def _ground_progress(i, total, title):
         _emit(bus, StepProgress(step="ground", message=title, current=i, total=total))
 
-    chunk_store = ChunkStore()
+    # shared across compose rounds so fulltext fetch/parse happens once
+    chunk_store = chunk_store or ChunkStore()
     chunk_store.build_from(extracted, fetch_full=fetch_fulltext, on_progress=_ground_progress)
     table = CitationTable(extracted)
     n_full = sum(
@@ -401,6 +428,103 @@ def _compose(
                 ),
             )
 
+        # rewrite loop: FIX (not just report) surviving unsupported claims.
+        # The rewriter weakens/qualifies each claim to match its sources; the
+        # revised claims are re-verified and the review text is updated in
+        # place — precision becomes a pipeline behavior, not a scorecard.
+        pre_rewrite_precision = precision  # post-defense, pre-rewrite
+        remaining_unsupported = [
+            i for i, r in enumerate(ver_results) if r.verdict.value == "unsupported"
+        ]
+        if remaining_unsupported:
+            clock.mark(f"{label}:rewrite")
+            _emit(bus, StepStarted(step="rewrite", title="论断改写"))
+            rewrites = rewrite_unsupported_claims(claims, ver_results, table, chunk_store)
+            applied = []
+            for i, rw in sorted(rewrites.items()):
+                old_text = claims[i].text
+                if old_text in review:
+                    review = review.replace(old_text, rw["new_text"], 1)
+                    claims[i].text = rw["new_text"]
+                    ver_results[i].claim_text = rw["new_text"]
+                    applied.append(
+                        {
+                            "claim_index": i,
+                            "old_text": old_text,
+                            "new_text": rw["new_text"],
+                            "note": rw["note"],
+                        }
+                    )
+            if applied:
+                sub_claims = [claims[a["claim_index"]] for a in applied]
+                sub_results, _ = verify_claims(sub_claims, table, chunk_store)
+                by_text = {r.claim_text: r for r in sub_results}
+                fixed = 0
+                for a in applied:
+                    sr = by_text.get(a["new_text"])
+                    if sr is None:
+                        continue
+                    idx = a["claim_index"]
+                    if sr.verdict.value in ("supported", "partial"):
+                        fixed += 1
+                    ver_results[idx].verdict = sr.verdict
+                    ver_results[idx].note = f"[rewrite] {sr.note}"[:400]
+                precision = _recompute_precision()
+                persistence.save_step(
+                    run_dir,
+                    "08c_rewrites",
+                    {"rewrites": applied, "reverified_grounded": fixed},
+                )
+                persistence.save_step(run_dir, "07_claims", claims)
+                persistence.save_text(run_dir, "review.md", review)
+                payload = _verification_payload()
+                payload["rewrite_fixed"] = fixed
+                # report BOTH sides of the rewrite: the conservative
+                # pre-rewrite number and what the loop bought
+                payload["pre_rewrite_precision"] = round(pre_rewrite_precision, 3)
+                payload["post_rewrite_precision"] = round(precision, 3)
+                persistence.save_json(run_dir, "verification.json", payload)
+                _emit(
+                    bus,
+                    StepCompleted(
+                        step="rewrite",
+                        message=(
+                            f"改写 {len(applied)} 条无依据论断 · 复验后 {fixed} 条转为有依据 · "
+                            f"精度 {pre_rewrite_precision * 100:.0f}% ⇒ {precision * 100:.0f}%"
+                        ),
+                    ),
+                )
+            else:
+                payload = _verification_payload()
+                payload["pre_rewrite_precision"] = round(pre_rewrite_precision, 3)
+                payload["post_rewrite_precision"] = round(pre_rewrite_precision, 3)
+                persistence.save_json(run_dir, "verification.json", payload)
+                _emit(
+                    bus,
+                    StepCompleted(step="rewrite", message="无可安全改写的论断，保持原判"),
+                )
+
+        # leniency audit: re-check a sample of "supported" verdicts under a
+        # stricter standard, so a vague-claim rewrite cannot quietly inflate
+        # the headline number unnoticed
+        from citens.agents.verifier import spot_check_supported
+
+        leniency = spot_check_supported(claims, ver_results, table, chunk_store)
+        persistence.save_step(run_dir, "08d_leniency_check", leniency)
+        if leniency.get("sampled"):
+            ar = leniency.get("agreement_rate")
+            ar_msg = f"{ar * 100:.0f}%" if ar is not None else "n/a"
+            _emit(
+                bus,
+                StepProgress(
+                    step="verify",
+                    message=(
+                        f"宽严抽检: {leniency['sampled']} 条 supported 复审，"
+                        f"{leniency['downgraded']} 条应降级（一致率 {ar_msg}）"
+                    ),
+                ),
+            )
+
         # health monitoring: detect systematic biases
         clock.mark(f"{label}:health")
         _emit(bus, StepStarted(step="health", title="对话健康监测"))
@@ -546,19 +670,72 @@ async def run_pipeline_async(
                 )
             _emit(bus, StepCompleted(step="planner", message=f"{len(keywords)} 条关键词"))
 
+            # Step 1b: seed papers — landmark works the keywords may miss.
+            # Their titles retrieve the canonical records themselves, and the
+            # resolved seeds join the snowball seeds so their citation graph
+            # (references + citing papers) is mined for neighbors.
+            seed_papers: list = []
+            if options.mode != RunMode.QUICK_SCAN:
+                clock.mark("seeds")
+                seed_titles, domain_terms = generate_seed_papers(topic, filters=options.filters)
+                if domain_terms:
+                    known = {q.lower() for q in keywords}
+                    fresh_terms = [
+                        t for t in domain_terms
+                        if t.lower() not in known and not any(t.lower() in q for q in keywords)
+                    ]
+                    if fresh_terms:
+                        keywords = keywords + fresh_terms
+                        meta.keywords = keywords
+                persistence.save_step(
+                    run_dir,
+                    "01b_seeds",
+                    {"requested_titles": seed_titles, "domain_terms_added": domain_terms},
+                )
+                if seed_titles:
+                    _emit(
+                        bus,
+                        StepProgress(
+                            step="planner",
+                            message=f"种子论文: {', '.join(t[:40] for t in seed_titles[:3])}…",
+                        ),
+                    )
+                    seed_papers = await resolve_seeds(seed_titles)
+                    _emit(
+                        bus,
+                        StepProgress(
+                            step="planner",
+                            message=f"种子论文解析 {len(seed_papers)}/{len(seed_titles)} 篇",
+                        ),
+                    )
+
             # Step 2: search (iterative — refine if first round is thin)
             clock.mark("search")
             _emit(bus, StepStarted(step="search", title="检索论文"))
             cache_key = {"keywords": keywords, "max_results": max_results, "sources": options.sources}
-            papers = cache.get("search", cache_key) if options.use_cache else None
-            if papers is None:
-                papers = await search_papers(keywords, max_results, sources=options.sources)
+            cached = cache.get("search", cache_key) if options.use_cache else None
+            search_health: dict[str, str] = {"cache": "hit"} if cached is not None else {}
+            if cached is None:
+                papers, search_health = await search_papers_with_health(
+                    keywords, max_results, sources=options.sources
+                )
+                payload = [p.model_dump() for p in papers]
                 if options.use_cache:
-                    cache.put("search", cache_key, [p.model_dump() for p in papers])
+                    cache.put("search", cache_key, payload)
             else:
                 from citens.models import Paper
 
-                papers = [Paper(**p) for p in papers]
+                papers = [Paper(**p) for p in cached]
+
+            failed_sources = [k for k, v in search_health.items() if v.startswith("failed")]
+            persistence.save_step(run_dir, "02_search_health", search_health)
+            if failed_sources:
+                msg = f"检索源失败: {', '.join(failed_sources)}"
+                print(f"  [search] {msg}")
+                if len(failed_sources) * 2 >= max(len(search_health), 1):
+                    _emit(bus, StepProgress(step="search", message=f"⚠ {msg}（过半源不可用，结果可能单薄）"))
+                else:
+                    _emit(bus, StepProgress(step="search", message=msg))
 
             # Iterative refinement: if pool is thin, refine queries and search again
             min_pool = max_papers * 2 if max_papers else 15
@@ -568,7 +745,18 @@ async def run_pipeline_async(
                     StepProgress(step="search", message=f"首轮 {len(papers)} 篇不足，迭代扩展检索…"),
                 )
                 found_titles = [p.title for p in papers[:10]]
-                refined = refine_queries(topic, keywords, found_titles, known_gaps=[])
+                mined = discover_terms(papers)
+                refined = refine_queries(
+                    topic, keywords, found_titles, known_gaps=[], discovered_terms=mined
+                )
+                if mined:
+                    _emit(
+                        bus,
+                        StepProgress(
+                            step="search",
+                            message=f"从结果中挖掘到领域术语: {', '.join(mined[:5])}",
+                        ),
+                    )
                 if refined:
                     _emit(
                         bus,
@@ -576,11 +764,15 @@ async def run_pipeline_async(
                     )
                     more = await search_papers(refined, max_results=min(max_results, 30), sources=options.sources)
                     # Merge and deduplicate
-                    from citens.search import deduplicate
-
                     papers = deduplicate(papers + more)
                     keywords = keywords + refined  # track all queries used
                     meta.keywords = keywords
+
+            # Merge resolved landmark seeds into the pool (they still go through
+            # filter like everything else — no free pass, just guaranteed
+            # candidacy for canonical works the keyword search missed).
+            if seed_papers:
+                papers = deduplicate(papers + seed_papers)
 
             if max_papers:
                 papers = blend_pool(papers, cap=max(max_papers * 3, 12))
@@ -630,7 +822,17 @@ async def run_pipeline_async(
             if options.mode != RunMode.QUICK_SCAN:
                 clock.mark("snowball")
                 _emit(bus, StepStarted(step="snowball", title="引用滚雪球"))
-                top_seeds = [p for p in scored[:3] if p.doi]
+                top_seeds = [p for p in seed_papers if p.doi] + [
+                    p for p in scored[:3] if p.doi
+                ]
+                # dedupe seeds by doi (landmarks first — they anchor the graph)
+                _seen_dois: set[str] = set()
+                deduped_seeds: list = []
+                for p in top_seeds:
+                    if p.doi not in _seen_dois:
+                        _seen_dois.add(p.doi)
+                        deduped_seeds.append(p)
+                top_seeds = deduped_seeds[:5]
                 existing = {p.id for p in scored}
                 snowballed = await snowball(top_seeds, existing, limit_per_paper=6)
                 if snowballed:
@@ -710,6 +912,9 @@ async def run_pipeline_async(
 
         # Step 5: first composition (verifier feedback may raise supplement queries)
         verify_trigger_queries: list[str] = []
+        # one ChunkStore for ALL compose rounds — ground text for a paper is
+        # fetched, parsed and chunked exactly once however often we recompose
+        shared_store = ChunkStore()
 
         def _collect_verify_queries(queries, _msg):
             verify_trigger_queries.extend(queries)
@@ -723,6 +928,7 @@ async def run_pipeline_async(
             on_supplement_queries=_collect_verify_queries,
             clock=clock,
             label="compose1",
+            chunk_store=shared_store,
         )
         meta.themes = [t.name for t in result.themes.themes]
 
@@ -820,6 +1026,7 @@ async def run_pipeline_async(
                     on_supplement_queries=_collect_verify_queries,
                     clock=clock,
                     label=f"compose{rounds_run + 1}",
+                    chunk_store=shared_store,
                 )
                 meta.themes = [t.name for t in result.themes.themes]
                 _emit(

@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     springer_api_key: str = ""  # api.springernature.com
     elsevier_api_key: str = ""  # dev.elsevier.com
     ieee_api_key: str = ""  # IEEE Xplore
+    core_api_key: str = ""  # api.core.ac.uk (free key; OA fulltext aggregator)
 
     # --- Defaults for a run (overridable via CLI / RunOptions) ---------------
     default_max_results: int = 60  # candidate pool target before filtering

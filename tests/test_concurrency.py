@@ -30,6 +30,7 @@ def _papers(n=6):
 
 
 def test_filter_concurrent_preserves_order(monkeypatch):
+    import re
     import time as _t
 
     seen_threads = set()
@@ -37,11 +38,16 @@ def test_filter_concurrent_preserves_order(monkeypatch):
     def fake_chat_json(system, user, **k):
         _t.sleep(0.02)  # force the pool to actually schedule in parallel
         seen_threads.add(threading.current_thread().ident)
-        idx = int(user.split("Paper ")[1].split(" ")[0])  # paper number
-        return {"score": 5 - (idx % 3), "reason": f"reason {idx}"}
+        idxs = [int(m) for m in re.findall(r"--- Paper (\d+) ---", user)]
+        return {
+            "results": [
+                {"paper_index": i, "score": 5 - (i % 3), "reason": f"reason {i}"}
+                for i in idxs
+            ]
+        }
 
     monkeypatch.setattr(filter_mod, "chat_json", fake_chat_json)
-    papers = _papers(6)
+    papers = _papers(18)  # 3 batches at the default batch size of 8
     passed, log = filter_mod.filter_papers(papers, "order books", return_log=True)
 
     assert log[0]["title"] == "Paper 0 on order books"  # order preserved
@@ -54,13 +60,15 @@ def test_filter_concurrent_preserves_order(monkeypatch):
 def test_filter_progress_reports_done_counts(monkeypatch):
     monkeypatch.setattr(
         filter_mod, "chat_json",
-        lambda s, u, **k: {"score": 4, "reason": "ok"},
+        lambda s, u, **k: {"results": [{"paper_index": 0, "score": 4, "reason": "ok"}]},
     )
     calls = []
     filter_mod.filter_papers(
         _papers(4), "t", on_progress=lambda done, total, title: calls.append((done, total))
     )
-    assert sorted(d for d, _ in calls) == [1, 2, 3, 4]
+    # progress fires once per BATCH, monotonically reaching the total
+    dones = [d for d, _ in calls]
+    assert dones == sorted(dones) and dones[-1] == 4
     assert all(t == 4 for _, t in calls)
 
 
@@ -68,10 +76,13 @@ def test_filter_small_budget_passed_through(monkeypatch):
     budgets = []
     monkeypatch.setattr(
         filter_mod, "chat_json",
-        lambda s, u, **k: budgets.append(k.get("max_tokens")) or {"score": 3, "reason": ""},
+        lambda s, u, **k: budgets.append(k.get("max_tokens"))
+        or {"results": [{"paper_index": 0, "score": 3, "reason": ""}]},
     )
     filter_mod.filter_papers(_papers(2), "t")
-    assert budgets and all(b == 1024 for b in budgets)
+    # 4096 for the batch call; 1024 when a paper falls back to per-paper
+    assert budgets and all(b in (1024, 4096) for b in budgets)
+    assert 4096 in budgets
 
 
 def test_extract_merged_quality_single_call(monkeypatch):
@@ -80,17 +91,24 @@ def test_extract_merged_quality_single_call(monkeypatch):
     def fake_chat_json(system, user, **k):
         calls.append(system)
         return {
-            "research_question": "q", "methodology": "m", "key_findings": ["f"],
-            "limitations": [], "relevance_to_topic": "r",
-            "study_type": "empirical", "evidence_level": 3, "method_rigor": 4,
-            "sample_or_data": "5 stocks", "effect_direction": "positive",
-            "temporal_scope": "2019-2021", "quality_note": "fine",
+            "papers": [
+                {
+                    "paper_index": 0,
+                    "research_question": "q", "methodology": "m",
+                    "key_findings": ["f"], "limitations": [],
+                    "relevance_to_topic": "r",
+                    "study_type": "empirical", "evidence_level": 3,
+                    "method_rigor": 4, "sample_or_data": "5 stocks",
+                    "effect_direction": "positive",
+                    "temporal_scope": "2019-2021", "quality_note": "fine",
+                }
+            ]
         }
 
     monkeypatch.setattr(extract, "chat_json", fake_chat_json)
     scored = [ScoredPaper(**p.model_dump(exclude={"id"}), relevance_score=4) for p in _papers(1)]
     out = extract.extract_papers(scored, "t")
-    assert len(calls) == 1  # one call per paper, quality folded in
+    assert len(calls) == 1  # one call per batch, quality folded in
     assert out[0].quality["evidence_level"] == 3
     assert out[0].quality["study_type"] == "empirical"
     assert out[0].quality["method_rigor"] == 4

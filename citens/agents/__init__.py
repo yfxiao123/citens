@@ -12,6 +12,7 @@ from citens.agents.intent import detect_intent
 from citens.agents.organize import organize_themes
 from citens.agents.planner import generate_keywords
 from citens.agents.reflector import reflect
+from citens.agents.rewriter import rewrite_unsupported_claims
 from citens.agents.synth import synthesize
 from citens.agents.verifier import verify_claims
 from citens.agents.verifier_trigger import collect_unsupported_queries
@@ -31,6 +32,7 @@ __all__ = [
     "organize_themes",
     "reflect",
     "review_unsupported_claims",
+    "rewrite_unsupported_claims",
     "synthesize",
     "verify_claims",
     "write_review",
