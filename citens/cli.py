@@ -278,15 +278,15 @@ def login(
         cookies = ctx.cookies()
         browser.close()
 
-    jar: dict[str, str] = {}
+    per_host: dict[str, list[str]] = {}
     for c in cookies:
         if not c.get("name") or not c.get("value"):
             continue
         host = (c.get("domain") or "").lstrip(".").lower()
         if not host:
             continue
-        jar.setdefault(host, []).append(f"{c['name']}={c['value']}")
-    jar = {h: "; ".join(v) for h, v in jar.items()}
+        per_host.setdefault(host, []).append(f"{c['name']}={c['value']}")
+    jar = {h: "; ".join(v) for h, v in per_host.items()}
     save_cookie_jar(jar)
     hosts = ", ".join(sorted(jar)[:6])
     console.print(f"[green]✓[/] 已保存 {len(jar)} 个域的会话 Cookie（{hosts}…）")
