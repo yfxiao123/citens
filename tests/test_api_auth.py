@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture()
 def client(monkeypatch):
     from citens.api.app import app
+
     from citens.config import settings
 
     monkeypatch.setattr(settings, "api_token", "s3cret")
@@ -21,6 +22,7 @@ def client(monkeypatch):
 @pytest.fixture()
 def open_client(monkeypatch):
     from citens.api.app import app
+
     from citens.config import settings
 
     monkeypatch.setattr(settings, "api_token", "")
