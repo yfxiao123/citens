@@ -200,60 +200,17 @@ def _download_and_convert(url: str) -> str | None:
             ctype = r.headers.get("content-type", "").lower()
             if "pdf" in ctype or url.lower().endswith(".pdf") or r.content[:5] == b"%PDF-":
                 return _pdf_bytes_to_text(r.content)
-        # publishers front PDF endpoints with a JS bot challenge — replay
-        # the SSO cookie jar through a real browser when we hit one
-        from citens.grounding.browserfetch import fetch_pdf_via_browser, looks_like_challenge
-
-        if r.status_code == 200 and looks_like_challenge(r.content):
-            body = fetch_pdf_via_browser(url)
-            return _pdf_bytes_to_text(body) if body else None
         return None
     except Exception:  # noqa: BLE001
         return None
-
-
-def _publisher_pdf_urls(doi: str) -> list[str]:
-    """Resolve a DOI to its publisher's PDF endpoint(s).
-
-    This is where the SSO cookie jar pays off: for non-OA papers the OA
-    locators (Unpaywall/CORE) come up empty, but the institutional session
-    entitles us to the publisher's own PDF endpoint. DOI -> landing page
-    redirect first (no cookies needed), then per-publisher PDF URL patterns.
-    """
-    from urllib.parse import urlparse as _up
-
-    try:
-        with sync_client(f"https://doi.org/{doi}", timeout=30, headers=_HEADERS) as client:
-            r = client.get(f"https://doi.org/{doi}")
-            final = str(r.url)
-    except Exception:  # noqa: BLE001
-        return []
-    host = (_up(final).hostname or "").lower()
-    out: list[str] = []
-    if host.endswith("sciencedirect.com"):
-        m = re.search(r"/pii/([^/?#]+)", final)
-        if m:
-            out.append(
-                f"https://www.sciencedirect.com/science/article/pii/"
-                f"{m.group(1)}/pdfft?isDTMRedir=true"
-            )
-    elif host.endswith("springer.com"):
-        out.append(f"https://link.springer.com/content/pdf/{doi}.pdf")
-    elif host.endswith("wiley.com"):
-        out.append(f"https://onlinelibrary.wiley.com/doi/pdf-direct/{doi}")
-        out.append(f"https://onlinelibrary.wiley.com/doi/pdf/{doi}")
-    elif host.endswith("tandfonline.com"):
-        out.append(f"https://www.tandfonline.com/doi/pdf/{doi}?download=true")
-    return out
 
 
 def fetch_fulltext(paper: Paper) -> str | None:
     """Return the paper's full text, or None if unavailable.
 
-    Order: user-dropped PDF (PAPERS_DIR) -> cache -> open-access network fetch
-    -> publisher PDF endpoint (rides the institutional cookie jar; see
-    citens login). The local check runs before the cache so a PDF dropped
-    after a previous miss is still picked up.
+    Order: user-dropped PDF (PAPERS_DIR) -> cache -> open-access network fetch.
+    The local check runs before the cache so a PDF dropped after a previous
+    miss is still picked up.
     """
     local = _local_pdf(paper)
     if local is not None:
@@ -278,8 +235,6 @@ def fetch_fulltext(paper: Paper) -> str | None:
         core = _core_pdf_url(paper.doi)
         if core:
             candidates.append(core)
-        # last resort: the publisher's own endpoint via the SSO session
-        candidates.extend(_publisher_pdf_urls(paper.doi))
 
     text = None
     for url in candidates:

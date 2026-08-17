@@ -120,6 +120,8 @@ class RunOptions:
     # Seed the candidate pool from `citens collect`'s persistent literature
     # pool when one exists (record-first workflow), and write new finds back.
     use_pool: bool = True
+    # Domain profile name (overrides settings.profile); "" = generic.
+    profile: str = ""
     allow_supplement: bool = True
     max_supplement_papers: int = 4
     fetch_fulltext: bool = True
@@ -704,6 +706,24 @@ async def run_pipeline_async(
             if options.filters:
                 persistence.save_step(run_dir, "00_filters", options.filters)
             keywords = generate_keywords(topic, filters=options.filters)
+            # domain profile: curated terminology joins the keyword batches
+            from citens.profiles import load_profile, merge_profile_terms
+
+            profile = load_profile(options.profile or settings.profile)
+            if profile is not None:
+                before = set(keywords)
+                keywords = merge_profile_terms(keywords, profile)
+                added = [q for q in keywords if q not in before]
+                if added:
+                    _emit(
+                        bus,
+                        StepProgress(
+                            step="planner",
+                            message=f"金融 profile 注入 {len(added)} 条领域术语"
+                            if profile.name == "finance"
+                            else f"profile '{profile.name}' 注入 {len(added)} 条领域术语",
+                        ),
+                    )
             meta.keywords = keywords
             persistence.save_step(run_dir, "01_keywords", keywords)
             if options.filters:
@@ -863,7 +883,8 @@ async def run_pipeline_async(
             )
             # venue-aware composite ranking (relevance x citations x SJR quartile),
             # applied when deciding which papers survive the cap
-            scored = rank_papers(scored)
+            _venue_boost = profile.venue_boost_set() if profile is not None else None
+            scored = rank_papers(scored, venue_boost=_venue_boost)
             persistence.save_step(
                 run_dir,
                 "03c_ranking",
@@ -914,7 +935,7 @@ async def run_pipeline_async(
                     )
                     # Filter the snowballed papers too
                     snow_scored = filter_papers(snowballed, topic, filters=options.filters)
-                    snow_scored = rank_papers(snow_scored)
+                    snow_scored = rank_papers(snow_scored, venue_boost=_venue_boost)
                     # Only add papers that pass quality bar and aren't already in
                     new_papers = [
                         p for p in snow_scored

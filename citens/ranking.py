@@ -241,7 +241,9 @@ def author_depth_factor(h_index: int, works: int, field_works: int = 0) -> float
     return 0.6 * w + 0.4 * h
 
 
-def rank_papers(papers: Sequence[ScoredPaper]) -> list[ScoredPaper]:
+def rank_papers(
+    papers: Sequence[ScoredPaper], venue_boost: set[str] | None = None
+) -> list[ScoredPaper]:
     """Fill venue_quartile/rank_score on copies, sorted by rank_score desc.
 
     Tie-break on relevance then citations so equal composites keep the more
@@ -257,6 +259,8 @@ def rank_papers(papers: Sequence[ScoredPaper]) -> list[ScoredPaper]:
         rel = p.relevance_score / 5.0
         cit = citation_factor(p.citation_count)
         ven = venue_score(q)
+        if venue_boost and p.venue and _norm(p.venue) in venue_boost:
+            ven = 1.0  # flagship field journal == Q1-level venue signal
         # weighted composite, renormalized over the factors a paper actually
         # has (author depth is optional metadata; its absence must not hurt)
         parts = [

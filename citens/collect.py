@@ -166,7 +166,9 @@ def import_records(topic: str, records: list[dict]) -> int:
 
 
 def build_queries(
-    topic: str, extra_queries: list[str] | None = None
+    topic: str,
+    extra_queries: list[str] | None = None,
+    profile_name: str = "",
 ) -> tuple[list[str], list[str]]:
     """Keyword batches: multi-dimension planner queries + survey hunting.
 
@@ -191,6 +193,18 @@ def build_queries(
         if k and k not in seen:
             seen.add(k)
             out.append(q)
+    if profile_name:
+        from citens.profiles import load_profile, merge_profile_terms
+
+        prof = load_profile(profile_name)
+        if prof is not None:
+            prior = set(q.lower() for q in out)
+            out = merge_profile_terms(out, prof)
+            # only NEWLY-added glossary concepts go to the constrained pass —
+            # a planner query that coincides with a term stays free-search
+            domain_terms = domain_terms + [
+                t for t in prof.domain_terms if t.lower() not in prior
+            ]
     broad = [q for q in domain_terms if q in out] + [
         q for q in out if _is_broad(q) and q not in domain_terms
     ]
@@ -444,34 +458,99 @@ def _enrich_author_engagement(
 # --- recall (#4) and audit (#6) --------------------------------------------------
 
 
-def recall_from_pool(topic: str, queries: list[str], k: int) -> list[Paper]:
-    """Deterministic BM25 pre-recall: top-k pool records for the queries.
+def _pool_key(p: Paper) -> str:
+    return p.doi or p.title.lower().strip()
 
-    Keeps LLM screening cost flat as the pool grows; the rest of the pool
-    stays a deep reservoir (nothing is deleted).
+
+def _emb_path(topic: str) -> Path:
+    return pool_path(topic).with_suffix(".emb.json")
+
+
+def embed_pool(topic: str) -> int:
+    """Embed title+abstract of every pool record into a persistent index.
+
+    Skipped entirely (returns 0) when no embedding model is configured —
+    the pool then serves BM25-only recall. Re-embeds only records missing
+    from the index (disk cache makes repeat calls free).
     """
-    from citens.grounding.retrieval import bm25_rank_texts
+    from citens.grounding.retrieval import embed_texts
+
+    pool = read_pool(topic)
+    index: dict[str, list[float]] = {}
+    if _emb_path(topic).is_file():
+        try:
+            index = json.loads(_emb_path(topic).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            index = {}
+    missing = [p for p in pool if _pool_key(p) not in index]
+    if missing:
+        vecs = embed_texts([f"{p.title}. {p.abstract[:600]}" for p in missing])
+        if vecs is None:
+            return 0
+        for p, v in zip(missing, vecs, strict=False):
+            index[_pool_key(p)] = v
+    _emb_path(topic).parent.mkdir(parents=True, exist_ok=True)
+    _emb_path(topic).write_text(json.dumps(index), encoding="utf-8")
+    return len(missing)
+
+
+def recall_from_pool(topic: str, queries: list[str], k: int) -> list[Paper]:
+    """Hybrid pre-recall: BM25 + vector (RRF-fused), top-k pool records.
+
+    Lexical catches exact terminology (LOB, OFI), embeddings catch semantic
+    neighbors worded differently — Reciprocal Rank Fusion merges the two
+    ranked lists without needing score calibration. Falls back to BM25-only
+    when no embedding index/model is available; the rest of the pool stays
+    a deep reservoir (nothing is deleted).
+    """
+    from citens.grounding.retrieval import bm25_rank_texts, cosine, embed_texts
 
     pool = read_pool(topic)
     if len(pool) <= k:
         return pool
-    # reviews always survive the pre-recall; BM25 fills the rest
-    reviews = [p for p in pool if p.is_review]
     texts = [
         f"{p.title} {p.abstract[:400]} {' '.join(p.keywords)} {p.subfield}"
         for p in pool
     ]
     query = " ".join(queries)
-    order = bm25_rank_texts(texts, query)
+    bm25_order = bm25_rank_texts(texts, query)
+
+    # vector order: persistent pool index + one query embedding
+    vec_order: list[int] = []
+    index: dict[str, list[float]] = {}
+    if _emb_path(topic).is_file():
+        try:
+            index = json.loads(_emb_path(topic).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            index = {}
+    if index:
+        qv = embed_texts([query])
+        if qv is not None:
+            scored = [
+                (cosine(index[_pool_key(p)], qv[0]), i)
+                for i, p in enumerate(pool)
+                if _pool_key(p) in index
+            ]
+            vec_order = [i for _s, i in sorted(scored, reverse=True)]
+
+    # RRF fuse: 1/(rrf_k + rank) per list that ranked the record
+    rrf_k = 60
+    fused: dict[int, float] = {}
+    for rank, i in enumerate(bm25_order):
+        fused[i] = fused.get(i, 0.0) + 1.0 / (rrf_k + rank)
+    for rank, i in enumerate(vec_order):
+        fused[i] = fused.get(i, 0.0) + 1.0 / (rrf_k + rank)
+    order = sorted(fused, key=lambda i: fused[i], reverse=True)
+
+    # reviews always survive the pre-recall; the fused order fills the rest
     picked: dict[str, Paper] = {}
-    for p in reviews:
-        picked[p.doi or p.title.lower().strip()] = p
+    for p in (x for x in pool if x.is_review):
+        picked[_pool_key(p)] = p
     for i in order:
         if len(picked) >= k:
             break
         p = pool[i]
-        key = p.doi or p.title.lower().strip()
-        picked.setdefault(key, p)
+        picked.setdefault(_pool_key(p), p)
     return list(picked.values())
 
 
@@ -526,13 +605,14 @@ def collect(
     extra_queries: list[str] | None = None,
     enrich_authors: bool = True,
     on_progress=None,
+    profile: str | None = None,
 ) -> dict:
     """Build/extend the literature pool for a topic. Returns a summary.
 
     Full text is deliberately NOT fetched — that happens later, in batches,
     only for papers that survive the pipeline's filter.
     """
-    queries, broad = build_queries(topic, extra_queries)
+    queries, broad = build_queries(topic, extra_queries, profile or settings.profile)
     if on_progress:
         on_progress(
             f"共 {len(queries)} 条关键词批次（含综述定向查询；"
@@ -591,6 +671,16 @@ def collect(
         if on_progress:
             on_progress(f"作者深耕信号已补全 {enriched} 篇（场域内 works/h-index）")
 
+    # hybrid-recall index: embed title+abstract of the whole pool when an
+    # embedding model is configured (vector channel of RRF recall)
+    n_emb = 0
+    if settings.embedding_model:
+        try:
+            n_emb = embed_pool(topic)
+        except Exception as e:  # noqa: BLE001
+            if on_progress:
+                on_progress(f"嵌入索引失败（回退 BM25 召回）: {e}")
+
     final_pool = read_pool(topic)
     subfields: dict[str, int] = {}
     for p in final_pool:
@@ -605,6 +695,7 @@ def collect(
         "added": total_added,
         "pool_total": len(final_pool),
         "n_reviews": sum(1 for p in final_pool if p.is_review),
+        "n_embedded": n_emb,
         "subfields": dict(sorted(subfields.items(), key=lambda kv: -kv[1])),
         "pool_path": str(pool_path(topic)),
     }

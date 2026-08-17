@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import sys
 import traceback
 from pathlib import Path
@@ -77,6 +76,9 @@ def run(
     no_pool: bool = typer.Option(
         False, "--no-pool", help="不注入/回写 citens collect 的文献池"
     ),
+    profile: str = typer.Option(
+        "", "--profile", help="领域 profile（如 finance；见 citens profiles 列表）"
+    ),
     no_fulltext: bool = typer.Option(
         False, "--no-fulltext", help="不获取全文（仅用摘要溯源，精度较低）"
     ),
@@ -123,6 +125,7 @@ def run(
         sources=src_list,
         use_cache=not no_cache,
         use_pool=not no_pool,
+        profile=profile,
         fetch_fulltext=not no_fulltext,
         mode=run_mode,
     )
@@ -244,146 +247,15 @@ def eval(  # noqa: A001
     console.print(f"[green]✓[/] 写入 {out / 'report.md'}")
 
 
-# Default publisher tour for `citens login`: ARTICLE deep links, not homepages —
-# the institutional entitlement handshake (SP-initiated SSO) only fires when an
-# actual paywalled article is requested; a homepage visit sets no usable token.
-_LOGIN_SITES = [
-    "https://www.sciencedirect.com/science/article/pii/S0304405X1000102X",
-    "https://link.springer.com/article/10.1007/s11579-012-0082-5",
-    "https://onlinelibrary.wiley.com/doi/10.1111/mafi.12413",
-    "https://www.tandfonline.com/doi/full/10.1080/14697688.2016.1154244",
-    "https://journals.sagepub.com/doi/10.1177/00220574231213461",
-    "https://ieeexplore.ieee.org/document/8777151",
-]
-
-
-@app.command()
-def login(
-    url: list[str] = typer.Option(
-        [], "--url", help="额外要登录的站点（可重复；不带则走默认出版商清单）"
-    ),
-    all_sites: bool = typer.Option(
-        False, "--all", help="遍历全部默认出版商站点（首次 SSO 后其余自动登录）"
-    ),
-):
-    """打开浏览器完成学校统一身份认证，把会话 Cookie 存入 data/cookies.json。
-
-    密码只进浏览器、不进任何配置或代码；之后的 run 会自动带上这些
-    Cookie 抓付费全文。默认只开 ScienceDirect；--all 会在同一浏览器
-    会话里依次访问全部主流出版商——统一身份认证的会话在 IdP 上，
-    第一个站登录后，后续站点自动放行，密码只需输一次。
-    会话过期后重跑一次本命令即可。
-    """
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        console.print(
-            "[yellow]![/] 需要 playwright: pip install 'citens[login]' "
-            "&& playwright install chromium"
-        )
-        raise typer.Exit(code=1) from None
-
-    from citens.net import save_cookie_jar
-
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=False)
-        ctx = browser.new_context()
-        page = ctx.new_page()
-        sites = url or (_LOGIN_SITES if all_sites else _LOGIN_SITES[:1])
-        console.print(
-            f"[cyan]将依次打开 {len(sites)} 篇付费文章（非首页——机构授权只在文章页触发）。[/]"
-        )
-        console.print("第一个弹出统一身份认证时登录；之后若出现'选择机构'页选南京大学。")
-        for i, site in enumerate(sites, 1):
-            try:
-                page.goto(site, timeout=60000)
-            except Exception as e:  # noqa: BLE001
-                console.print(f"  [yellow]{site} 加载异常（跳过）:[/] {e}")
-                continue
-            console.print(f"  [{i}/{len(sites)}] {site}")
-
-        def _entitled(page) -> bool:
-            """Heuristic: an entitled article page offers a real PDF download.
-
-            These sites are heavy SPAs — the DOM hydrates seconds after
-            'load', so button-text selectors alone fire too early. Wait for
-            hydration, then check HTML-level PDF hrefs (stamp.jsp,
-            content/pdf, pdf-direct) AND button text.
-            """
-            import time as _t
-
-            _t.sleep(4)  # SPA hydration (IEEE/Springer/SD render post-load)
-            try:
-                html = page.content()
-            except Exception:  # noqa: BLE001
-                return False
-            for marker in (
-                "stamp.jsp",          # IEEE
-                "/content/pdf/",      # Springer
-                "/pdf-direct/",       # Wiley
-                "/doi/pdf/",          # T&F / SAGE
-                "pdfft",              # ScienceDirect
-                "Download PDF",
-                "Download article",
-            ):
-                if marker in html:
-                    return True
-            for sel in ("a:has-text('PDF')", "a[title='PDF']"):
-                try:
-                    if page.locator(sel).count() > 0:
-                        return True
-                except Exception:  # noqa: BLE001
-                    continue
-            return False
-
-        # verify entitlement per site; give the user a fix loop
-        for _round in range(3):
-            missing = []
-            for site in sites:
-                try:
-                    page.goto(site, timeout=60000, wait_until="load")
-                    okflag = _entitled(page)
-                except Exception:  # noqa: BLE001
-                    okflag = False
-                mark = "[green]✓[/]" if okflag else "[red]✗[/]"
-                console.print(f"  {mark} {site[:70]}")
-                if not okflag:
-                    missing.append(site)
-            if not missing:
-                break
-            console.print(
-                f"[yellow]上述 {len(missing)} 家未获得下载权限。[/]在浏览器中打开这些文章页，"
-                "点击 'Access through your institution / Log in via an institution'，"
-                "选择南京大学完成登录（学校会话已在，无需再输密码），"
-                "确认出现 PDF 下载按钮后，回这里按回车重新校验。"
-            )
-            with contextlib.suppress(EOFError):
-                input()
-        cookies = ctx.cookies()
-        browser.close()
-
-    per_host: dict[str, list[str]] = {}
-    for c in cookies:
-        # empty-value cookies (e.g. sim-inst-token="") carry no entitlement
-        if not c.get("name") or not c.get("value"):
-            continue
-        host = (c.get("domain") or "").lstrip(".").lower()
-        if not host:
-            continue
-        per_host.setdefault(host, []).append(f"{c['name']}={c['value']}")
-    jar = {h: "; ".join(v) for h, v in per_host.items()}
-    save_cookie_jar(jar)
-    hosts = ", ".join(sorted(jar)[:6])
-    console.print(f"[green]✓[/] 已保存 {len(jar)} 个域的会话 Cookie（{hosts}…）")
-    console.print("  之后 citens run 抓这些域的全文时会自动携带；过期后重跑 citens login。")
-
-
 @app.command()
 def collect(
     topic: str = typer.Argument(..., help="研究领域（中文或英文）"),
     target: int = typer.Option(100, "-n", help="文献池目标条数"),
     queries: str = typer.Option("", "--queries", help="追加自定义查询（逗号分隔）"),
     no_author: bool = typer.Option(False, "--no-author", help="跳过作者深耕信号补全"),
+    profile: str = typer.Option(
+        "", "--profile", help="领域 profile（如 finance）：注入术语表+期刊白名单"
+    ),
     audit_recall: bool = typer.Option(
         False, "--audit-recall", help="建池后用 top 综述的参考文献算池覆盖率"
     ),
@@ -406,6 +278,7 @@ def collect(
         summary = _collect(
             topic, target=target, extra_queries=extra,
             enrich_authors=not no_author, on_progress=_prog,
+            profile=profile or None,
         )
     console.print(
         f"[green]✓[/] 本轮发现 {summary['found']} 篇 · 新增 {summary['added']} 篇 · "
@@ -476,33 +349,6 @@ def resume(
         console.print("[bold red]续跑失败:[/]")
         traceback.print_exc()
         raise typer.Exit(code=1) from None
-
-
-@app.command()
-def fetch(
-    run_dir: str = typer.Argument(..., help="要补全文的 run 目录"),
-):
-    """在可见浏览器里补齐该 run 缺失的付费 PDF（半自动）。
-
-    逐篇打开文章页（带 login 会话），自动点击 PDF 下载控件；点不动时
-    你在窗口里手动点，下载自动存入 papers/。完成后运行
-    citens reverify <run目录> 重跑核验看精度提升。
-    """
-    from citens.fetch import fetch_run
-
-    try:
-        summary = fetch_run(run_dir)
-    except FileNotFoundError as e:
-        console.print(f"[bold red]无法补全文:[/] {e}")
-        raise typer.Exit(code=1) from None
-    if not summary.get("missing"):
-        console.print("[green]✓[/] 该 run 无缺失全文（或有本地 PDF/缓存）")
-        return
-    console.print(
-        f"[green]✓[/] 缺失 {summary['missing']} 篇 · 本次下载 {summary['downloaded']} 篇"
-    )
-    if summary["downloaded"]:
-        console.print(f"  下一步: citens reverify {run_dir}")
 
 
 @app.command()

@@ -58,16 +58,6 @@ class Settings(BaseSettings):
     # same network). Example: https://lib.univ.edu.cn/login?url=
     # Leave empty to disable rewriting.
     ezproxy_prefix: str = ""
-    # Raw Cookie header for the EZproxy host, copied from your browser after
-    # SSO login (DevTools -> Network -> any libproxy request -> request headers
-    # -> Cookie). EZproxy authenticates by session cookie, so URL rewriting
-    # alone bounces off-campus fetches to a login page. Rotates on re-login.
-    ezproxy_cookie: str = ""
-    # Per-host session cookies written by `citens login` (host -> Cookie header).
-    cookie_jar_path: str = "data/cookies.json"
-    # Drop folder for manually downloaded PDFs (see fetch_list.md emitted by a
-    # run). Full-text lookup checks here BEFORE hitting the network, so files
-    # you drop are picked up by the next run.
     papers_dir: str = "papers"
 
     # --- API server (citens.api) ----------------------------------------------
@@ -97,6 +87,9 @@ class Settings(BaseSettings):
     output_dir: str = "runs"
     # Persistent literature pools built by `citens collect` (JSONL per topic).
     litdb_dir: str = "data/litdb"
+    # Domain profile for collect/run (see citens profiles for the list).
+    # "" = generic. Example: "finance".
+    profile: str = ""
     # Output language of the review prose AND section headings: "en" or "zh".
     # Anything not recognized as Chinese falls back to English.
     review_language: str = "en"

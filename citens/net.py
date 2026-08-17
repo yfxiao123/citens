@@ -77,92 +77,12 @@ def rewrite_url(url: str) -> str:
     return f"{prefix}{quote(url, safe='')}"
 
 
-def _ezproxy_headers(url: str) -> dict[str, str]:
-    """Cookie for the EZproxy host when the user lent us their SSO session.
-
-    Off-campus EZproxy authenticates by session cookie; the rewritten URL
-    alone just bounces to an SSO login page (HTML, rejected downstream).
-    """
-    prefix = settings.ezproxy_prefix.strip()
-    cookie = settings.ezproxy_cookie.strip()
-    if not prefix or not cookie:
-        return {}
-    prefix_host = (urlparse(prefix).hostname or "").lower()
-    host = (urlparse(url).hostname or "").lower()
-    if prefix_host and host == prefix_host:
-        return {"Cookie": cookie}
-    return {}
-
-
-def load_cookie_jar() -> dict[str, str]:
-    """Host -> raw Cookie header, written by ``citens login``."""
-    import json
-    from pathlib import Path
-
-    p = Path(settings.cookie_jar_path)
-    if not p.is_file():
-        return {}
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
-    except Exception:  # noqa: BLE001 — a corrupt jar must not break fetching
-        return {}
-
-
-def save_cookie_jar(jar: dict[str, str]) -> None:
-    import json
-    from pathlib import Path
-
-    p = Path(settings.cookie_jar_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(jar, indent=2), encoding="utf-8")
-
-
-def _jar_cookies() -> httpx.Cookies:
-    """The harvested SSO jar as a real cookie jar (per-cookie domains).
-
-    Publisher entitlement flows CROSS DOMAINS by redirect (link.springer.com
-    -> springernature.com idp -> back with a token); a static Cookie header
-    for one host dies at the first hop. A populated httpx cookie jar sends
-    the right cookies at every hop automatically.
-    """
-    cookies = httpx.Cookies()
-    for host, header in load_cookie_jar().items():
-        for pair in header.split("; "):
-            if "=" not in pair:
-                continue
-            name, value = pair.split("=", 1)
-            # leading dot => domain cookie (covers subdomains like
-            # www.sciencedirect.com); without it cookielib does exact-host only
-            dom = host.lstrip(".").lower()
-            try:
-                cookies.set(name, value, domain=f".{dom}")
-            except Exception:  # noqa: BLE001 — a malformed entry skips silently
-                continue
-    return cookies
 
 
 def sync_client(url: str | None = None, **kwargs) -> httpx.Client:
-    """A sync httpx.Client configured with timeout/redirects + proxy (if any).
-
-    Loads the SSO cookie jar (when present) as native cookies so redirect
-    chains through publisher/IdP domains keep their sessions.
-    """
+    """A sync httpx.Client configured with timeout/redirects + proxy (if any)."""
     kwargs.setdefault("timeout", 60)
     kwargs.setdefault("follow_redirects", True)
-    jar = _jar_cookies()
-    if len(jar.jar):
-        existing = kwargs.pop("cookies", None)
-        merged = httpx.Cookies(existing) if existing else httpx.Cookies()
-        merged.update(jar)
-        kwargs["cookies"] = merged
-    if url:
-        headers = {
-            **_ezproxy_headers(url),
-            **(kwargs.pop("headers", {}) or {}),
-        }
-        if headers:
-            kwargs["headers"] = headers
     proxy = proxy_url_for(url)
     if proxy:
         try:  # httpx >= 0.28

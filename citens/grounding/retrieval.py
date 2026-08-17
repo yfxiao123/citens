@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Protocol, cast
 
 from citens import cache
 from citens.config import settings
@@ -94,6 +94,49 @@ def bm25_rank_texts(
     return sorted(range(n), key=lambda i: scores[i], reverse=True)
 
 
+def embed_texts(texts: list[str]) -> list[list[float]] | None:
+    """Embed texts via the configured model (disk-cached); None when
+    embedding is unavailable (no model set or API failure)."""
+    model = settings.embedding_model
+    if not model:
+        return None
+    cached: list[list[float] | None] = []
+    missing: list[int] = []
+    for i, t in enumerate(texts):
+        v = cache.get("embed", {"model": model, "text": t})
+        if isinstance(v, list):
+            cached.append(v)
+        else:
+            cached.append(None)
+            missing.append(i)
+    if missing:
+        try:
+            from openai import OpenAI
+
+            kwargs: dict = {"api_key": settings.llm_api_key}
+            if settings.llm_api_base:
+                kwargs["base_url"] = settings.llm_api_base
+            client = OpenAI(**kwargs)
+            resp = client.embeddings.create(model=model, input=[texts[i] for i in missing])
+            for i, item in zip(missing, resp.data, strict=False):
+                vec = list(item.embedding)
+                cached[i] = vec
+                cache.put("embed", {"model": model, "text": texts[i]}, vec)
+        except Exception:  # noqa: BLE001
+            return None
+    for c in cached:
+        if c is None:
+            return None
+    return cast("list[list[float]]", cached)
+
+
+def cosine(a: list[float], b: list[float]) -> float:
+    num = sum(x * y for x, y in zip(a, b, strict=False))
+    da = math.sqrt(sum(x * x for x in a)) or 1e-9
+    db = math.sqrt(sum(y * y for y in b)) or 1e-9
+    return num / (da * db)
+
+
 class EmbeddingRetriever:
     """Cosine similarity via an OpenAI-compatible embeddings endpoint.
 
@@ -105,52 +148,14 @@ class EmbeddingRetriever:
     def __init__(self) -> None:
         self._fallback = BM25Retriever()
 
-    def _embed(self, texts: list[str]) -> list[list[float]] | None:
-        model = settings.embedding_model
-        if not model:
-            return None
-        cached: list[list[float] | None] = []
-        missing: list[int] = []
-        for i, t in enumerate(texts):
-            v = cache.get("embed", {"model": model, "text": t})
-            if isinstance(v, list):
-                cached.append(v)
-            else:
-                cached.append(None)
-                missing.append(i)
-        if missing:
-            try:
-                from openai import OpenAI
-
-                kwargs: dict = {"api_key": settings.llm_api_key}
-                if settings.llm_api_base:
-                    kwargs["base_url"] = settings.llm_api_base
-                client = OpenAI(**kwargs)
-                resp = client.embeddings.create(
-                    model=model, input=[texts[i] for i in missing]
-                )
-                for i, item in zip(missing, resp.data, strict=False):
-                    vec = list(item.embedding)
-                    cached[i] = vec
-                    cache.put("embed", {"model": model, "text": texts[i]}, vec)
-            except Exception:  # noqa: BLE001
-                return None
-        return [c for c in cached if c is not None] if all(c is not None for c in cached) else None
-
     def rank(self, chunks: Sequence[Chunk], query: str, k: int) -> list[Chunk]:
-        texts = [c.text for c in chunks] + [query]
-        vecs = self._embed(texts)
+        vecs = embed_texts([c.text for c in chunks] + [query])
         if vecs is None:
             return self._fallback.rank(chunks, query, k)
-
-        def cos(a: list[float], b: list[float]) -> float:
-            num = sum(x * y for x, y in zip(a, b, strict=False))
-            da = math.sqrt(sum(x * x for x in a)) or 1e-9
-            db = math.sqrt(sum(y * y for y in b)) or 1e-9
-            return num / (da * db)
-
         qv = vecs[-1]
-        order = sorted(range(len(chunks)), key=lambda i: cos(vecs[i], qv), reverse=True)
+        order = sorted(
+            range(len(chunks)), key=lambda i: cosine(vecs[i], qv), reverse=True
+        )
         return [chunks[i] for i in order[:k]]
 
 
