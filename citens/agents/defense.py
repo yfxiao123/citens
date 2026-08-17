@@ -11,11 +11,16 @@ This implements the "Concession Threshold Protocol" inspired by Imbad0202/ARS.
 from __future__ import annotations
 
 from citens.llm import chat_json, run_concurrent
-from citens.models import Claim, Verdict, VerificationResult
+from citens.models import Claim, VerificationResult
+
+# verdicts the defense lawyer may challenge (everything not grounded and not
+# the unverifiable exclusion); mirrored from the rewriter's DEFECT_VERDICTS
+_DEFENSEABLE = {"unsupported", "background", "contradictory"}
 
 SYSTEM_PROMPT = """You are a defense lawyer for academic claims. A verifier has marked a claim as \
-UNSUPPORTED, saying the cited sources don't back it up. Your job is to evaluate whether the \
-claim MIGHT still be reasonable given the sources, even if not explicitly stated.
+DEFECTIVE (unsupported / background / contradictory), saying the cited sources don't back it \
+up or contradict it. Your job is to evaluate whether the claim MIGHT still be reasonable given \
+the sources, even if not explicitly stated.
 
 Rules:
 1. Read the claim and the cited sources carefully
@@ -38,17 +43,18 @@ def challenge_verdict(
     verdict: VerificationResult,
     source_context: str,
 ) -> dict:
-    """Challenge an UNSUPPORTED verdict with a defense rebuttal.
+    """Challenge a DEFECTIVE verdict (unsupported / background / contradictory)
+    with a defense rebuttal.
 
     Args:
         claim: The claim being defended
-        verdict: The original UNSUPPORTED verdict
+        verdict: The original defect verdict
         source_context: The cited sources' abstracts/chunks
 
     Returns:
         Dict with 'score' (1-5), 'rebuttal' (str), 'concede' (bool)
     """
-    if verdict.verdict != Verdict.UNSUPPORTED:
+    if verdict.verdict not in _DEFENSEABLE:
         return {"score": 0, "rebuttal": "", "concede": True}
 
     user_prompt = (
@@ -93,7 +99,7 @@ def review_unsupported_claims(
     unsupported_pairs = [
         (idx, claim, verdict)
         for idx, (claim, verdict) in enumerate(zip(claims, ver_results, strict=False))
-        if verdict.verdict == Verdict.UNSUPPORTED
+        if verdict.verdict.value in _DEFENSEABLE
     ]
 
     def _defend(_i: int, pair: tuple[int, Claim, VerificationResult]) -> dict:

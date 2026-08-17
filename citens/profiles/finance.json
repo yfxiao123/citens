@@ -1,6 +1,7 @@
 {
   "name": "finance",
   "description": "Finance & financial economics domain profile (FT50 core venues)",
+  "primary_sources": ["openalex", "crossref", "semantic_scholar", "arxiv"],
   "domain_terms": [
     "market microstructure",
     "order flow imbalance",
@@ -66,5 +67,37 @@
     "Management Science and Operations Research",
     "Applied Mathematics",
     "Statistics and Probability"
-  ]
+  ],
+  "terminology": {
+    "market microstructure": "市场微观结构",
+    "order flow imbalance": "订单流失衡",
+    "limit order book": "限价订单簿",
+    "price impact": "价格冲击",
+    "liquidity provision": "流动性供给",
+    "liquidity risk": "流动性风险",
+    "adverse selection": "逆向选择",
+    "factor model": "因子模型",
+    "cross-section of returns": "股票收益横截面",
+    "asset pricing anomaly": "资产定价异象",
+    "risk premium": "风险溢价",
+    "volatility forecasting": "波动率预测",
+    "realized volatility": "已实现波动率",
+    "portfolio optimization": "投资组合优化",
+    "optimal execution": "最优执行",
+    "market making": "做市",
+    "high-frequency trading": "高频交易",
+    "term structure": "期限结构",
+    "yield curve": "收益率曲线",
+    "credit risk": "信用风险",
+    "systemic risk": "系统性风险",
+    "option pricing": "期权定价",
+    "implied volatility": "隐含波动率",
+    "event study": "事件研究法",
+    "difference in differences": "双重差分",
+    "instrumental variables": "工具变量",
+    "machine learning": "机器学习",
+    "deep learning": "深度学习",
+    "neural network": "神经网络",
+    "return predictability": "收益可预测性"
+  }
 }

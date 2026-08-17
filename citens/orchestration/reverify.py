@@ -70,7 +70,8 @@ def reverify(run_dir: str, bus: EventBus | None = None) -> dict:
          "verifiable_claims": sum(
              1 for r in ver_results if r.verdict.value != "unverifiable"),
          **{v: sum(1 for r in ver_results if r.verdict.value == v)
-            for v in ("supported", "partial", "unsupported", "unverifiable")},
+            for v in ("supported", "partial", "background", "contradictory",
+                      "unsupported", "unverifiable")},
          "results": [r.model_dump() for r in ver_results],
          "previous_precision": old_precision},
     )
@@ -84,9 +85,13 @@ def reverify(run_dir: str, bus: EventBus | None = None) -> dict:
          for c, r in zip(claims, ver_results, strict=False)],
     )
 
-    # defense pass over unsupported claims (now with better ground text),
+    # defense pass over defect claims (now with better ground text),
     # then fold overturns into the final verdicts like the main pipeline
-    unsupported = [r for r in ver_results if r.verdict.value == "unsupported"]
+    unsupported = [
+        r
+        for r in ver_results
+        if r.verdict.value in ("unsupported", "background", "contradictory")
+    ]
     defense = []
     if unsupported:
         _emit(bus, StepStarted(step="defense", title="双向核验（辩护律师）"))

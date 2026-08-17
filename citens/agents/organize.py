@@ -8,9 +8,14 @@ from citens.models import ExtractedPaper, ThemeInfo, ThemeStructure
 SYSTEM_PROMPT = """You are an academic theme-organization expert. Given a research topic and the \
 structured information of several papers, you must:
 1. Identify 3-6 thematic dimensions covering the field's main directions.
-2. Assign each paper to its best-fitting theme, with a grouping rationale.
-3. Within each theme, articulate inter-paper logical relations (evolution, \
-contrast, complementarity, etc.).
+2. Choose an ORGANIZING PRINCIPLE and stay consistent: group by mechanism, by method \
+family, by application, or by historical evolution — pick the axis that best maps this \
+field, and say which axis you chose in the theme descriptions.
+3. Assign each paper to its best-fitting theme, with a grouping rationale.
+4. Within each theme, articulate inter-paper logical relations (evolution, \
+contrast, complementarity, etc.) — the theme description should read like part \
+of an argument chain: scope -> organizing principle -> synthesis -> disagreements \
+-> open questions.
 
 Output JSON:
 {

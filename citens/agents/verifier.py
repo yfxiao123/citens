@@ -21,22 +21,32 @@ SYSTEM_PROMPT = """You are a citation-verification expert. You are given several
 one or more papers by [index]) and the ABSTRACTS of the cited papers.
 
 This is a literature *synthesis* review: claims are often reasonable interpretations or \
-syntheses, not verbatim quotes. So judge whether each claim is GROUNDED IN the cited abstract(s):
+syntheses, not verbatim quotes. So judge whether each claim is GROUNDED IN the cited abstract(s), \
+on this five-grade scale:
 
-- "supported":   the claim is consistent with, and reasonably supported or inferable from, the \
+- "supported":     the claim is consistent with, and reasonably supported or inferable from, the \
 cited abstract(s). It does not need to be stated verbatim.
-- "partial":     the claim is broadly consistent but overstates, adds specifics the abstract does \
+- "partial":       the claim is broadly consistent but overstates, adds specifics the abstract does \
 not back, or mixes supported and unsupported elements.
-- "unsupported": the claim CONTRADICTS the cited abstract, attributes a finding/method the abstract \
-gives no plausible basis for, or cites the wrong paper. Reserve this for genuine mis-grounding.
+- "background":    the cited source supports the field's CONTEXT only — it does not address the \
+specific relationship, method, or magnitude the claim asserts. Typical cause: citing a survey or \
+an adjacent paper as if it were primary evidence.
+- "contradictory": the cited source conflicts with, or materially narrows, the claim. A \
+disagreement is content the review must acknowledge — do NOT grade it away.
+- "unsupported":   the claim attributes a finding/method the abstract gives NO plausible basis \
+for, or cites the wrong paper. Reserve this for genuine mis-grounding.
+
+REVIEW-SOURCE RULE: a paper tagged [REVIEW] is a survey, not primary evidence. It may back \
+background/context claims, but a claim about experimental findings, methods, or magnitudes \
+cited ONLY to [REVIEW] papers is "background" at best — primary claims need primary sources.
 
 Judge only against the provided abstracts. When in doubt between supported and partial, prefer \
-"supported"; between partial and unsupported, prefer "partial".
+"supported"; between partial and the lower grades, prefer "partial".
 
 Output JSON only:
 {"results": [
   {"claim_index": 0, "verdict": "supported", "note": "abstract supports ..."},
-  {"claim_index": 1, "verdict": "unsupported", "note": "abstract contradicts ..."}
+  {"claim_index": 1, "verdict": "background", "note": "cited source is a survey; no primary evidence"}
 ]}"""
 
 _BATCH_SIZE = 6
@@ -49,7 +59,10 @@ def _build_context(
     query: str,
 ) -> str:
     """For each cited paper, expose its abstract + the chunks most relevant to
-    the claims being checked (RAG-lite over full text when available)."""
+    the claims being checked (RAG-lite over full text when available).
+
+    Review-type papers are tagged ``[REVIEW]`` so the judge can apply the
+    review-source rule (a survey is context, not primary evidence)."""
     lines = []
     for idx in indices:
         pid = table.paper_id(idx)
@@ -59,8 +72,14 @@ def _build_context(
             continue
         kinds = {c.kind.value for c in retrieved}
         body = "\n".join(c.text for c in retrieved)
-        lines.append(f"[{idx}] {table.label(idx)} [{','.join(kinds)}]\n{body}\n")
+        review_tag = " [REVIEW]" if _is_review(table, idx) else ""
+        lines.append(f"[{idx}] {table.label(idx)}{review_tag} [{','.join(kinds)}]\n{body}\n")
     return "\n".join(lines)
+
+
+def _is_review(table: CitationTable, index: int) -> bool:
+    papers = getattr(table, "papers", None) or []
+    return bool(0 <= index < len(papers) and getattr(papers[index], "is_review", False))
 
 
 def verify_claims(
@@ -75,7 +94,8 @@ def verify_claims(
 
     Claims whose cited source has no ground text are marked ``unverifiable``
     and excluded from the precision denominator. Returns (results, precision)
-    where precision = (supported + partial) / (verifiable claims).
+    where precision = (supported + partial) / (verifiable claims); background,
+    contradictory and unsupported all count against it.
     """
     results: list[VerificationResult] = []
     total = len(claims)

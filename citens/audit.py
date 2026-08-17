@@ -15,6 +15,10 @@ from pathlib import Path
 
 _VERDICTS = {"s": "supported", "p": "partial", "u": "unsupported"}
 
+# machine background/contradictory both mean "not grounded by this citation"
+# for a human filling s/p/u; normalize before comparing, keep raw for confusion
+_HUMAN_EQUIV = {"background": "unsupported", "contradictory": "unsupported"}
+
 
 def _refs_from_bib(run_dir: str) -> list[str]:
     """Reference labels in CitationTable order (references.bib entry order)."""
@@ -49,7 +53,9 @@ def generate_audit_sheet(run_dir: str, out_name: str = "审核清单.md") -> str
         f"(改写前 {ver.get('pre_rewrite_precision', '-')}, "
         f"改写后 {ver.get('post_rewrite_precision', '-')})  "
         f"| 总论断 {ver['total_claims']} 条: supported {ver['supported']} / "
-        f"partial {ver['partial']} / unsupported {ver['unsupported']} / "
+        f"partial {ver['partial']} / background {ver.get('background', 0)} / "
+        f"contradictory {ver.get('contradictory', 0)} / "
+        f"unsupported {ver['unsupported']} / "
         f"unverifiable {ver['unverifiable']}",
     ]
     if leni.get("sampled"):
@@ -59,7 +65,8 @@ def generate_audit_sheet(run_dir: str, out_name: str = "审核清单.md") -> str
         )
     lines += [
         "\n判定标准: supported(s)=被引文献确有此依据; "
-        "partial(p)=大方向对但有夸大/无依据细节; unsupported(u)=被引文献没有此依据",
+        "partial(p)=大方向对但有夸大/无依据细节; unsupported(u)=被引文献没有此依据"
+        "（机器的 background=只支撑背景 / contradictory=与原文相左，均按 u 对待）",
         "用法: 每条论断下'人工判定:'后填 s/p/u, 然后运行 "
         "`citens audit <run目录> --ingest 审核清单.md`\n",
         "## 参考文献索引\n",
@@ -101,20 +108,21 @@ def ingest_audit(run_dir: str, sheet_path: str) -> dict:
             "no '人工判定: s/p/u' entries found — fill the sheet before ingesting"
         )
 
-    exact = sum(1 for i, v in matched if results[i]["verdict"] == v)
+    exact = sum(
+        1
+        for i, v in matched
+        if _HUMAN_EQUIV.get(results[i]["verdict"], results[i]["verdict"]) == v
+    )
     # a one-step leniency gap: machine supported vs human partial, or
-    # machine partial vs human unsupported
+    # machine partial vs human unsupported (background/contradictory count as
+    # unsupported — they are both "not grounded by this citation")
     order = {"supported": 0, "partial": 1, "unsupported": 2}
-    lenient = sum(
-        1
-        for i, v in matched
-        if order.get(results[i]["verdict"], 1) < order.get(v, 1)
-    )
-    strict = sum(
-        1
-        for i, v in matched
-        if order.get(results[i]["verdict"], 1) > order.get(v, 1)
-    )
+
+    def _m(v: str) -> int:
+        return order.get(_HUMAN_EQUIV.get(v, v), 1)
+
+    lenient = sum(1 for i, v in matched if _m(results[i]["verdict"]) < order.get(v, 1))
+    strict = sum(1 for i, v in matched if _m(results[i]["verdict"]) > order.get(v, 1))
     # human-grounded precision over the judged sample (the honest headline)
     human_ok = sum(1 for _i, v in matched if v in ("supported", "partial"))
 

@@ -612,6 +612,11 @@ def collect(
     Full text is deliberately NOT fetched — that happens later, in batches,
     only for papers that survive the pipeline's filter.
     """
+    from citens.profiles import load_profile, order_sources
+
+    prof = load_profile(profile or settings.profile)
+    # domain-preferred source order (finance: journal records win dedup)
+    sources = order_sources(sources, prof)
     queries, broad = build_queries(topic, extra_queries, profile or settings.profile)
     if on_progress:
         on_progress(
@@ -620,15 +625,27 @@ def collect(
         )
     free = [q for q in queries if q not in broad]
 
+    per_query = max(target // max(len(queries), 1), 8)
     by_key, hits = asyncio.run(
-        _search_per_query(
-            free or queries, per_query=max(target // max(len(queries), 1), 8),
-            sources=sources,
-        )
+        _search_per_query(free or queries, per_query=per_query, sources=sources)
     )
     papers = list(by_key.values())
     if on_progress:
         on_progress(f"自由检索 {len(free or queries)} 条查询 · 命中 {len(papers)} 篇")
+
+    # adaptive narrowing (nature-academic-search's ">500 results → add
+    # filters" rule, scaled to our caps): a query whose result list saturated
+    # the per-query cap has unbounded recall — push it into the
+    # field-constrained pass rather than trusting free-search ranking alone
+    saturated = [
+        q for q in (free or queries)
+        if hits.get(q, 0) >= per_query and q not in broad
+    ]
+    broad = broad + saturated
+    if saturated and on_progress:
+        on_progress(
+            f"{len(saturated)} 条查询命中数触顶（召回过宽），转入场域收窄二轮"
+        )
 
     total_added = append_pool(topic, papers)
 

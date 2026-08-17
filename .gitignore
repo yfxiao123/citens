@@ -31,7 +31,8 @@ requirements.txt
 1407.5684.pdf
 
 # downloaded data (license: CC BY-NC, fetched at init time, not redistributed)
-data/sjr/
+# + local literature pools & any session artifacts: never commit
+/data/
 
 # local tooling scratch
 .zcode/

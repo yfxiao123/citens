@@ -23,11 +23,26 @@ from citens import cache
 from citens.config import settings
 from citens.models import Chunk
 
-_WORD_RE = re.compile(r"[a-z0-9]+")
+_WORD_RE = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]+")
+
+_CJK_RUN_RE = re.compile(r"^[\u4e00-\u9fff]+$")
 
 
 def _terms(text: str) -> list[str]:
-    return _WORD_RE.findall(text.lower())
+    """Lexical terms: latin/digit words, CJK bigrams (Lucene CJKAnalyzer style).
+
+    Bigrams, not single chars: single CJK chars are so common they drown the
+    IDF signal; before this, ``[a-z0-9]+`` matched NOTHING in Chinese text —
+    BM25 over a Chinese pool silently returned index order.
+    """
+    out: list[str] = []
+    for m in _WORD_RE.finditer(text.lower()):
+        tok = m.group(0)
+        if not _CJK_RUN_RE.match(tok) or len(tok) == 1:
+            out.append(tok)
+        else:
+            out.extend(tok[i : i + 2] for i in range(len(tok) - 1))
+    return out
 
 
 class Retriever(Protocol):
@@ -68,7 +83,15 @@ def bm25_rank_texts(
 
     Generic text-level BM25 shared by chunk retrieval and the literature
     pool's deterministic pre-recall (rank pool records before LLM screening).
+
+    Corpora past ``_FTS5_MIN`` texts go through an in-memory SQLite FTS5
+    index (C speed, stdlib) — the pure-Python scorer stays as the small-
+    corpus path and the fallback when FTS5 is unavailable.
     """
+    if len(texts) >= _FTS5_MIN:
+        order = _fts5_rank(texts, query)
+        if order is not None:
+            return order
     docs = [_terms(t) for t in texts]
     n = len(docs)
     if n == 0:
@@ -92,6 +115,50 @@ def bm25_rank_texts(
             s += idf * tf[t] * (k1 + 1) / (tf[t] + k1 * (1 - b + b * len(d) / avgdl))
         scores.append(s)
     return sorted(range(n), key=lambda i: scores[i], reverse=True)
+
+
+# SQLite FTS5 is C-speed and in the stdlib; it only pays off once the corpus
+# outgrows pure-Python scoring (the pool's ~140 records are instant either way)
+_FTS5_MIN = 400
+
+
+def _fts5_rank(texts: list[str], query: str) -> list[int] | None:
+    """BM25 ordering via an in-memory FTS5 index; None on ANY failure (FTS5
+    not compiled in, query syntax, …) so the caller falls back silently.
+
+    Texts are pre-tokenized with :func:`_terms` (CJK bigrams included) and
+    inserted space-joined, so the FTS tokenizer never sees raw Chinese —
+    unicode61 would otherwise swallow a whole CJK run as one token.
+    """
+    import sqlite3
+
+    conn = None
+    try:
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE VIRTUAL TABLE t USING fts5(body)")
+        conn.executemany(
+            "INSERT INTO t(rowid, body) VALUES (?, ?)",
+            [(i, " ".join(_terms(t))) for i, t in enumerate(texts)],
+        )
+        qtokens = list(dict.fromkeys(_terms(query)))
+        if not qtokens:
+            return list(range(len(texts)))
+        match = " OR ".join(qtokens)
+        # bm25() is lower-is-better (more negative = better match)
+        rows = conn.execute(
+            "SELECT rowid FROM t WHERE t MATCH ? ORDER BY bm25(t)", (match,)
+        ).fetchall()
+        matched = [r[0] for r in rows]
+        # FTS omits zero-match docs entirely; the pure-Python scorer ranks
+        # them last-but-present — keep that contract so callers can rely on
+        # getting every index back
+        seen = set(matched)
+        return matched + [i for i in range(len(texts)) if i not in seen]
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def embed_texts(texts: list[str]) -> list[list[float]] | None:

@@ -54,8 +54,10 @@ Every run writes an inspectable directory:
 runs/<topic>-<timestamp>/
 ├── review.md              # the survey, with [n] citation markers
 ├── references.bib         # BibTeX
-├── provenance.json        # claim → reference → verdict mapping
-├── verification.json      # per-claim verdicts + citation precision
+├── references.ris         # RIS (EndNote/Zotero import)
+├── review_browser.html    # self-contained audit UI (see below)
+├── provenance.json        # claim → reference → verdict → evidence-chunk anchors
+├── verification.json      # per-claim verdicts (5-grade) + citation precision
 ├── grounding.json         # which papers have full text vs abstract only
 ├── fetch_list.md          # papers YOU can fetch manually (see below)
 └── steps/*.json           # every intermediate stage
@@ -80,6 +82,9 @@ citens resume runs/<dir>            # an interrupted run continues from its
 citens reverify runs/<dir>          # drop fetch_list.md's PDFs into papers/
                                     #   first: re-verifies every claim against
                                     #   the new full text, reports the delta
+citens browse runs/<dir> --open     # single-file HTML audit browser: filter
+                                    #   claims by verdict, search, expand the
+                                    #   evidence chunk behind each claim
 citens run "..." -l zh              # output language (prose + headings)
 ```
 
@@ -127,6 +132,8 @@ Precision depends on how much ground text exists. Same topic, same model:
 | + snowballing, defense review, deep_review mode (13 papers) | 65 | **94%** |
 
 The number is computed by an LLM-as-judge with the cited paper's retrieved chunks in view — it's a working measure, not a certification. Claims whose cited paper has no ground text are excluded from the denominator and reported as `unverifiable` instead.
+
+The judge grades on a **five-grade scale**: `supported` / `partial` (both count as grounded), `background` (the source — often a survey — backs field context only; the rewriter re-aims the claim at primary sources), `contradictory` (the source disagrees; the rewrite surfaces the disagreement instead of papering over it), and `unsupported` (weaken or drop). A review whose citation is a survey can therefore no longer sneak an empirical claim past the judge.
 
 Reproduce it yourself — the eval harness runs a topic set (or summarizes existing runs) and writes a comparison table:
 

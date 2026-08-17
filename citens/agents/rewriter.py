@@ -21,25 +21,43 @@ from citens.models import Claim, VerificationResult
 
 SYSTEM_PROMPT = """You are a meticulous academic editor fixing citation problems in a survey.
 
-You are given claims that a verifier judged UNSUPPORTED against the cited \
-papers' ground text, along with that ground text. Rewrite each claim so that \
-it IS supported by the sources it cites.
+You are given claims that a verifier judged DEFECTIVE against the cited papers' \
+ground text, along with that ground text and the defect type:
+
+- "unsupported"   — the source gives no plausible basis for the claim.
+- "background"    — the source (often a survey) backs only field context, not \
+the specifics the claim asserts.
+- "contradictory" — the source conflicts with, or materially narrows, the claim.
+
+Rewrite each claim so that it IS supported by the sources it cites:
 
 Rewrite rules (strict):
 1. WEAKEN or QUALIFY — remove the specifics the source does not state \
 (magnitudes, mechanisms, generalizations). "X improves Y by 30%" -> "X is \
 reported to improve Y" when only the direction is grounded.
-2. DROP dead citations — remove [n] markers of papers that do not support \
+2. For "background": either weaken the claim to what a context citation CAN \
+back, or drop the review/context citation if a primary source among the \
+cited ones actually supports the specifics.
+3. For "contradictory": do not delete the disagreement — rewrite so the claim \
+matches what the source actually reports, or presents the divergence \
+explicitly ("[n] reports X, in contrast to ..."). Silently reversing the \
+claim's meaning is forbidden.
+4. DROP dead citations — remove [n] markers of papers that do not support \
 any part of the claim. Keep only citations that plausibly back the rewrite.
-3. NEVER add new facts, numbers, or mechanisms not present in the ground \
+5. NEVER add new facts, numbers, or mechanisms not present in the ground \
 text. A shorter, hedged claim is correct; an embellished one is not.
-4. Keep the claim's role in the survey (it still says something useful).
-5. Keep the same citation-marker format: [n] or [n][m].
+6. Keep the claim's role in the survey (it still says something useful).
+7. Keep the same citation-marker format: [n] or [n][m].
 
 Output JSON:
 {"rewrites": [
   {"claim_index": 0, "new_text": "...", "note": "removed unsupported magnitude"}
 ]}"""
+
+
+# verdicts the rewriter is allowed to touch — everything except the grounded
+# two and the unverifiable exclusion
+DEFECT_VERDICTS = {"unsupported", "background", "contradictory"}
 
 
 def rewrite_unsupported_claims(
@@ -50,15 +68,17 @@ def rewrite_unsupported_claims(
     *,
     batch_size: int = 8,
 ) -> dict[int, dict]:
-    """Rewrite unsupported claims to match their sources.
+    """Rewrite defective claims (unsupported / background / contradictory)
+    to match their sources.
 
     Returns {claim_index: {"new_text": ..., "note": ...}} for accepted
     rewrites. Claims whose rewrite keeps zero citations are dropped (nothing
     in the rewrite is grounded, so the claim cannot be saved).
     """
     targets = [
-        i for i, r in enumerate(ver_results)
-        if r.verdict.value == "unsupported" and i < len(claims)
+        i
+        for i, r in enumerate(ver_results)
+        if r.verdict.value in DEFECT_VERDICTS and i < len(claims)
     ]
     if not targets:
         return {}
@@ -70,7 +90,8 @@ def rewrite_unsupported_claims(
         claim_lines = []
         for j, i in enumerate(batch_idx):
             claim = claims[i]
-            claim_lines.append(f"Claim {j} (original): {claim.text}")
+            defect = ver_results[i].verdict.value if i < len(ver_results) else "unsupported"
+            claim_lines.append(f"Claim {j} [{defect}] (original): {claim.text}")
             for cite in claim.citation_indices:
                 pid = table.paper_id(cite)
                 chunks = chunk_store.chunks_for(pid)[:3]
@@ -80,7 +101,7 @@ def rewrite_unsupported_claims(
         user_prompt = (
             "Ground text of cited papers:\n"
             + "\n".join(context_lines[:24])
-            + "\n\nClaims judged unsupported:\n"
+            + "\n\nClaims judged defective (bracket tag = defect type):\n"
             + "\n".join(claim_lines)
             + f"\n\nRewrite all {len(batch_idx)} claims per the rules."
         )

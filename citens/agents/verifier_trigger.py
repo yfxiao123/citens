@@ -56,14 +56,20 @@ def collect_unsupported_queries(
     *,
     max_claims: int = 5,
 ) -> list[str]:
-    """Map unsupported claims to supplementary search queries.
+    """Map defect claims to supplementary search queries.
 
     Verdicts carry claim_text; we zip them back to the source claims by text
     match (verifier results are ordered like the claims list). Derives queries
-    for up to `max_claims` unsupported claims, dedupes, caps at 6.
+    for up to `max_claims` defect claims, dedupes, caps at 6.
+
+    "background" counts too: a context-only citation usually means the PRIMARY
+    source is out there unfound — that is exactly a retrieval gap. A genuine
+    contradiction is a writing problem, not a retrieval one.
     """
     unsupported_texts = {
-        r.claim_text for r in ver_results if r.verdict == Verdict.UNSUPPORTED
+        r.claim_text
+        for r in ver_results
+        if r.verdict in (Verdict.UNSUPPORTED, Verdict.BACKGROUND)
     }
     if not unsupported_texts:
         return []

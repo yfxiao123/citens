@@ -27,33 +27,42 @@ the following research topic.
 
 SECTION_PROMPT = """You are an academic survey writer. Using the theme info and paper list below, \
 write this theme section (600-900 words).
-1. Synthesize across the papers — do NOT list them one by one.
+1. A review is NOT a survey list. Never write "Author A reported X. Author B reported Y." \
+sequences — organize the section by mechanism / method / finding and cite papers INSIDE the \
+synthesis, letting each paragraph advance one point of the argument.
 2. Analyze inter-paper relations (agreement, contradiction, evolution, complementarity). Where the \
 CROSS-PAPER SYNTHESIS notes consensus or contradictions, foreground them and argue a position.
-3. **Cite a paper by writing its index in square brackets, e.g. [0] or [3].** Use the EXACT index \
+3. Use connectives that signal logical relation — "in contrast", "building on this", \
+"the remaining disagreement is", "this contrast persists because ..." — and avoid contentless \
+"furthermore"/"additionally" chains.
+4. **Cite a paper by writing its index in square brackets, e.g. [0] or [3].** Use the EXACT index \
 shown before each paper below. A sentence making a claim about a paper MUST carry its [index].
-4. **Ground every cited claim in what the paper's abstract actually says.** Do NOT invent specifics \
-(methods, numbers, mechanisms) the abstract does not state. When the abstract is thin, make the \
+5. **Ground every cited claim in what the paper's abstract actually says.** Do NOT invent specifics \
+(methods, numbers, mechanisms) the abstract does not state. A paper's TITLE looking related is not \
+evidence — never state specifics a title alone suggests. When the abstract is thin, make the \
 claim appropriately general rather than fabricating detail. Prefer fewer, defensible claims over \
 many speculative ones.
-5. Do NOT write any heading line — start directly with prose.
-6. Fluent, scholarly prose."""
+6. Do NOT write any heading line — start directly with prose.
+7. Fluent, scholarly prose."""
 
 CRIT_SYNTH_PROMPT = """You are an academic survey writer. Write a "Critical Synthesis" section \
 (400-700 words) that takes a position across the whole literature.
-Use the provided cross-paper consensus and contradictions. Argue, do not merely list.
+Use the provided cross-paper consensus and contradictions. Argue, do not merely list — \
+a review may take a view, but it must SHOW its reasoning, not assert it. Where the evidence \
+conflicts, map the disagreement (who claims what, on which data/method) instead of averaging it away.
 Cite papers by [index], and keep claims grounded in what those papers' abstracts support.
 Do NOT write a heading line. Fluent, scholarly prose."""
 
 CONCLUSION_PROMPT = """You are an academic survey writer. Write "Conclusion & Outlook" (400-600 \
 words) for the topic.
-1. Summarize main findings and consensus.
+1. Close with a USABLE MAP of the field, not a replay of the sections: what is settled, \
+where the live disagreements stand, and which open questions are most worth attacking next \
+(anchor them in the listed research gaps where possible).
 2. Note current shortcomings.
-3. Outlook on future directions — anchor it in the listed research gaps where possible.
-4. Cite ONLY the papers listed below, using their EXACT [index]. Never invent papers, \
+3. Cite ONLY the papers listed below, using their EXACT [index]. Never invent papers, \
 authors, or numbering not in the list — a conclusion citing unknown work is worthless.
-5. Do NOT write any heading, bold title, or references list.
-6. Fluent, scholarly prose."""
+4. Do NOT write any heading, bold title, or references list.
+5. Fluent, scholarly prose."""
 
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
 _BOLD_TITLE_RE = re.compile(r"^\s{0,3}\*\*[^*\n]+\*\*\s*$")
@@ -176,6 +185,7 @@ def write_review_body(
     synthesis: SynthesisResult | None = None,
     on_step=None,
     evidence_for=None,
+    terminology: dict[str, str] | None = None,
 ) -> str:
     """Generate the review BODY (title + intro + theme sections + critical
     synthesis + conclusion).
@@ -189,6 +199,10 @@ def write_review_body(
     excerpts for a theme's papers (from the ChunkStore): the writer grounds
     its claims in them instead of abstract extracts alone — fewer
     unsupported claims at the SOURCE, before any verifier pass.
+
+    ``terminology`` (from the domain profile) is the EN->ZH ledger appended
+    to every prompt so field terms get ONE consistent Chinese rendering
+    across all sections (nature-reader's Terminology Ledger).
     """
     sections: list[str] = [f"# {topic}\n"]
 
@@ -204,8 +218,16 @@ def write_review_body(
 
     # --- build all section jobs (kind, label, system, user, budget) ----------
     lang_line = lang_instruction()
+    term_line = ""
+    if terminology:
+        pairs = "; ".join(f"{en}={zh}" for en, zh in list(terminology.items())[:40])
+        term_line = (
+            "\nTERMINOLOGY LEDGER (use these exact renderings, consistently, "
+            f"on first and later occurrence): {pairs}\n"
+        )
     jobs: list[dict] = [
-        {"kind": "intro", "label": "intro", "system": INTRO_PROMPT + "\n" + lang_line,
+        {"kind": "intro", "label": "intro",
+         "system": INTRO_PROMPT + "\n" + lang_line + term_line,
          "user": f"研究主题 / Topic: {topic}", "budget": 4096}
     ]
 
@@ -223,7 +245,7 @@ def write_review_body(
             f"{synth_context}"
             f"包含论文 / Papers (index in [brackets]):{_papers_block(indexed)}\n"
         )
-        system_prompt = SECTION_PROMPT + "\n" + lang_line
+        system_prompt = SECTION_PROMPT + "\n" + lang_line + term_line
         if evidence_for is not None:
             excerpts = evidence_for(theme)
             if excerpts:
@@ -253,7 +275,8 @@ def write_review_body(
         )
         jobs.append(
             {"kind": "crit", "label": "critical-synthesis",
-             "system": CRIT_SYNTH_PROMPT + "\n" + lang_line, "user": synth_prompt, "budget": 4096}
+             "system": CRIT_SYNTH_PROMPT + "\n" + lang_line + term_line,
+             "user": synth_prompt, "budget": 4096}
         )
 
     summary = "".join(f"- {t.name}: {t.description}\n" for t in themes.themes)
@@ -261,7 +284,8 @@ def write_review_body(
     if synthesis and synthesis.gaps:
         gaps = "研究空白 / Research gaps:\n" + "".join(f"- {g}\n" for g in synthesis.gaps)
     jobs.append(
-        {"kind": "conclusion", "label": "conclusion", "system": CONCLUSION_PROMPT + "\n" + lang_line,
+        {"kind": "conclusion", "label": "conclusion",
+         "system": CONCLUSION_PROMPT + "\n" + lang_line + term_line,
          "user": (
              f"研究主题 / Topic: {topic}\n\n主题结构 / Themes:\n{summary}\n{gaps}\n"
              f"可引用论文 / Citable papers (use EXACT [index]):"

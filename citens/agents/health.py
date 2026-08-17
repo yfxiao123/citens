@@ -57,6 +57,8 @@ def check_health(
     verifiable = [r for r in ver_results if r.verdict != Verdict.UNVERIFIABLE]
     supported = sum(1 for r in verifiable if r.verdict == Verdict.SUPPORTED)
     partial = sum(1 for r in verifiable if r.verdict == Verdict.PARTIAL)
+    background = sum(1 for r in verifiable if r.verdict == Verdict.BACKGROUND)
+    contradictory = sum(1 for r in verifiable if r.verdict == Verdict.CONTRADICTORY)
     unsupported = sum(1 for r in verifiable if r.verdict == Verdict.UNSUPPORTED)
 
     precision = (supported + partial) / len(verifiable) if verifiable else 0.0
@@ -73,6 +75,8 @@ def check_health(
         "n_contradictions": n_contradictions,
         "n_gaps": n_gaps,
         "n_unsupported": unsupported,
+        "n_background": background,
+        "n_contradictory": contradictory,
         "n_absent": absent_count,
     }
 
@@ -84,6 +88,8 @@ def check_health(
         issues.append("verifier_too_lenient")
     if absent_count == 0 and len(verifiable) > 10:
         issues.append("absence_blindness")
+    if len(verifiable) >= 10 and background > 0.2 * len(verifiable):
+        issues.append("reviews_cited_as_primary")
 
     # Generate adversarial queries if issues detected
     adversarial_queries = []

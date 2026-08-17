@@ -420,6 +420,30 @@ def audit(
 
 
 @app.command()
+def browse(
+    run_dir: str = typer.Argument(..., help="run 目录（含 verification.json）"),
+    open_: bool = typer.Option(False, "--open", help="生成后在浏览器中打开"),
+):
+    """为已完成的 run 生成自包含的 HTML 审阅浏览器（可对旧 run 反复重建）。
+
+    论断×判定×证据锚点一览：按判定筛选、关键词搜索、逐条展开
+    provenance 里的 chunk 锚点，正文/参考文献可下载。单文件、无服务器、
+    无构建——直接把 review_browser.html 发给别人即可。
+    """
+    import webbrowser
+
+    from citens.artifacts import write_review_browser
+
+    path = write_review_browser(run_dir)
+    if path is None:
+        console.print("[bold red]该 run 没有 verification.json（尚未核验），无可浏览内容[/]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]✓[/] 审阅浏览器已生成: {path}")
+    if open_:
+        webbrowser.open(Path(path).resolve().as_uri())
+
+
+@app.command()
 def sjr(
     force: bool = typer.Option(False, "--force", help="重新下载（即使文件已存在）"),
     mirror: bool = typer.Option(

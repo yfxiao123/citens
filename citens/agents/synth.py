@@ -16,7 +16,10 @@ SYSTEM_PROMPT = """You are a critical-synthesis expert for academic literature. 
 papers (structured) and the themes they fall into, look ACROSS papers and identify:
 
 1. "consensus": claims/observations on which multiple papers agree.
-2. "contradictions": points where papers diverge, conflict, or reach opposite conclusions.
+2. "contradictions": points where papers diverge, conflict, or reach opposite \
+conclusions. For each, name the disagreeing papers ([index]) and what exactly \
+diverges — the data? the method? the market/sample? the period? A disagreement \
+without a stated axis is useless to the writer.
 3. "gaps": aspects of the topic that are under-covered, unresolved, or missing entirely — \
 be specific and concrete.
 

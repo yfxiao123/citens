@@ -98,6 +98,29 @@ class CitationTable:
             entries.append(f"@article{{{key},\n  {body},\n}}")
         return "\n\n".join(entries) + "\n"
 
+    def to_ris(self) -> str:
+        """RIS export for EndNote/Zotero import (nature-citation default).
+
+        Missing fields are simply omitted — never invented.
+        """
+        blocks = []
+        for p in self.papers:
+            lines = ["TY  - JOUR"]
+            for a in p.authors:
+                lines.append(f"AU  - {_bib_escape(a)}")
+            lines.append(f"TI  - {_bib_escape(p.title)}")
+            venue = _bib_venue(p.source, getattr(p, "venue", ""))
+            lines.append(f"JO  - {venue}")
+            if p.year:
+                lines.append(f"PY  - {p.year}")
+            if p.doi:
+                lines.append(f"DO  - {_bib_escape(p.doi)}")
+            if p.url:
+                lines.append(f"UR  - {_bib_escape(p.url)}")
+            lines.append("ER  - ")
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks) + "\n"
+
 
 def parse_claims_from_review(markdown: str) -> list[Claim]:
     """Extract cited claims from a review's body (skips the references section).
@@ -130,11 +153,14 @@ def parse_claims_from_review(markdown: str) -> list[Claim]:
     return claims
 
 
-def build_provenance(claims, table, ver_results=None) -> list[dict]:
+def build_provenance(claims, table, ver_results=None, chunk_store=None) -> list[dict]:
     """Claim -> cited references map, for provenance.json.
 
     If ``ver_results`` (list of VerificationResult) is given, each claim is
-    annotated with the Verifier's verdict.
+    annotated with the Verifier's verdict. If ``chunk_store`` is given, each
+    citation also carries the ground-text chunk a reader should look at
+    (deterministic top-1 retrieval against the claim text — nature-reader's
+    stable-anchor contract, cheap enough to run for every claim).
     """
     vmap: dict[str, tuple[str, str]] = {}
     if ver_results:
@@ -150,6 +176,24 @@ def build_provenance(claims, table, ver_results=None) -> list[dict]:
                 for i in c.citation_indices
             ],
         }
+        if chunk_store is not None:
+            anchors = []
+            for i in c.citation_indices[:3]:
+                pid = table.paper_id(i)
+                if not chunk_store.has(pid):
+                    continue
+                for ch in chunk_store.retrieve(pid, c.text, k=1):
+                    anchors.append(
+                        {
+                            "index": i,
+                            "chunk_id": ch.chunk_id,
+                            "kind": ch.kind.value,
+                            "excerpt": ch.text[:200],
+                        }
+                    )
+                    break
+            if anchors:
+                entry["evidence_chunks"] = anchors
         if c.text in vmap:
             verdict, note = vmap[c.text]
             entry["verdict"] = verdict

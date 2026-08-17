@@ -40,6 +40,7 @@ from citens.agents import (
 from citens.agents.planner import discover_terms, generate_seed_papers, refine_queries
 from citens.agents.quality import build_comparison_matrix, render_comparison_md
 from citens.agents.writer import localized_heading
+from citens.artifacts import write_review_browser
 from citens.config import settings
 from citens.events import (
     Event,
@@ -208,6 +209,7 @@ def _compose(
     clock: StepClock | None = None,
     label: str = "compose",
     chunk_store: ChunkStore | None = None,
+    terminology: dict[str, str] | None = None,
 ) -> ComposeResult:
     """organize -> synthesize -> write -> verify, persisting all artifacts.
 
@@ -334,11 +336,13 @@ def _compose(
 
     body = write_review_body(
         extracted, themes, topic, synthesis=synthesis, on_step=_write_step,
-        evidence_for=_evidence_for,
+        evidence_for=_evidence_for, terminology=terminology,
     )
     review = body + f"\n## {localized_heading('refs')}\n\n" + table.references_md() + "\n"
     review_path = persistence.save_text(run_dir, "review.md", review)
     persistence.save_text(run_dir, "references.bib", table.to_bibtex())
+    # RIS for EndNote/Zotero users (nature-citation default export)
+    persistence.save_text(run_dir, "references.ris", table.to_ris())
 
     claims = parse_claims_from_review(review)
     persistence.save_step(run_dir, "07_claims", claims)
@@ -404,6 +408,10 @@ def _compose(
                 ),
                 "supported": sum(1 for r in ver_results if r.verdict.value == "supported"),
                 "partial": sum(1 for r in ver_results if r.verdict.value == "partial"),
+                "background": sum(1 for r in ver_results if r.verdict.value == "background"),
+                "contradictory": sum(
+                    1 for r in ver_results if r.verdict.value == "contradictory"
+                ),
                 "unsupported": sum(1 for r in ver_results if r.verdict.value == "unsupported"),
                 "unverifiable": sum(
                     1 for r in ver_results if r.verdict.value == "unverifiable"
@@ -414,9 +422,12 @@ def _compose(
         persistence.save_json(run_dir, "verification.json", _verification_payload())
         _emit(bus, StepCompleted(step="verify", message=f"引用精度 {precision * 100:.0f}%"))
 
-        # bidirectional verification: defense lawyer challenges unsupported verdicts
-        unsupported_count = sum(1 for r in ver_results if r.verdict.value == "unsupported")
-        if unsupported_count > 0:
+        # bidirectional verification: defense lawyer challenges defect verdicts
+        defect_counts = {
+            v: sum(1 for r in ver_results if r.verdict.value == v)
+            for v in ("unsupported", "background", "contradictory")
+        }
+        if sum(defect_counts.values()) > 0:
             clock.mark(f"{label}:defense")
             _emit(bus, StepStarted(step="defense", title="双向核验（辩护律师）"))
             source_contexts: dict[int, str] = {}
@@ -465,15 +476,19 @@ def _compose(
                 ),
             )
 
-        # rewrite loop: FIX (not just report) surviving unsupported claims.
-        # The rewriter weakens/qualifies each claim to match its sources; the
-        # revised claims are re-verified and the review text is updated in
+        # rewrite loop: FIX (not just report) surviving defect claims —
+        # unsupported (no basis), background (context-only citation) and
+        # contradictory (source disagrees) each get a tailored rewrite. The
+        # rewriter weakens/qualifies/re-aims each claim to match its sources;
+        # the revised claims are re-verified and the review text is updated in
         # place — precision becomes a pipeline behavior, not a scorecard.
         pre_rewrite_precision = precision  # post-defense, pre-rewrite
-        remaining_unsupported = [
-            i for i, r in enumerate(ver_results) if r.verdict.value == "unsupported"
+        remaining_defects = [
+            i
+            for i, r in enumerate(ver_results)
+            if r.verdict.value in ("unsupported", "background", "contradictory")
         ]
-        if remaining_unsupported:
+        if remaining_defects:
             clock.mark(f"{label}:rewrite")
             _emit(bus, StepStarted(step="rewrite", title="论断改写"))
             rewrites = rewrite_unsupported_claims(claims, ver_results, table, chunk_store)
@@ -526,7 +541,8 @@ def _compose(
                     StepCompleted(
                         step="rewrite",
                         message=(
-                            f"改写 {len(applied)} 条无依据论断 · 复验后 {fixed} 条转为有依据 · "
+                            f"改写 {len(applied)} 条缺陷论断（无依据/背景引用/矛盾）· "
+                            f"复验后 {fixed} 条转为有依据 · "
                             f"精度 {pre_rewrite_precision * 100:.0f}% ⇒ {precision * 100:.0f}%"
                         ),
                     ),
@@ -599,7 +615,11 @@ def _compose(
                 )
                 on_supplement_queries(vq, f"{len(vq)} 条核验触发补充检索")
 
-    persistence.save_json(run_dir, "provenance.json", build_provenance(claims, table, ver_results))
+    persistence.save_json(
+        run_dir,
+        "provenance.json",
+        build_provenance(claims, table, ver_results, chunk_store=chunk_store),
+    )
 
     return ComposeResult(
         themes=themes,
@@ -667,6 +687,15 @@ async def run_pipeline_async(
         # the exact topic even when meta.json was never reached
         persistence.save_json(run_dir, "run.json", {"topic": topic})
 
+    # bound once here so every later stage (including the resume path, which
+    # skips the planner) can rely on it being defined
+    from citens.profiles import load_profile, order_sources
+
+    profile = load_profile(options.profile or settings.profile)
+    # domain-preferred source order (dedup keeps the first reporter of a
+    # preprint/published pair — finance wants the journal record to win)
+    options.sources = order_sources(options.sources, profile)
+
     try:
         resumed = options.resume_dir is not None
         if resumed:
@@ -707,9 +736,8 @@ async def run_pipeline_async(
                 persistence.save_step(run_dir, "00_filters", options.filters)
             keywords = generate_keywords(topic, filters=options.filters)
             # domain profile: curated terminology joins the keyword batches
-            from citens.profiles import load_profile, merge_profile_terms
+            from citens.profiles import merge_profile_terms
 
-            profile = load_profile(options.profile or settings.profile)
             if profile is not None:
                 before = set(keywords)
                 keywords = merge_profile_terms(keywords, profile)
@@ -1022,6 +1050,7 @@ async def run_pipeline_async(
             clock=clock,
             label="compose1",
             chunk_store=shared_store,
+            terminology=profile.terminology if profile is not None else None,
         )
         meta.themes = [t.name for t in result.themes.themes]
 
@@ -1128,6 +1157,7 @@ async def run_pipeline_async(
                     clock=clock,
                     label=f"compose{rounds_run + 1}",
                     chunk_store=shared_store,
+                    terminology=profile.terminology if profile is not None else None,
                 )
                 meta.themes = [t.name for t in result.themes.themes]
                 _emit(
@@ -1161,6 +1191,12 @@ async def run_pipeline_async(
         meta.review_path = result.review_path
         meta.citation_precision = round(result.precision, 3)
         persistence.save_json(run_dir, "meta.json", meta)
+        # self-contained HTML browser over the run's artifacts (claims,
+        # verdicts, evidence anchors, downloads); regenerate-able any time
+        # via `citens browse <run_dir>`
+        browser_path = None
+        with contextlib.suppress(Exception):
+            browser_path = write_review_browser(run_dir)
         timings = clock.payload()
         timings["token_usage_by_stage"] = usage.get("token_usage_by_stage", {})
         timings["total_tokens"] = usage.get("total_tokens", 0)
@@ -1179,6 +1215,7 @@ async def run_pipeline_async(
                     "references": len(result.table),
                     "citation_precision": meta.citation_precision,
                     "seconds": clock.total(),
+                    **({"browser": browser_path} if browser_path else {}),
                 },
             ),
         )

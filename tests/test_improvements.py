@@ -156,7 +156,8 @@ def test_rewriter_returns_grounded_rewrites(monkeypatch):
     from citens.agents import rewriter
 
     def fake_chat_json(system, user, **k):
-        assert "UNSUPPORTED" in system
+        assert "DEFECTIVE" in system  # three-grade defect taxonomy
+        assert "contradictory" in system
         return {
             "rewrites": [
                 {"claim_index": 0, "new_text": "Hedged claim [1]", "note": "removed magnitude"},

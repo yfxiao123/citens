@@ -22,6 +22,8 @@ def collect_metrics(run_dir: str | Path) -> dict:
         "verifiable": 0,
         "supported": 0,
         "partial": 0,
+        "background": 0,
+        "contradictory": 0,
         "unsupported": 0,
         "unverifiable": 0,
         "fulltext_papers": 0,
@@ -50,7 +52,7 @@ def collect_metrics(run_dir: str | Path) -> dict:
     if ver_file.exists():
         ver = json.loads(ver_file.read_text(encoding="utf-8"))
         for k in ("total_claims", "verifiable_claims", "supported", "partial",
-                  "unsupported", "unverifiable"):
+                  "background", "contradictory", "unsupported", "unverifiable"):
             metrics[k.replace("_claims", "").replace("total", "claims")] = ver.get(k, 0)
         metrics["precision"] = ver.get("citation_precision")
 
@@ -65,7 +67,7 @@ def collect_metrics(run_dir: str | Path) -> dict:
 def render_table(rows: list[dict]) -> str:
     """Render collected metrics as a GitHub-flavored markdown table."""
     header = [
-        "topic", "papers", "claims", "supported", "partial",
+        "topic", "papers", "claims", "supported", "partial", "bg", "contra",
         "unsupported", "unverifiable", "fulltext", "precision",
     ]
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
@@ -76,6 +78,8 @@ def render_table(rows: list[dict]) -> str:
             str(r.get("claims", 0)),
             str(r.get("supported", 0)),
             str(r.get("partial", 0)),
+            str(r.get("background", 0)),
+            str(r.get("contradictory", 0)),
             str(r.get("unsupported", 0)),
             str(r.get("unverifiable", 0)),
             str(r.get("fulltext_papers", 0)),

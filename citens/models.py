@@ -205,8 +205,19 @@ class ClaimIntentManifest(BaseModel):
 
 
 class Verdict(str, Enum):
+    """Five-grade support scale (nature-citation style).
+
+    "background" and "contradictory" split what used to collapse into
+    "unsupported": a context-only citation is a *ranking/citation-choice*
+    defect (the claim overreaches its evidence), while a contradiction is
+    *content* the review must acknowledge, not paper over. Both stay out of
+    the precision numerator; the rewriter handles each differently.
+    """
+
     SUPPORTED = "supported"
     PARTIAL = "partial"
+    BACKGROUND = "background"  # source backs field context only, not the claim
+    CONTRADICTORY = "contradictory"  # source conflicts with / narrows the claim
     UNSUPPORTED = "unsupported"
     UNVERIFIABLE = "unverifiable"  # cited source has no ground text (e.g. no abstract)
 
