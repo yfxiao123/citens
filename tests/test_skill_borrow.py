@@ -354,3 +354,62 @@ def test_review_browser_without_verification_returns_none(tmp_path):
     run = tmp_path / "run"
     run.mkdir()
     assert write_review_browser(str(run)) is None
+
+
+# --- formal journal over arXiv preprint (references) ---------------------
+
+
+def test_best_venue_prefers_journal_over_arxiv():
+    from citens.search.openalex import best_venue
+
+    work = {
+        "primary_location": {"source": {"display_name": "arXiv"}},
+        "locations": [
+            {"source": {"display_name": "arXiv"}},
+            {"source": {"display_name": "Journal of Finance"}},
+            {"source": {"display_name": "Journal of Finance"}},
+        ],
+    }
+    assert best_venue(work) == "Journal of Finance"
+    # preprint-only work keeps its host
+    assert best_venue({"primary_location": {"source": {"display_name": "arXiv"}},
+                       "locations": [{"source": {"display_name": "arXiv"}}]}) == "arXiv"
+
+
+def test_openalex_to_paper_cites_journal_when_available():
+    from citens.search.openalex import OpenAlexSearcher
+
+    work = {
+        "title": "T", "publication_year": 2020, "cited_by_count": 1,
+        "authorships": [{"author": {"display_name": "Zheng Zhao"}}],
+        "primary_location": {"source": {"display_name": "arXiv"}},
+        "locations": [
+            {"source": {"display_name": "arXiv"}},
+            {"source": {"display_name": "Review of Financial Studies"}},
+        ],
+        "biblio": {"volume": "34", "issue": "2", "first_page": "1", "last_page": "30"},
+    }
+    p = OpenAlexSearcher.to_paper(work)
+    assert p.venue == "Review of Financial Studies"
+
+
+# --- theme names follow the review language ------------------------------
+
+
+def test_organize_localizes_theme_names_for_chinese(monkeypatch):
+    from citens.agents import organize as organize_mod
+    from citens.config import settings
+
+    assert "theme name 字段用中文" in organize_mod._localization_line() \
+        if (monkeypatch.setattr(settings, "review_language", "zh") or True) else False
+    monkeypatch.setattr(settings, "review_language", "zh")
+    assert "theme name 字段用中文" in organize_mod._localization_line()
+    monkeypatch.setattr(settings, "review_language", "en")
+    assert "theme name 字段用中文" not in organize_mod._localization_line()
+
+
+def test_default_max_papers_is_20():
+    from citens.config import Settings
+
+    # _env_file=None: ignore the user's .env so the code default is what we test
+    assert Settings(_env_file=None).default_max_papers == 20

@@ -103,6 +103,11 @@ def run(
         language = typer.prompt("综述输出语言 (zh=中文 / en=English)", default="zh")
     if language:
         settings.review_language = language
+    if n is None and sys.stdin.isatty():
+        console.print(
+            "[yellow]提示: 未指定 -n/--max-papers，默认保留 20 篇；想要更完整的引用网络"
+            "建议 -n 30（耗时与论文数大致成正比）[/]"
+        )
     if concurrency:
         settings.llm_concurrency = concurrency
     elif (n or 0) >= 30 and settings.llm_concurrency < 8:

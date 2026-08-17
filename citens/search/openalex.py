@@ -17,6 +17,33 @@ from citens.models import Paper
 from citens.search.base import SearchSource, register
 
 
+def best_venue(work: dict) -> str:
+    """Prefer the formal journal over a preprint host for citation purposes.
+
+    OpenAlex makes arXiv the primary_location for works whose journal record
+    is thin (or that are still preprints); when the same work's ``locations``
+    list contains a real journal, a reference list should cite the journal —
+    "if it has a formal publication, cite the formal publication".
+    """
+    candidates = [work.get("primary_location")] + (work.get("locations") or [])
+    seen: set[str] = set()
+    for loc in candidates:
+        src = (loc or {}).get("source") or {}
+        name = (src.get("display_name") or "").strip()
+        if not name:
+            continue
+        low = name.lower()
+        if any(h in low for h in ("arxiv", "ssrn", "repec", "social science research")):
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        return name
+    # no formal venue recorded: keep the preprint host as the source
+    src = ((work.get("primary_location") or {}).get("source") or {})
+    return (src.get("display_name") or "").strip() or "OpenAlex"
+
+
 @register("openalex")
 class OpenAlexSearcher(SearchSource):
     name = "OpenAlex"
@@ -66,9 +93,9 @@ class OpenAlexSearcher(SearchSource):
                 authors.append(name)
         abstract = OpenAlexSearcher.decode_abstract(work.get("abstract_inverted_index"))
         loc = work.get("primary_location") or {}
-        source_obj = loc.get("source") or {}
-        source_name = source_obj.get("display_name", "") or "OpenAlex"
-        # Prefer the open-access PDF URL.
+        # venue = the formal journal when one exists (arXiv primary_location
+        # loses to the published version); PDF url still prefers OA locations
+        source_name = best_venue(work)
         pdf_url = (loc.get("pdf_url") or "").strip() or None
         oa = work.get("open_access") or {}
         if not pdf_url and oa.get("oa_url"):

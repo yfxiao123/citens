@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from citens.config import settings
 from citens.llm import chat_json
 from citens.models import ExtractedPaper, ThemeInfo, ThemeStructure
 
@@ -47,8 +48,23 @@ def organize_themes(papers: list[ExtractedPaper], topic: str) -> ThemeStructure:
     user_prompt = (
         f"研究主题 / Topic: {topic}\n\n"
         f"论文列表 / Papers ({len(papers)}):\n{''.join(parts)}\n\n"
-        "Identify 3-6 themes and assign papers to them."
+        "Identify 3-6 themes and assign papers to them.\n"
+        + _localization_line()
     )
     result = chat_json(SYSTEM_PROMPT, user_prompt)
     themes = [ThemeInfo(**t) for t in result.get("themes", [])]
     return ThemeStructure(themes=themes)
+
+
+def _localization_line() -> str:
+    """Theme names must match the review's prose language — they become the
+    section headings the writer renders as ``###``. Before this, a Chinese
+    review got English theme titles like "Deep Learning Factor Models in
+    Asset Pricing" while the body stayed Chinese."""
+    v = (settings.review_language or "en").strip().lower()
+    if v in ("zh", "cn", "chinese", "中文", "ch"):
+        return (
+            "输出语言要求：theme name 字段用中文书写（它将被用作综述的小节标题）；"
+            "description 可用中英双语。"
+        )
+    return "Write theme names in English."

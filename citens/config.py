@@ -82,7 +82,7 @@ class Settings(BaseSettings):
 
     # --- Defaults for a run (overridable via CLI / RunOptions) ---------------
     default_max_results: int = 60  # candidate pool target before filtering
-    default_max_papers: int = 15  # final papers kept after filtering (0 = no cap)
+    default_max_papers: int = 20  # final papers kept after filtering (0 = no cap)
     enrich_abstracts: bool = True  # cross-source DOI enrichment for missing abstracts
     output_dir: str = "runs"
     # Persistent literature pools built by `citens collect` (JSONL per topic).

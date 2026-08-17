@@ -274,7 +274,7 @@ async def _field_constrained_pass(
             "sort": "cited_by_count:desc",
             "select": (
                 "id,title,authorships,publication_year,abstract_inverted_index,"
-                "cited_by_count,doi,primary_location,open_access,topics,keywords,biblio"
+                "cited_by_count,doi,primary_location,open_access,topics,keywords,biblio,locations"
             ),
         }
         try:
@@ -310,7 +310,7 @@ async def _review_pass(topic_queries: list[str], per_query: int = 10) -> list[Pa
             "per_page": min(per_query, 25),
             "select": (
                 "id,title,authorships,publication_year,abstract_inverted_index,"
-                "cited_by_count,doi,primary_location,open_access,topics,keywords,biblio"
+                "cited_by_count,doi,primary_location,open_access,topics,keywords,biblio,locations"
             ),
         }
         try:
@@ -360,7 +360,7 @@ def _backfill_metadata(papers: list[Paper], batch: int = 40) -> int:
                 {
                     "filter": f"doi:{dois}",
                     "per_page": batch,
-                    "select": "doi,topics,keywords,authorships,biblio",
+                    "select": "doi,topics,keywords,authorships,biblio,primary_location,locations",
                 },
             )
             r.raise_for_status()
@@ -393,6 +393,13 @@ def _backfill_metadata(papers: list[Paper], batch: int = 40) -> int:
                     p.keywords = kws
                     changed = True
             biblio = w.get("biblio") or {}
+            if not p.venue:
+                from citens.search.openalex import best_venue
+
+                venue = best_venue(w)
+                if venue and venue != "OpenAlex":
+                    p.venue = venue
+                    changed = True
             if not p.volume and biblio.get("volume"):
                 p.volume = str(biblio["volume"])
                 changed = True
