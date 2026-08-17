@@ -46,7 +46,7 @@ class OpenAlexSearcher(SearchSource):
             "select": (
                 "id,title,authorships,publication_year,abstract_inverted_index,"
                 "cited_by_count,doi,primary_location,open_access,relevance_score,"
-                "topics,keywords"
+                "topics,keywords,biblio"
             ),
         }
         resp = await client.get(self.BASE_URL, params=params)
@@ -86,6 +86,8 @@ class OpenAlexSearcher(SearchSource):
             for kw in work.get("keywords") or []
             if kw.get("display_name")
         ][:12]
+        biblio = work.get("biblio") or {}
+        fp, lp = str(biblio.get("first_page") or ""), str(biblio.get("last_page") or "")
         return Paper(
             title=work.get("title", ""),
             authors=authors,
@@ -99,6 +101,9 @@ class OpenAlexSearcher(SearchSource):
             venue=source_name if source_name != "OpenAlex" else "",
             keywords=keywords,
             subfield=subfield,
+            volume=str(biblio.get("volume") or ""),
+            issue=str(biblio.get("issue") or ""),
+            pages=f"{fp}-{lp}".strip("-") if (fp or lp) else "",
         )
 
     @staticmethod

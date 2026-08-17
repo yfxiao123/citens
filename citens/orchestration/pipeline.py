@@ -346,6 +346,11 @@ def _compose(
 
     claims = parse_claims_from_review(review)
     persistence.save_step(run_dir, "07_claims", claims)
+    # citation coverage: which kept papers never got cited anywhere (breadth
+    # signal — pairs with the writer's cite-broadly rule and the health issue)
+    cited_papers = {
+        i for c in claims for i in c.citation_indices if 0 <= i < len(extracted)
+    }
     _emit(
         bus,
         StepCompleted(step="write", message=f"综述生成完成 · {len(claims)} 条带引用论断"),
@@ -416,6 +421,8 @@ def _compose(
                 "unverifiable": sum(
                     1 for r in ver_results if r.verdict.value == "unverifiable"
                 ),
+                "papers_cited": len(cited_papers),
+                "papers_total": len(extracted),
                 "results": [r.model_dump() for r in ver_results],
             }
 
@@ -584,6 +591,15 @@ def _compose(
         theme_paper_counts = {theme.name: len(theme.paper_indices) for theme in themes.themes}
         absence_audit = audit_coverage(topic, [p.title for p in extracted])
         health_report = check_health(synthesis, ver_results, absence_audit, theme_paper_counts)
+        health_report["citation_coverage"] = {
+            "cited": len(cited_papers),
+            "total": len(extracted),
+        }
+        if len(extracted) >= 8 and len(cited_papers) < 0.7 * len(extracted):
+            health_report.setdefault("issues", []).append(
+                f"thin_citation_coverage: only {len(cited_papers)}/{len(extracted)} "
+                "papers cited anywhere in the review"
+            )
         persistence.save_step(run_dir, "08_health", health_report)
         
         issues = health_report.get("issues", [])

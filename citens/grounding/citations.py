@@ -20,11 +20,52 @@ _SENT_SPLIT_RE = re.compile(r"(?<=[。.!?！？])\s+")
 _REF_HEADER_RE = re.compile(r"参考文献|references", re.IGNORECASE)
 
 
+_APA_MAX_AUTHORS = 10  # APA-7 lists up to 20; 10 keeps entries readable
+
+
+def _apa_authors(authors: Sequence[str]) -> str:
+    """OpenAlex display names ("Zheng Zhao") -> APA "Zhao, Z., Fan, W."
+
+    Heuristic: last whitespace token is the surname, the rest becomes
+    initials. Wrong for some name orders, but consistent and clearly better
+    than truncating at three names with "et al." in the reference list.
+    """
+    parts: list[str] = []
+    for name in authors[:_APA_MAX_AUTHORS]:
+        tokens = [t for t in str(name).replace(",", " ").split() if t]
+        if not tokens:
+            continue
+        surname = tokens[-1]
+        initials = ".".join(w[0].upper() for w in tokens[:-1] if w[0].isalpha())
+        parts.append(f"{surname}, {initials}." if initials else surname)
+    if not parts:
+        return ""
+    out = ", ".join(parts)
+    if len(authors) > _APA_MAX_AUTHORS:
+        out += ", et al."
+    return out
+
+
 def _format_label(p: Paper) -> str:
-    authors = ", ".join(p.authors[:3])
-    if len(p.authors) > 3:
-        authors += " et al."
-    return f"{authors} ({p.year}). {p.title}. {p.source}."
+    """Complete APA-7-style reference entry: authors (year). title. *venue*,
+    volume(issue), pages. DOI — journal/volume/issue/pages included, per the
+    technical report's house style, instead of the old title-only sketch."""
+    authors = _apa_authors(p.authors) or "Anonymous"
+    year = p.year or "n.d."
+    venue = _bib_venue(p.source, getattr(p, "venue", ""))
+    entry = f"{authors} ({year}). {p.title}. *{venue}*"
+    vol, iss, pages = p.volume, p.issue, getattr(p, "pages", "")
+    if vol:
+        entry += f", {vol}"
+        if iss:
+            entry += f"({iss})"
+    if pages:
+        entry += f", {pages}"
+    if p.doi:
+        entry += f". https://doi.org/{p.doi}"
+    elif p.url:
+        entry += f". {p.url}"
+    return entry
 
 
 def _bibtex_key(p: Paper, index: int) -> str:
@@ -92,6 +133,12 @@ class CitationTable:
                 fields.append(("doi", _bib_escape(p.doi)))
             if p.url:
                 fields.append(("url", _bib_escape(p.url)))
+            if p.volume:
+                fields.append(("volume", _bib_escape(p.volume)))
+            if p.issue:
+                fields.append(("number", _bib_escape(p.issue)))
+            if p.pages:
+                fields.append(("pages", _bib_escape(p.pages).replace("-", "--")))
             source = _bib_venue(p.source, getattr(p, "venue", ""))
             fields.append(("journal", source))
             body = ",\n  ".join(f"{k} = {{{v}}}" for k, v in fields)
@@ -113,6 +160,16 @@ class CitationTable:
             lines.append(f"JO  - {venue}")
             if p.year:
                 lines.append(f"PY  - {p.year}")
+            if p.volume:
+                lines.append(f"VL  - {_bib_escape(p.volume)}")
+            if p.issue:
+                lines.append(f"IS  - {_bib_escape(p.issue)}")
+            pages = getattr(p, "pages", "")
+            if pages:
+                first, _, last = pages.partition("-")
+                lines.append(f"SP  - {_bib_escape(first)}")
+                if last:
+                    lines.append(f"EP  - {_bib_escape(last)}")
             if p.doi:
                 lines.append(f"DO  - {_bib_escape(p.doi)}")
             if p.url:

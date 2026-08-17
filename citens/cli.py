@@ -86,7 +86,7 @@ def run(
         False, "--no-clarify", help="跳过跑前澄清问题（直接运行）"
     ),
     language: str | None = typer.Option(
-        None, "--language", "-l", help="综述输出语言: en/zh (默认取 REVIEW_LANGUAGE 或 en)"
+        None, "--language", "-l", help="综述输出语言: zh/en (缺省时询问, 默认中文)"
     ),
     concurrency: int | None = typer.Option(
         None, "--concurrency", "-c",
@@ -98,6 +98,9 @@ def run(
 
     topic_str = " ".join(topic) if topic else "大语言模型在金融领域的应用"
     src_list = [s.strip() for s in sources.split(",")] if sources else None
+    if language is None and sys.stdin.isatty():
+        # ask, Chinese-first (config default is zh; -l/--language skips this)
+        language = typer.prompt("综述输出语言 (zh=中文 / en=English)", default="zh")
     if language:
         settings.review_language = language
     if concurrency:

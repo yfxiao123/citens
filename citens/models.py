@@ -43,6 +43,9 @@ class Paper(BaseModel):
     doi: str | None = None
     pdf_url: str | None = None  # open-access full-text PDF, if known
     venue: str = ""  # journal / conference / repository name, when known
+    volume: str = ""  # journal volume ("36") — for complete reference entries
+    issue: str = ""  # journal issue ("8")
+    pages: str = ""  # "4387-4403" (first-last, whichever endpoints are known)
     keywords: list[str] = Field(default_factory=list)  # author/indexer keywords
     subfield: str = ""  # fine-grained field tag (assigned at pool collection)
     # Author-engagement signals (filled by citens collect; 0 = unknown).

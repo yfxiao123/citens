@@ -91,8 +91,9 @@ class Settings(BaseSettings):
     # "" = generic. Example: "finance".
     profile: str = ""
     # Output language of the review prose AND section headings: "en" or "zh".
-    # Anything not recognized as Chinese falls back to English.
-    review_language: str = "en"
+    # Default Chinese — the primary reader writes Chinese reviews; anything
+    # not recognized as Chinese falls back to English.
+    review_language: str = "zh"
 
     # --- Venue-aware ranking -------------------------------------------------
     # Composite retrieval score = w_rel*(relevance/5) + w_cit*citation_factor

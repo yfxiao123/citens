@@ -130,6 +130,9 @@ def append_pool(topic: str, papers: list[Paper]) -> int:
                         dict.fromkeys(old.matched_queries + p.matched_queries)
                     )[:12],
                     "is_review": old.is_review or p.is_review,
+                    "volume": old.volume or p.volume,
+                    "issue": old.issue or p.issue,
+                    "pages": old.pages or p.pages,
                     "citation_count": max(old.citation_count, p.citation_count),
                     "abstract": p.abstract if len(p.abstract) > len(old.abstract) else old.abstract,
                     "pdf_url": old.pdf_url or p.pdf_url,
@@ -271,7 +274,7 @@ async def _field_constrained_pass(
             "sort": "cited_by_count:desc",
             "select": (
                 "id,title,authorships,publication_year,abstract_inverted_index,"
-                "cited_by_count,doi,primary_location,open_access,topics,keywords"
+                "cited_by_count,doi,primary_location,open_access,topics,keywords,biblio"
             ),
         }
         try:
@@ -307,7 +310,7 @@ async def _review_pass(topic_queries: list[str], per_query: int = 10) -> list[Pa
             "per_page": min(per_query, 25),
             "select": (
                 "id,title,authorships,publication_year,abstract_inverted_index,"
-                "cited_by_count,doi,primary_location,open_access,topics,keywords"
+                "cited_by_count,doi,primary_location,open_access,topics,keywords,biblio"
             ),
         }
         try:
@@ -343,7 +346,9 @@ def _backfill_metadata(papers: list[Paper], batch: int = 40) -> int:
     Records from S2/Crossref/arXiv carry no taxonomy; one batched call per
     ``batch`` DOIs fills them from the OpenAlex work record.
     """
-    need = [p for p in papers if p.doi and (not p.subfield or not p.keywords)]
+    need = [p for p in papers if p.doi and (
+        not p.subfield or not p.keywords or not p.volume or not p.pages
+    )]
     filled = 0
     topic_counts: dict[str, int] = {}
     for start in range(0, len(need), batch):
@@ -355,7 +360,7 @@ def _backfill_metadata(papers: list[Paper], batch: int = 40) -> int:
                 {
                     "filter": f"doi:{dois}",
                     "per_page": batch,
-                    "select": "doi,topics,keywords,authorships",
+                    "select": "doi,topics,keywords,authorships,biblio",
                 },
             )
             r.raise_for_status()
@@ -386,6 +391,20 @@ def _backfill_metadata(papers: list[Paper], batch: int = 40) -> int:
                        if k.get("display_name")][:12]
                 if kws:
                     p.keywords = kws
+                    changed = True
+            biblio = w.get("biblio") or {}
+            if not p.volume and biblio.get("volume"):
+                p.volume = str(biblio["volume"])
+                changed = True
+            if not p.issue and biblio.get("issue"):
+                p.issue = str(biblio["issue"])
+                changed = True
+            if not p.pages:
+                fp = str(biblio.get("first_page") or "")
+                lp = str(biblio.get("last_page") or "")
+                pages = f"{fp}-{lp}".strip("-") if (fp or lp) else ""
+                if pages:
+                    p.pages = pages
                     changed = True
             if changed:
                 filled += 1

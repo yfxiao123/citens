@@ -35,15 +35,18 @@ CROSS-PAPER SYNTHESIS notes consensus or contradictions, foreground them and arg
 3. Use connectives that signal logical relation — "in contrast", "building on this", \
 "the remaining disagreement is", "this contrast persists because ..." — and avoid contentless \
 "furthermore"/"additionally" chains.
-4. **Cite a paper by writing its index in square brackets, e.g. [0] or [3].** Use the EXACT index \
+4. **Cite BROADLY within the theme**: draw on every listed paper that bears on the \
+argument — a section that cites only two or three of its listed papers is incomplete. \
+Papers not yet cited anywhere should surface where they genuinely fit.
+5. **Cite a paper by writing its index in square brackets, e.g. [0] or [3].** Use the EXACT index \
 shown before each paper below. A sentence making a claim about a paper MUST carry its [index].
-5. **Ground every cited claim in what the paper's abstract actually says.** Do NOT invent specifics \
+6. **Ground every cited claim in what the paper's abstract actually says.** Do NOT invent specifics \
 (methods, numbers, mechanisms) the abstract does not state. A paper's TITLE looking related is not \
 evidence — never state specifics a title alone suggests. When the abstract is thin, make the \
 claim appropriately general rather than fabricating detail. Prefer fewer, defensible claims over \
 many speculative ones.
-6. Do NOT write any heading line — start directly with prose.
-7. Fluent, scholarly prose."""
+7. Do NOT write any heading line — start directly with prose.
+8. Fluent, scholarly prose."""
 
 CRIT_SYNTH_PROMPT = """You are an academic survey writer. Write a "Critical Synthesis" section \
 (400-700 words) that takes a position across the whole literature.

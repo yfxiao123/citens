@@ -195,6 +195,75 @@ def test_fts5_unavailable_falls_back(monkeypatch):
     assert len(order) == 600
 
 
+# --- complete APA references (technical-report house style) --------------
+
+
+def test_apa_reference_includes_volume_issue_pages_doi():
+    p = _p(
+        "Deep order books",
+        authors=["Zheng Zhao", "Wei Fan", "Bin Li"],
+        venue="Journal of Finance", volume="36", issue="8",
+        pages="4387-4403", doi="10.1111/jofi.12345",
+    )
+    label = CitationTable([p]).label(0)
+    assert "Zhao, Z., Fan, W., Li, B." in label   # APA authors, not 3+et-al
+    assert "(2020). Deep order books." in label
+    assert "*Journal of Finance*" in label        # italic venue
+    assert ", 36(8), 4387-4403." in label         # volume(issue), pages
+    assert "https://doi.org/10.1111/jofi.12345" in label
+
+
+def test_bib_and_ris_carry_biblio_fields():
+    p = _p("Alpha paper", venue="Quantitative Finance", volume="12", issue="3",
+           pages="301-319", doi="10.1080/14697688.2024.1234567")
+    table = CitationTable([p])
+    bib = table.to_bibtex()
+    assert "volume = {12}" in bib
+    assert "number = {3}" in bib
+    assert "pages = {301--319}" in bib  # BibTeX page range dashes
+    ris = table.to_ris()
+    assert "VL  - 12" in ris and "IS  - 3" in ris
+    assert "SP  - 301" in ris and "EP  - 319" in ris
+
+
+def test_openalex_to_paper_parses_biblio():
+    from citens.search.openalex import OpenAlexSearcher
+
+    work = {
+        "title": "T", "publication_year": 2020, "cited_by_count": 1,
+        "authorships": [{"author": {"display_name": "Zheng Zhao"}}],
+        "primary_location": {"source": {"display_name": "Journal of Finance"}},
+        "biblio": {"volume": "36", "issue": "8",
+                   "first_page": "4387", "last_page": "4403"},
+    }
+    p = OpenAlexSearcher.to_paper(work)
+    assert (p.volume, p.issue, p.pages) == ("36", "8", "4387-4403")
+    assert p.venue == "Journal of Finance"
+
+
+def test_crossref_to_paper_parses_biblio():
+    from citens.search.crossref import CrossrefSearcher
+
+    item = {
+        "title": ["T"], "is-referenced-by-count": 2, "DOI": "10.1/x",
+        "author": [{"given": "Wei", "family": "Fan"}],
+        "container-title": ["Journal of Finance"],
+        "volume": "79", "issue": "4", "page": "921–955",  # en-dash
+        "issued": {"date-parts": [[2014]]},
+    }
+    p = CrossrefSearcher._to_paper(item)
+    assert (p.volume, p.issue, p.pages) == ("79", "4", "921-955")
+
+
+# --- Chinese by default ---------------------------------------------------
+
+
+def test_default_review_language_is_chinese():
+    from citens.config import Settings
+
+    assert Settings().review_language == "zh"
+
+
 # --- audit ingest normalizes new verdicts -------------------------------
 
 

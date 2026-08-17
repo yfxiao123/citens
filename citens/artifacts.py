@@ -111,6 +111,8 @@ def write_review_browser(run_dir: str) -> str | None:
         "counts": counts,
         "claims": claims,
         "papers": papers,
+        "papers_cited": ver.get("papers_cited"),
+        "papers_total": ver.get("papers_total"),
         "leni": {k: leni.get(k) for k in ("sampled", "downgraded", "agreement_rate")},
         "review_md": review_md,
         "bib_uri": _b64_data_uri(bib, "text/plain") if bib else "",
@@ -203,7 +205,8 @@ const pct = x => x == null ? "—" : (x*100).toFixed(0) + "%";
 document.getElementById("headline").innerHTML =
   "引用精度 <b>" + pct(DATA.precision) + "</b>" +
   (DATA.pre != null ? "（改写前 " + pct(DATA.pre) + " → 改写后 " + pct(DATA.post) + "）" : "") +
-  " · 论断 " + DATA.claims.length + " 条";
+  " · 论断 " + DATA.claims.length + " 条" +
+  (DATA.papers_cited != null ? " · 引用覆盖 " + DATA.papers_cited + "/" + DATA.papers_total + " 篇" : "");
 
 const stats = document.getElementById("stats");
 const mk = (key, label) => {

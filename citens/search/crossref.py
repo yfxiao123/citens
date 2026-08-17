@@ -75,6 +75,9 @@ class CrossrefSearcher(SearchSource):
             doi=doi,
             pdf_url=links[0] if links else None,
             venue=(item.get("container-title") or [""])[0] or "",
+            volume=str(item.get("volume") or ""),
+            issue=str(item.get("issue") or ""),
+            pages=str(item.get("page") or "").replace("–", "-"),
         )
 
 

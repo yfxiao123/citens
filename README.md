@@ -57,11 +57,13 @@ runs/<topic>-<timestamp>/
 ├── references.ris         # RIS (EndNote/Zotero import)
 ├── review_browser.html    # self-contained audit UI (see below)
 ├── provenance.json        # claim → reference → verdict → evidence-chunk anchors
-├── verification.json      # per-claim verdicts (5-grade) + citation precision
+├── verification.json      # per-claim verdicts (5-grade) + precision + citation coverage
 ├── grounding.json         # which papers have full text vs abstract only
 ├── fetch_list.md          # papers YOU can fetch manually (see below)
 └── steps/*.json           # every intermediate stage
 ```
+
+References render as complete APA-style entries — full author list, `*venue*`, volume(issue), pages, DOI (journal/volume/issue/pages are harvested from OpenAlex `biblio` / Crossref and backfilled into the pool). `verification.json` also reports **citation coverage** (`papers_cited`/`papers_total`); below 70% the health report flags `thin_citation_coverage`, and the writer is under a cite-broadly rule within every theme.
 
 ## Quick start
 
@@ -85,7 +87,8 @@ citens reverify runs/<dir>          # drop fetch_list.md's PDFs into papers/
 citens browse runs/<dir> --open     # single-file HTML audit browser: filter
                                     #   claims by verdict, search, expand the
                                     #   evidence chunk behind each claim
-citens run "..." -l zh              # output language (prose + headings)
+citens run "..." -l en              # English output — Chinese is the DEFAULT
+                                    #   (asked interactively when -l is omitted)
 ```
 
 Web UI (SSE streaming, live step progress, precision panel):
