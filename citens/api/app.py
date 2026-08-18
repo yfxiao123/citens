@@ -20,6 +20,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -221,6 +222,34 @@ def result(run_id: str) -> dict:
                 json.loads(f.read_text(encoding="utf-8")) if name.endswith(".json") else f.read_text(encoding="utf-8")
             )
     return payload
+
+
+# files the UI may link to directly (the rest stay API-shaped payloads)
+_SERVABLE_ARTIFACTS = {
+    "review_browser.html": "text/html",
+    "references.ris": "application/octet-stream",
+    "references.bib": "text/plain",
+    "review.md": "text/markdown",
+    "fetch_list.md": "text/markdown",
+}
+
+
+@app.get("/artifact/{run_id}/{filename}", dependencies=[Depends(_require_token)])
+def artifact(run_id: str, filename: str) -> FileResponse:
+    """Serve one whitelisted artifact file of a run (the audit browser, the
+    RIS export, ...). Whitelist + resolved-path containment: run ids and
+    filenames both come from the URL, so traversal must be impossible."""
+    ctype = _SERVABLE_ARTIFACTS.get(filename)
+    if ctype is None:
+        raise HTTPException(404, f"not a servable artifact: {filename}")
+    root = Path(settings.output_dir).resolve()
+    d = (root / run_id).resolve()
+    if not d.is_relative_to(root) or not d.is_dir():
+        raise HTTPException(404, f"unknown run: {run_id}")
+    f = d / filename
+    if not f.is_file():
+        raise HTTPException(404, f"run has no {filename}")
+    return FileResponse(f, media_type=ctype)
 
 
 _static = Path(__file__).parent / "static"

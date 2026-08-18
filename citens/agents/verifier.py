@@ -18,38 +18,70 @@ from citens.llm import chat_json, run_concurrent
 from citens.models import Claim, Verdict, VerificationResult
 
 SYSTEM_PROMPT = """You are a citation-verification expert. You are given several CLAIMS (each citing \
-one or more papers by [index]) and the ABSTRACTS of the cited papers.
+one or more papers by [index]) and the GROUND TEXT of the cited papers (abstracts, or full-text \
+excerpts when available).
 
-This is a literature *synthesis* review: claims are often reasonable interpretations or \
-syntheses, not verbatim quotes. So judge whether each claim is GROUNDED IN the cited abstract(s), \
-on this five-grade scale:
+This is a literature *synthesis* review: claims are often interpretations or syntheses, not \
+verbatim quotes. So judge whether each claim is GROUNDED IN the cited sources, on this \
+five-grade scale:
 
-- "supported":     the claim is consistent with, and reasonably supported or inferable from, the \
-cited abstract(s). It does not need to be stated verbatim.
-- "partial":       the claim is broadly consistent but overstates, adds specifics the abstract does \
-not back, or mixes supported and unsupported elements.
+- "supported":     the claim is consistent with, and supported by, the cited ground text — with \
+no material overstatement. It does not need to be stated verbatim.
+- "partial":       the claim's core is grounded but it overstates, adds specifics the ground \
+text does not back, or mixes grounded and ungrounded elements.
 - "background":    the cited source supports the field's CONTEXT only — it does not address the \
 specific relationship, method, or magnitude the claim asserts. Typical cause: citing a survey or \
 an adjacent paper as if it were primary evidence.
 - "contradictory": the cited source conflicts with, or materially narrows, the claim. A \
 disagreement is content the review must acknowledge — do NOT grade it away.
-- "unsupported":   the claim attributes a finding/method the abstract gives NO plausible basis \
-for, or cites the wrong paper. Reserve this for genuine mis-grounding.
+- "unsupported":   the claim attributes a finding, method, or detail the cited ground text gives \
+NO plausible basis for, or cites the wrong paper.
 
 REVIEW-SOURCE RULE: a paper tagged [REVIEW] is a survey, not primary evidence. It may back \
 background/context claims, but a claim about experimental findings, methods, or magnitudes \
 cited ONLY to [REVIEW] papers is "background" at best — primary claims need primary sources.
 
-Judge only against the provided abstracts. When in doubt between supported and partial, prefer \
-"supported"; between partial and the lower grades, prefer "partial".
+CALIBRATION RULES (derived from a human audit of real verdicts — apply strictly):
+
+1. NO-GROUND-TEXT RULE: a citation whose context says "NO GROUND TEXT" contributes NOTHING to \
+the claim's support. Judge only against the sources that have ground text. If the claim's core \
+assertion is ABOUT such a paper (its method, findings, or design), the verdict is "unsupported" \
+— citing a paper you cannot see is not evidence.
+2. INTERPRETIVE FRAMING RULE: when the factual core is supported but the claim adds interpretive \
+framing the source does not make ("开创了范式 / opened a new paradigm", "回答了不同层次的问题", \
+"the field's central question has shifted"), the verdict is "partial", not "supported".
+3. MULTI-CITATION RULE: check EVERY [index] attached to a claim, not just the closest one. The \
+claim is "supported" only if each cited paper's ground text backs the part it is attached to; \
+citations that back nothing make the claim "partial" at best.
+
+Judge only against the provided ground text. Grade what the text actually shows — do not \
+resolve doubt toward the lenient side.
 
 Output JSON only:
 {"results": [
-  {"claim_index": 0, "verdict": "supported", "note": "abstract supports ..."},
+  {"claim_index": 0, "verdict": "supported", "note": "ground text supports ..."},
   {"claim_index": 1, "verdict": "background", "note": "cited source is a survey; no primary evidence"}
 ]}"""
 
-_BATCH_SIZE = 6
+_BATCH_SIZE = 10
+
+
+def _claim_ground_key(
+    claim: Claim, table: CitationTable, chunk_store: ChunkStore
+) -> str:
+    """Stable identity of (claim text, citations, their ground text).
+
+    A compose round that re-states an unchanged claim against unchanged
+    ground text will re-judge it identically — so later rounds can reuse the
+    verdict instead of paying for it again."""
+    import hashlib
+
+    parts = [claim.text, ",".join(str(i) for i in sorted(set(claim.citation_indices)))]
+    for i in sorted(set(claim.citation_indices)):
+        pid = table.paper_id(i)
+        chunks_text = "|".join(c.text for c in chunk_store.chunks_for(pid))
+        parts.append(f"{pid}:{hashlib.sha1(chunks_text.encode()).hexdigest()[:12]}")
+    return hashlib.sha1("\n".join(parts).encode()).hexdigest()
 
 
 def _build_context(
@@ -68,7 +100,11 @@ def _build_context(
         pid = table.paper_id(idx)
         retrieved = chunk_store.retrieve(pid, query, k=4)
         if not retrieved:
-            lines.append(f"[{idx}] {table.label(idx)}\n(ABSTRACT UNAVAILABLE — cannot verify)\n")
+            lines.append(
+                f"[{idx}] {table.label(idx)}\n"
+                "(NO GROUND TEXT — abstract unavailable; this citation contributes "
+                "nothing to any claim)\n"
+            )
             continue
         kinds = {c.kind.value for c in retrieved}
         body = "\n".join(c.text for c in retrieved)
@@ -82,6 +118,17 @@ def _is_review(table: CitationTable, index: int) -> bool:
     return bool(0 <= index < len(papers) and getattr(papers[index], "is_review", False))
 
 
+def claim_stack_stats(claims: list[Claim]) -> dict:
+    """Citation-stacking lint: a claim wearing many [n] markers is hard to
+    ground (the multi-citation rule) and hard to read. >4 citations on one
+    claim is a defect per the writer's stacking cap."""
+    counts = [len(c.citation_indices) for c in claims]
+    return {
+        "max_citations_per_claim": max(counts) if counts else 0,
+        "stacked_claims": sum(1 for n in counts if n > 4),
+    }
+
+
 def verify_claims(
     claims: list[Claim],
     table: CitationTable,
@@ -89,6 +136,7 @@ def verify_claims(
     *,
     batch_size: int = _BATCH_SIZE,
     on_progress=None,
+    verdict_cache: dict | None = None,
 ) -> tuple[list[VerificationResult], float]:
     """Verify every cited claim.
 
@@ -96,28 +144,46 @@ def verify_claims(
     and excluded from the precision denominator. Returns (results, precision)
     where precision = (supported + partial) / (verifiable claims); background,
     contradictory and unsupported all count against it.
+
+    ``verdict_cache`` (threaded across compose rounds by the pipeline) reuses
+    verdicts for claims whose text, citations, and cited ground text are all
+    unchanged — the re-compose rounds only pay for what actually changed.
     """
     results: list[VerificationResult] = []
     total = len(claims)
-    unverifiable: list[VerificationResult] = []
+    # results placed by CLAIM index — the rewriter / spot-check index into
+    # ver_results parallel to claims, so order must never drift (unverifiable
+    # used to be appended at the end, misaligning every later index)
+    placed: list[VerificationResult | None] = [None] * total
     to_check: list[tuple[int, Claim]] = []
 
     # First pass: split out unverifiable claims (no abstract for any cited source).
-    for claim in claims:
+    for slot, claim in enumerate(claims):
         has_ground = any(
             chunk_store.has(table.paper_id(i)) for i in claim.citation_indices
         )
         if not has_ground:
-            unverifiable.append(
-                VerificationResult(
-                    claim_text=claim.text,
-                    verdict=Verdict.UNVERIFIABLE,
-                    citation_indices=claim.citation_indices,
-                    note="cited source(s) have no abstract available",
-                )
+            placed[slot] = VerificationResult(
+                claim_text=claim.text,
+                verdict=Verdict.UNVERIFIABLE,
+                citation_indices=claim.citation_indices,
+                note="cited source(s) have no abstract available",
             )
         else:
-            to_check.append((len(results) + len(unverifiable), claim))
+            to_check.append((slot, claim))
+
+    # Cache hits: unchanged claims skip the judge entirely.
+    n_cached = 0
+    if verdict_cache is not None:
+        remaining: list[tuple[int, Claim]] = []
+        for slot, claim in to_check:
+            hit = verdict_cache.get(_claim_ground_key(claim, table, chunk_store))
+            if hit is not None:
+                placed[slot] = hit.model_copy()
+                n_cached += 1
+            else:
+                remaining.append((slot, claim))
+        to_check = remaining
 
     # Second pass: judge the verifiable claims in concurrent batches.
     verifiable = [c for _, c in to_check]
@@ -136,12 +202,12 @@ def verify_claims(
         context = _build_context(cited_indices, table, chunk_store, batch_query)
         claim_lines = "\n".join(f"Claim {j}: {c.text}" for j, c in enumerate(batch))
         user_prompt = (
-            f"Source abstracts of cited papers:\n{context}\n\n"
+            f"Ground text of cited papers:\n{context}\n\n"
             f"Claims to verify:\n{claim_lines}\n\n"
             "Return a verdict for each claim_index (0-based within this batch)."
         )
         try:
-            raw = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048, strong=True)
+            raw = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=8192, strong=True)
             verdicts = {int(r.get("claim_index", -1)): r for r in raw.get("results", [])}
         except Exception as e:  # noqa: BLE001
             print(f"    verify batch failed: {e}")
@@ -150,9 +216,16 @@ def verify_claims(
         out: list[VerificationResult] = []
         for j, claim in enumerate(batch):
             entry = verdicts.get(j, {})
-            verdict_str = str(entry.get("verdict", "partial")).lower().strip()
+            verdict_str = str(entry.get("verdict", "")).lower().strip()
             if verdict_str not in {v.value for v in Verdict}:
-                verdict_str = "partial"
+                # a missing/malformed judge response is "we could not verify",
+                # never a free pass into the precision numerator
+                verdict_str = "unverifiable"
+                entry = {
+                    **entry,
+                    "note": (str(entry.get("note", "")) or "")
+                    + " [judge returned no usable verdict]"
+                }
             out.append(
                 VerificationResult(
                     claim_text=claim.text,
@@ -172,8 +245,15 @@ def verify_claims(
     for batch_results in run_concurrent(_verify_batch, batches, on_done=on_done):
         results.extend(batch_results)
 
-    # Append unverifiable claims at the end.
-    results.extend(unverifiable)
+    # place fresh verdicts at their claim slots + store for later rounds
+    for (slot, claim), res in zip(to_check, results, strict=False):
+        placed[slot] = res
+        if verdict_cache is not None:
+            verdict_cache[_claim_ground_key(claim, table, chunk_store)] = res
+    if n_cached and on_progress:
+        on_progress(done + n_cached, total)
+
+    results = [r for r in placed if r is not None]
 
     verifiable_results = [r for r in results if r.verdict != Verdict.UNVERIFIABLE]
     if verifiable_results:
@@ -241,7 +321,7 @@ def spot_check_supported(
             + "\n\nClaims previously judged 'supported':\n"
             + "\n".join(claim_lines)
             + f"\n\nAudit all {len(sample)} claims.",
-            max_tokens=2048,
+            max_tokens=8192,
             strong=True,
         )
         verdicts = {int(r.get("claim_index", -1)): r for r in raw.get("results", [])}
@@ -253,9 +333,88 @@ def spot_check_supported(
         for j in range(len(sample))
         if verdicts.get(j, {}).get("verdict", "confirm") == "downgrade"
     )
+    per_claim = [
+        {
+            "claim_index": i,
+            "verdict": verdicts.get(j, {}).get("verdict", "confirm"),
+            "note": str(verdicts.get(j, {}).get("note", ""))[:200],
+        }
+        for j, i in enumerate(sample)
+    ]
     return {
         "sampled": len(sample),
         "downgraded": downgraded,
         "agreement_rate": round(1 - downgraded / len(sample), 3) if sample else None,
         "claim_indices": sample,
+        "results": per_claim,
+    }
+
+
+# --- canary claims: a honeypot that measures the judge's false-accept rate ---
+# Deliberately unsupported claims, verified in a separate call so they never
+# contaminate the real results. A judge that lets canaries pass as
+# supported/partial is lenient by construction — this turns "verifier too
+# lenient" from a suspicion into a measured number.
+_CANARY_CLAIMS = (
+    "The cited paper reports a 47.3% reduction in average patient mortality "
+    "across three clinical trials.",
+    "According to the cited paper, its proposed method reduces GPU training "
+    "cost by an order of magnitude compared with all baselines.",
+    "The cited paper proves its main theorem under the assumption that markets "
+    "are frictionless and informationally efficient at all times.",
+)
+
+
+def canary_check(table: CitationTable, chunk_store: ChunkStore) -> dict:
+    """Verify synthetic unsupported claims against real ground text.
+
+    Each canary cites one paper that HAS ground text, so the correct verdict is
+    unambiguously "unsupported". Returns the catch rate; never raises (a failed
+    canary call is reported, not fatal).
+    """
+    indices = [
+        i for i in range(len(getattr(table, "papers", []) or []))
+        if chunk_store.has(table.paper_id(i))
+    ]
+    if not indices:
+        return {"injected": 0, "caught": 0, "false_accept_rate": None}
+
+    picks = indices[: len(_CANARY_CLAIMS)]
+    claims = [
+        Claim(text=text, citation_indices=[i])
+        for text, i in zip(_CANARY_CLAIMS, picks, strict=False)
+    ]
+    context = _build_context(
+        sorted({c.citation_indices[0] for c in claims}), table, chunk_store,
+        "canary unsupported claims",
+    )
+    claim_lines = "\n".join(f"Claim {j}: {c.text}" for j, c in enumerate(claims))
+    try:
+        raw = chat_json(
+            SYSTEM_PROMPT,
+            f"Ground text of cited papers:\n{context}\n\n"
+            f"Claims to verify:\n{claim_lines}\n\n"
+            "Return a verdict for each claim_index (0-based within this batch).",
+            max_tokens=4096,
+            strong=True,
+        )
+        verdicts = {int(r.get("claim_index", -1)): str(r.get("verdict", "")).lower()
+                    for r in raw.get("results", [])}
+    except Exception as e:  # noqa: BLE001
+        return {"injected": len(claims), "caught": 0, "false_accept_rate": None,
+                "error": str(e)[:200]}
+
+    details = [
+        {"claim": j, "verdict": verdicts.get(j, "missing")}
+        for j in range(len(claims))
+    ]
+    caught = sum(
+        1 for d in details
+        if d["verdict"] in {"unsupported", "contradictory", "background"}
+    )
+    return {
+        "injected": len(claims),
+        "caught": caught,
+        "false_accept_rate": round(1 - caught / len(claims), 3) if claims else None,
+        "verdicts": {str(d["claim"]): d["verdict"] for d in details},
     }

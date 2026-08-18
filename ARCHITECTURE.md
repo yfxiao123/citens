@@ -26,7 +26,9 @@ citens/
 ├── cli.py                  typer entry: run / collect / audit / browse / resume / reverify / serve / eval / sjr
 ├── config.py               Settings (.env): two-tier models, polite-pool email, retriever, profile
 ├── models.py               Paper → ScoredPaper → ExtractedPaper; Chunk/Claim/Verdict(5-grade)
-├── llm.py                  chat/chat_json, batched concurrent calls, usage telemetry, JSON retries
+├── llm.py                  chat/chat_json, batched concurrent calls, usage telemetry, JSON retries,
+│                           per-request thinking control (reasoning_effort; hybrid models share
+│                           one completion budget between thinking and body)
 ├── net.py                  httpx client (proxy/EZproxy prefix)
 ├── cache.py                disk cache namespaces (search/enrich/embed)
 ├── runlog.py               append-only event log, per-stage token attribution
@@ -35,16 +37,20 @@ citens/
 ├── profiles.py + profiles/ pure-data domain profiles: terms / venue whitelist / subfields /
 │                           EN→ZH terminology ledger / primary-source order
 ├── ranking.py              composite ranking (venue boost, author depth, SJR)
-├── audit.py                human audit sheet ⇄ verifier calibration
+├── audit.py                human audit sheet ⇄ verifier calibration (+ golden set in tests/golden/)
 ├── artifacts.py            review_browser.html generator (HTML+JS template, embedded JSON)
-├── search/                 arxiv / semantic_scholar / openalex / crossref + snowball + seeds
+├── search/                 arxiv / semantic_scholar (key tier: 1 rps process-wide throttle) /
+│                           openalex / crossref + snowball + seeds
 ├── grounding/              fulltext, ChunkStore (shared across rounds), retrieval
-│                           (bm25 | keyword | embedding, FTS5 fast path), citations (bib+RIS), provenance anchors
-├── agents/                 planner, filter, extract, organize, synth, writer, verifier (5-grade),
-│                           defense, rewriter, health, reflector, verifier_trigger, …
-├── orchestration/pipeline.py  run stages + reflect loop; reverify.py
+│                           (bm25 | keyword | embedding, FTS5 fast path), citations (bib+RIS),
+│                           provenance anchors, abstract enrichment (OpenAlex→S2→Crossref→Springer)
+├── agents/                 planner, filter, extract, organize, synth, writer, verifier
+│                           (5-grade + calibration rules + canary honeypot + stack lint),
+│                           defense, rewriter, health (incl. canary false-accept), reflector,
+│                           verifier_trigger, …
+├── orchestration/pipeline.py  run stages + reflect loop + blind-paper demotion; reverify.py
 ├── eval/precision.py       metrics sweep
-└── api/app.py              FastAPI + SSE
+└── api/app.py              FastAPI + SSE + zero-build three-pane console (static/, vendored marked)
 ```
 
 ## Data flow

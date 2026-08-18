@@ -3,149 +3,278 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>litreview — citation-grounded literature reviews</title>
+<title>CiteLens Console</title>
 <style>
   :root {
-    --bg: #0f1115; --panel: #161a22; --border: #262c38;
-    --fg: #e6e9ef; --muted: #8b93a3; --accent: #4da3ff; --ok: #3fb950; --err: #f85149;
+    --bg: #0f1115; --panel: #161a22; --panel2: #1b202b; --border: #262c38;
+    --fg: #e6e9ef; --muted: #8b93a3; --accent: #4da3ff; --ok: #3fb950;
+    --warn: #d29922; --err: #f85149; --radius: 10px;
+    --mono: "Cascadia Code", Consolas, "SF Mono", monospace;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--fg);
     font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-    display: flex; min-height: 100vh; flex-direction: column;
+    display: flex; flex-direction: column;
   }
-  header { padding: 14px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 12px; }
-  header h1 { font-size: 18px; margin: 0; }
-  header .sub { color: var(--muted); font-size: 13px; }
-  main { flex: 1; display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px 24px; max-width: 1280px; width: 100%; margin: 0 auto; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
-  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  header {
+    display: flex; align-items: center; gap: 10px; padding: 10px 18px;
+    border-bottom: 1px solid var(--border); flex: none;
+  }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .3px; }
+  header h1 .lens { color: var(--accent); }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .chip {
+    font-size: 11px; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 2px 9px; background: var(--panel);
+  }
+  .chip b { color: var(--fg); font-weight: 600; }
+  header .spacer { flex: 1; }
+  header a { color: var(--muted); font-size: 12px; text-decoration: none; margin-left: 12px; }
+  header a:hover { color: var(--accent); }
+
+  main {
+    flex: 1; display: grid; min-height: 0;
+    grid-template-columns: 300px 380px 1fr; gap: 14px; padding: 14px 18px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px; min-height: 0;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  label { display: block; font-size: 11px; color: var(--muted); margin: 10px 0 4px; letter-spacing: .4px; }
   input[type=text], input[type=number], select {
-    width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--bg); color: var(--fg); font-size: 14px;
+    width: 100%; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--fg); font-size: 13px;
   }
-  button {
-    margin-top: 14px; width: 100%; padding: 10px; border: 0; border-radius: 6px;
-    background: var(--accent); color: #06121f; font-size: 15px; font-weight: 600; cursor: pointer;
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  button.primary {
+    margin-top: 14px; width: 100%; padding: 9px; border: 0; border-radius: 6px;
+    background: var(--accent); color: #06121f; font-size: 14px; font-weight: 600; cursor: pointer;
   }
-  button:disabled { opacity: .45; cursor: wait; }
-  #steps { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-  #steps li { padding: 6px 8px; border-left: 2px solid var(--border); margin: 4px 0; color: var(--muted); }
-  #steps li.running { border-left-color: var(--accent); color: var(--fg); }
+  button.primary:disabled { opacity: .45; cursor: wait; }
+
+  #history { flex: 1; overflow-y: auto; margin-top: 14px; }
+  #history .run {
+    padding: 8px 9px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    border: 1px solid transparent; margin-bottom: 4px;
+  }
+  #history .run:hover { background: var(--panel2); }
+  #history .run.active { border-color: var(--accent); background: var(--panel2); }
+  #history .run .t { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #history .run .m { color: var(--muted); margin-top: 2px; display: flex; gap: 8px; }
+  #history .run .prec { color: var(--ok); }
+
+  #timeline { flex: 1; overflow-y: auto; padding-right: 4px; }
+  #steps { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+  #steps li {
+    padding: 6px 10px; border-left: 2px solid var(--border); margin: 5px 0;
+    color: var(--muted); position: relative;
+  }
+  #steps li b { color: var(--fg); font-size: 12.5px; font-weight: 600; }
+  #steps li .msg { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; line-height: 1.5; }
+  #steps li.running { border-left-color: var(--accent); }
+  #steps li.running b::after {
+    content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 7px;
+    border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%;
+    animation: spin 0.9s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   #steps li.done { border-left-color: var(--ok); }
-  #steps li.fail { border-left-color: var(--err); color: var(--err); }
-  #steps .msg { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
-  #summary { margin: 0 0 12px; font-size: 13px; line-height: 1.7; }
-  #summary b { color: var(--accent); }
-  .bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 8px 0; }
-  .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
-  #review { font-size: 14px; line-height: 1.75; overflow-wrap: break-word; }
-  #review h1, #review h2 { border-bottom: 1px solid var(--border); padding-bottom: 6px; }
-  #review pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; }
-  #review code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
-  .placeholder { color: var(--muted); text-align: center; padding: 80px 0; font-size: 14px; }
-  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 12px; border-top: 1px solid var(--border); }
-  a { color: var(--accent); }
+  #steps li.done b::after { content: " ✓"; color: var(--ok); }
+  #steps li.fail { border-left-color: var(--err); }
+  #steps li.fail, #steps li.fail .msg { color: var(--err); }
+  #steps li .elapsed { position: absolute; right: 8px; top: 6px; font-size: 10.5px; color: var(--muted); font-family: var(--mono); }
+  #steps li.warn .msg { color: var(--warn); }
+
+  #metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; flex: none; }
+  .metric {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; text-align: center;
+  }
+  .metric .v { font-size: 17px; font-weight: 700; font-family: var(--mono); }
+  .metric .k { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+  .metric.good .v { color: var(--ok); }
+  .metric.bad .v { color: var(--err); }
+  .metric.warn .v { color: var(--warn); }
+
+  #tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); flex: none; overflow-x: auto; }
+  #tabs button {
+    background: none; border: 0; color: var(--muted); font-size: 12px; padding: 8px 12px;
+    cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  #tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
+  #tabs button:disabled { opacity: .3; cursor: default; }
+  #viewer { flex: 1; overflow-y: auto; padding: 14px 16px; font-size: 13.5px; line-height: 1.8; }
+  #viewer h1, #viewer h2, #viewer h3 { border-bottom: 1px solid var(--border); padding-bottom: 5px; margin: 1em 0 .5em; }
+  #viewer h1 { font-size: 19px; } #viewer h2 { font-size: 16px; } #viewer h3 { font-size: 14px; }
+  #viewer pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+  #viewer code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
+  #viewer table { border-collapse: collapse; } #viewer td, #viewer th { border: 1px solid var(--border); padding: 4px 8px; }
+  .placeholder { color: var(--muted); text-align: center; padding: 80px 0; font-size: 13px; }
+  .vgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 10px 0 16px; }
+  .vnote { font-size: 12px; color: var(--muted); margin: 6px 0; }
+  .raw { white-space: pre-wrap; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+
+  #timer {
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    text-align: right; padding: 4px 2px 8px; flex: none;
+  }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 260px 1fr; grid-template-rows: 1fr 1fr; }
+    .card:nth-child(2) { grid-column: 1; grid-row: 2; }
+    .card:nth-child(3) { grid-column: 2; grid-row: 1 / span 2; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>litreview</h1>
-  <span class="sub">可信引用 · 批判性综述 · every claim verifiable against its source</span>
+  <h1>Cite<span class="lens">Lens</span> Console</h1>
+  <span class="sub">可信引用 · 批判性综述</span>
+  <span class="chip" id="chip-model">…</span>
+  <span class="chip" id="chip-sjr">SJR</span>
+  <span class="spacer"></span>
+  <a href="/docs" target="_blank">API</a>
 </header>
 <main>
+  <!-- left: run form + history -->
   <section class="card">
-    <label>研究主题 / topic</label>
-    <input type="text" id="topic" placeholder="e.g. 订单簿建模 / limit order book modeling" value="">
-    <label>最终论文数 / max papers</label>
-    <input type="number" id="maxp" value="8" min="3" max="30">
+    <label>研究主题 / TOPIC</label>
+    <input type="text" id="topic" placeholder="e.g. 订单簿建模与市场微观结构">
+    <label>核心论文数 / -n</label>
+    <input type="number" id="maxp" value="20" min="3" max="50">
     <div id="clarify"></div>
-    <label>选项 / options</label>
+    <label>运行模式 / MODE</label>
+    <select id="mode">
+      <option value="">auto（按主题自动）</option>
+      <option value="quick_scan">quick_scan（单轮，快）</option>
+      <option value="deep_review">deep_review（反思循环，慢而深）</option>
+    </select>
+    <label>全文获取 / FULLTEXT</label>
     <select id="fulltext">
-      <option value="1">获取全文（引用精度更高）</option>
+      <option value="1">获取全文（精度更高）</option>
       <option value="0">仅摘要（更快）</option>
     </select>
-    <button id="go">生成综述 / run</button>
-    <ul id="steps"></ul>
-    <div class="bar"><i id="prog"></i></div>
+    <button class="primary" id="go">▶ 生成综述 / RUN</button>
+    <div id="history"></div>
   </section>
+
+  <!-- middle: live pipeline -->
   <section class="card">
-    <div id="summary"></div>
-    <div id="review"><div class="placeholder">综述将在这里显示 —— 输入主题后点击「生成综述」<br>The review appears here after a run.</div></div>
+    <div id="timer">idle</div>
+    <div id="metrics">
+      <div class="metric" id="m-prec"><div class="v">–</div><div class="k">引用精度</div></div>
+      <div class="metric" id="m-canary"><div class="v">–</div><div class="k">蜜罐漏判</div></div>
+      <div class="metric" id="m-lenient"><div class="v">–</div><div class="k">宽严纠偏</div></div>
+      <div class="metric" id="m-unver"><div class="v">–</div><div class="k">不可验证率</div></div>
+    </div>
+    <div id="timeline"><ul id="steps"></ul></div>
+  </section>
+
+  <!-- right: artifacts -->
+  <section class="card">
+    <div id="tabs">
+      <button data-tab="review" class="active" disabled>综述</button>
+      <button data-tab="refs" disabled>参考文献</button>
+      <button data-tab="fetch" disabled>待取全文</button>
+      <button data-tab="verify" disabled>核验详情</button>
+      <button data-tab="audit" disabled>审计浏览器 ↗</button>
+    </div>
+    <div id="viewer"><div class="placeholder">左侧输入主题运行，或点击历史记录查看既往综述<br>run a review, or open one from history</div></div>
   </section>
 </main>
-<footer>litreview · runs stream over SSE · <a href="/docs">API docs</a> · <a href="/runs">/runs</a></footer>
+<script src="/vendor/marked.min.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const stepEls = {};
+const state = { runId: null, running: false, t0: null, timerHandle: null };
 
-function upsertStep(step, title) {
-  if (!stepEls[step]) {
-    const li = document.createElement("li");
-    li.dataset.step = step;
-    $("steps").appendChild(li);
-    stepEls[step] = li;
+/* ---------- header chips ---------- */
+fetch("/health").then(r => r.json()).then(h => {
+  $("chip-model").innerHTML = `model <b>${h.llm_model}</b>`;
+  $("chip-sjr").innerHTML = h.sjr_data ? `SJR <b>loaded</b>` : `SJR <b>absent</b>`;
+}).catch(() => {});
+
+/* ---------- history ---------- */
+async function loadHistory() {
+  try {
+    const j = await (await fetch("/runs")).json();
+    $("history").innerHTML = (j.runs || []).map(r => `
+      <div class="run" data-id="${encodeURIComponent(r.run_id)}">
+        <div class="t">${r.topic || r.run_id}</div>
+        <div class="m">
+          <span>${(r.run_id || "").split("-").slice(-1)[0]}</span>
+          ${r.citation_precision != null ? `<span class="prec">${Math.round(r.citation_precision * 100)}%</span>` : ""}
+        </div>
+      </div>`).join("");
+    document.querySelectorAll("#history .run").forEach(el =>
+      el.addEventListener("click", () => openRun(decodeURIComponent(el.dataset.id), el)));
+  } catch {}
+}
+loadHistory();
+
+async function openRun(runId, el) {
+  document.querySelectorAll("#history .run").forEach(x => x.classList.remove("active"));
+  if (el) el.classList.add("active");
+  state.runId = runId;
+  try {
+    const j = await (await fetch(`/result/${encodeURIComponent(runId)}`)).json();
+    paintResult(j, runId);
+  } catch (e) {
+    $("viewer").innerHTML = `<div class="placeholder">读取失败: ${e.message}</div>`;
   }
-  const li = stepEls[step];
-  li.className = "running";
-  if (title && !li.dataset.title) { li.dataset.title = title; li.innerHTML = `<b>${title}</b><span class="msg"></span>`; }
-  return li;
 }
 
-function renderMd(md) {
-  if (window.marked) return marked.parse(md);
-  // fallback: minimal renderer until marked loads
-  return "<pre>" + md.replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c])) + "</pre>";
-}
-
+/* ---------- clarify ---------- */
+let clarifyTimer = null;
 async function loadClarify() {
   const topic = $("topic").value.trim();
   const box = $("clarify");
   if (!topic) { box.innerHTML = ""; return; }
   try {
-    const r = await fetch("/clarify?topic=" + encodeURIComponent(topic));
-    const j = await r.json();
+    const j = await (await fetch("/clarify?topic=" + encodeURIComponent(topic))).json();
     const qs = j.questions || [];
-    if (!qs.length) { box.innerHTML = ""; return; }
     box.innerHTML = qs.map(q => `
       <label>${q.question}</label>
       <select data-qid="${q.id}">
-        ${q.options.map(o => `<option value="${o}" ${o===q.default?"selected":""}>${o}</option>`).join("")}
+        ${q.options.map(o => `<option value="${o}" ${o === q.default ? "selected" : ""}>${o}</option>`).join("")}
       </select>`).join("");
   } catch { box.innerHTML = ""; }
 }
+$("topic").addEventListener("input", () => {
+  clearTimeout(clarifyTimer);
+  clarifyTimer = setTimeout(loadClarify, 600);  // debounce: /clarify costs an LLM call
+});
 
-function collectFilters() {
-  const f = {};
-  document.querySelectorAll("#clarify select[data-qid]").forEach(sel => {
-    f[sel.dataset.qid] = sel.value;
-  });
-  return f;
-}
-
-$("topic").addEventListener("change", loadClarify);
-$("topic").addEventListener("blur", loadClarify);
-
+/* ---------- SSE run ---------- */
 async function run() {
   const topic = $("topic").value.trim();
-  if (!topic) { alert("请输入研究主题 / enter a topic"); return; }
+  if (!topic) { alert("请输入研究主题"); return; }
+  state.running = true; state.t0 = Date.now();
   $("go").disabled = true;
   $("steps").innerHTML = ""; Object.keys(stepEls).forEach(k => delete stepEls[k]);
-  $("summary").innerHTML = ""; $("prog").style.width = "0";
-  $("review").innerHTML = '<div class="placeholder">运行中… streaming events</div>';
+  ["m-prec", "m-canary", "m-lenient", "m-unver"].forEach(id => setMetric(id, "–", ""));
+  document.querySelectorAll("#tabs button").forEach(b => b.disabled = true);
+  $("viewer").innerHTML = '<div class="placeholder">运行中 · streaming…</div>';
+  startTimer();
 
-  const body = {
-    topic,
-    max_papers: parseInt($("maxp").value, 10) || 8,
-    fetch_fulltext: $("fulltext").value === "1",
-    filters: collectFilters(),
-  };
+  const filters = {};
+  document.querySelectorAll("#clarify select[data-qid]").forEach(s => filters[s.dataset.qid] = s.value);
+
   try {
     const resp = await fetch("/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        topic,
+        max_papers: parseInt($("maxp").value, 10) || 20,
+        mode: $("mode").value || null,
+        fetch_fulltext: $("fulltext").value === "1",
+        filters,
+      }),
     });
     if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
     const reader = resp.body.getReader();
@@ -163,9 +292,11 @@ async function run() {
       }
     }
   } catch (e) {
-    $("summary").innerHTML = `<span style="color:var(--err)">运行失败 / failed: ${e.message}</span>`;
+    upsertStep("pipeline", "失败").classList.add("fail");
+    addMsg("pipeline", e.message, true);
   } finally {
-    $("go").disabled = false;
+    state.running = false; $("go").disabled = false; stopTimer();
+    loadHistory();
   }
 }
 
@@ -179,49 +310,161 @@ function parseSSE(frame) {
   try { return JSON.parse(data); } catch { return null; }
 }
 
+/* ---------- timeline ---------- */
+function upsertStep(step, title) {
+  if (!stepEls[step]) {
+    const li = document.createElement("li");
+    li.dataset.step = step;
+    li.innerHTML = `<b></b><span class="msg"></span><span class="elapsed"></span>`;
+    $("steps").appendChild(li);
+    stepEls[step] = li;
+    li._t0 = Date.now();
+  }
+  const li = stepEls[step];
+  if (title && !li.dataset.title) { li.dataset.title = title; li.querySelector("b").textContent = title; }
+  li.classList.add("running");
+  $("timeline").scrollTop = $("timeline").scrollHeight;
+  return li;
+}
+function addMsg(step, msg, isErr) {
+  const li = stepEls[step]; if (!li) return;
+  const m = li.querySelector(".msg");
+  m.textContent = msg;
+  if (isErr) li.classList.add("warn");
+}
+function finishStep(step, ok) {
+  const li = stepEls[step]; if (!li) return;
+  li.classList.remove("running");
+  li.classList.add(ok ? "done" : "fail");
+  const dt = Math.round((Date.now() - (li._t0 || Date.now())) / 1000);
+  li.querySelector(".elapsed").textContent = dt >= 60 ? `${Math.floor(dt / 60)}m${dt % 60}s` : `${dt}s`;
+}
+
+function setMetric(id, text, cls) {
+  const el = $(id);
+  el.querySelector(".v").textContent = text;
+  el.className = "metric" + (cls ? " " + cls : "");
+}
+
+/* mid-run metric sniffing from step messages (final numbers come from /result) */
+function sniffMetrics(msg) {
+  let m;
+  if ((m = msg.match(/引用精度\s*([\d.]+)%/))) setMetric("m-prec", m[1] + "%", +m[1] >= 70 ? "good" : "warn");
+  if ((m = msg.match(/蜜罐检测.*?漏判率\s*([\d.]+)%/))) setMetric("m-canary", m[1] + "%", +m[1] === 0 ? "good" : "bad");
+  if ((m = msg.match(/宽严纠偏.*?(\d+)\s*条/))) setMetric("m-lenient", m[1] + " 条", +m[1] === 0 ? "good" : "warn");
+  if ((m = msg.match(/(\d+)\s*条.*?unverifiable|不可验证率\s*([\d.]+)%/))) setMetric("m-unver", (m[2] || m[1]) + (m[2] ? "%" : " 条"), "warn");
+}
+
 function handleEvent(ev) {
   if (ev.type === "RunStarted") {
-    document.title = `litreview — ${ev.topic}`;
+    document.title = `CiteLens — ${ev.topic}`;
   } else if (ev.type === "StepStarted") {
-    upsertStep(ev.step, ev.title);
+    upsertStep(ev.step, ev.title || ev.step);
   } else if (ev.type === "StepProgress") {
-    const li = upsertStep(ev.step, ev.step);
-    li.querySelector(".msg").textContent = ev.message + (ev.total ? ` (${ev.current}/${ev.total})` : "");
-    if (ev.total) $("prog").style.width = `${Math.round(100 * ev.current / ev.total)}%`;
+    upsertStep(ev.step, ev.step);
+    addMsg(ev.step, ev.message + (ev.total ? ` (${ev.current}/${ev.total})` : ""));
+    sniffMetrics(ev.message || "");
   } else if (ev.type === "StepCompleted") {
-    const li = upsertStep(ev.step, ev.step);
-    li.className = "done";
-    li.querySelector(".msg").textContent = ev.message;
+    upsertStep(ev.step, ev.step);
+    addMsg(ev.step, ev.message);
+    finishStep(ev.step, true);
+    sniffMetrics(ev.message || "");
   } else if (ev.type === "RunFailed") {
     const li = upsertStep(ev.step || "pipeline", "失败");
-    li.className = "fail"; li.querySelector(".msg").textContent = ev.message;
+    li.classList.remove("running"); li.classList.add("fail");
+    addMsg(ev.step || "pipeline", ev.message, true);
     return true;
   } else if (ev.type === "RunCompleted") {
     const s = ev.summary || {};
-    $("prog").style.width = "100%";
-    const prec = s.citation_precision != null ? `${Math.round(s.citation_precision * 100)}%` : "n/a";
-    $("summary").innerHTML =
-      `<b>${s.topic ?? ""}</b><br>` +
-      `候选 ${s.total_papers ?? 0} 篇 → 采用 ${s.filtered_papers ?? 0} 篇 · ${s.claims ?? 0} 条带引用论断<br>` +
-      `引用精度 / citation precision: <b>${prec}</b><br>` +
-      `产物: <a href="/result/${encodeURIComponent(ev.run_dir.split(/[\\/]/).pop())}" target="_blank">完整结果 JSON</a> · ` +
-      `<code>${ev.review_path ?? ""}</code>`;
-    fetch(`/result/${encodeURIComponent(ev.run_dir.split(/[\\/]/).pop())}`)
-      .then(r => r.json())
-      .then(j => { if (j.review_md) $("review").innerHTML = renderMd(j.review_md); })
-      .catch(() => {});
+    const runId = (ev.run_dir || "").split(/[\\/]/).pop();
+    if (runId) openRun(runId);
     return true;
   }
   return false;
 }
 
-// marked from CDN for markdown rendering (graceful fallback if offline)
-(function loadMarked() {
-  const s = document.createElement("script");
-  s.src = "https://cdn.jsdelivr.net/npm/marked@12/marked.min.js";
-  s.onerror = () => {};  // fallback renderer covers it
-  document.head.appendChild(s);
-})();
+/* ---------- timer ---------- */
+function startTimer() {
+  stopTimer();
+  state.timerHandle = setInterval(() => {
+    const s = Math.round((Date.now() - state.t0) / 1000);
+    $("timer").textContent = `⏱ ${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  }, 1000);
+}
+function stopTimer() {
+  if (state.timerHandle) clearInterval(state.timerHandle);
+  state.timerHandle = null;
+}
+
+/* ---------- artifact viewer ---------- */
+let currentResult = null;
+function paintResult(j, runId) {
+  currentResult = j;
+  const tabs = document.querySelectorAll("#tabs button");
+  tabs.forEach(b => b.disabled = false);
+  $("tabs").querySelector('[data-tab="review"]').click();
+  const v = j.verification || {};
+  if (v.citation_precision != null) setMetric("m-prec", Math.round(v.citation_precision * 100) + "%", v.citation_precision >= 0.7 ? "good" : "warn");
+  const canary = v.canary || {};
+  if (canary.false_accept_rate != null) setMetric("m-canary", Math.round(canary.false_accept_rate * 100) + "%", canary.false_accept_rate === 0 ? "good" : "bad");
+  if (v.leniency_downgraded != null) setMetric("m-lenient", v.leniency_downgraded + " 条", v.leniency_downgraded === 0 ? "good" : "warn");
+  if (v.unverifiable_rate != null) setMetric("m-unver", Math.round(v.unverifiable_rate * 100) + "%", v.unverifiable_rate <= 0.1 ? "good" : "warn");
+  const stack = v.citation_stacking;
+  if (stack) addStepNote(`引用堆砌: 最大 ${stack.max_citations_per_claim} 引用/论断，${stack.stacked_claims} 条超限`);
+}
+
+function addStepNote(text) {
+  const li = document.createElement("li");
+  li.innerHTML = `<b>lint</b><span class="msg">${text}</span>`;
+  $("steps").appendChild(li);
+}
+
+function esc(s) { return (s || "").replace(/[<>&]/g, c => ({"<": "&lt;", ">": "&gt;", "&": "&amp;"}[c])); }
+function renderMd(md) {
+  if (window.marked) return marked.parse(md);
+  return "<pre>" + esc(md) + "</pre>";  // offline fallback: verbatim, escaped
+}
+
+document.querySelectorAll("#tabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (!currentResult) return;
+    document.querySelectorAll("#tabs button").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    const j = currentResult;
+    const runId = encodeURIComponent(j.run_id);
+    const tab = btn.dataset.tab;
+    if (tab === "review") {
+      $("viewer").innerHTML = j.review_md ? renderMd(j.review_md) : '<div class="placeholder">无 review.md</div>';
+    } else if (tab === "refs") {
+      $("viewer").innerHTML = j.references_bib
+        ? `<div class="vnote"><a href="/artifact/${runId}/references.bib" download>references.bib</a> · <a href="/artifact/${runId}/references.ris" download>references.ris (Zotero/EndNote)</a></div><pre class="raw">${esc(j.references_bib)}</pre>`
+        : '<div class="placeholder">无参考文献</div>';
+    } else if (tab === "fetch") {
+      $("viewer").innerHTML = j.fetch_list
+        ? `<div class="vnote">把 PDF 按建议文件名放入 papers/ 后重跑，可全文核验</div>${renderMd(j.fetch_list)}`
+        : '<div class="placeholder">本次运行全部论文均有 ground text</div>';
+    } else if (tab === "verify") {
+      const v = j.verification || {};
+      const rows = (v.results || []).map(r => `
+        <div class="vnote"><b style="color:${r.verdict === "supported" ? "var(--ok)" : r.verdict === "partial" ? "var(--accent)" : "var(--err)"}">${r.verdict}</b>
+        [${(r.citation_indices || []).join(",")}] ${esc((r.claim_text || "").slice(0, 110))}…</div>`).join("");
+      $("viewer").innerHTML = `
+        <div class="vgrid">
+          <div class="metric good"><div class="v">${v.supported ?? 0}</div><div class="k">supported</div></div>
+          <div class="metric warn"><div class="v">${v.partial ?? 0}</div><div class="k">partial</div></div>
+          <div class="metric bad"><div class="v">${v.unsupported ?? 0}</div><div class="k">unsupported</div></div>
+          <div class="metric bad"><div class="v">${v.contradictory ?? 0}</div><div class="k">contradictory</div></div>
+          <div class="metric"><div class="v">${v.unverifiable ?? 0}</div><div class="k">unverifiable</div></div>
+          <div class="metric good"><div class="v">${Math.round((v.citation_precision ?? 0) * 100)}%</div><div class="k">精度</div></div>
+        </div>
+        <div class="vnote">逐条判定（详见 provenance.json / 审计浏览器）：</div>${rows}`;
+    } else if (tab === "audit") {
+      $("viewer").innerHTML = '<div class="placeholder">在新标签页打开审计浏览器…</div>';
+      window.open(`/artifact/${runId}/review_browser.html`, "_blank");
+      $("tabs").querySelector('[data-tab="verify"]').click();
+    }
+  });
+});
 
 $("go").addEventListener("click", run);
 $("topic").addEventListener("keydown", e => { if (e.key === "Enter") run(); });

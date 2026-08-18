@@ -66,7 +66,7 @@ def challenge_verdict(
     )
 
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=1536, strong=True)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=4096, strong=True)
         score = result.get("score", 0)
         if not isinstance(score, int) or score < 1 or score > 5:
             score = 0

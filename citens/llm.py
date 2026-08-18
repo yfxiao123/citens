@@ -39,7 +39,43 @@ class LLMBackend(Protocol):
         temperature: float = 0.3,
         max_tokens: int | None = None,
         response_json: bool = False,
+        thinking: bool = True,
     ) -> str: ...
+
+
+def build_completion_kwargs(
+    model: str,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+    max_tokens: int,
+    response_json: bool,
+    thinking: bool = True,
+) -> dict[str, Any]:
+    """Chat-completions payload shared by the OpenAI-compatible backends.
+
+    ``thinking=False`` injects ``reasoning_effort: "none"`` — on hybrid
+    reasoning models (deepseek-v4-flash etc.) thinking and the visible body
+    share one completion budget, so a long deliberation can starve the body
+    to empty. Killing the thinking for mechanical calls (or as a writer's
+    last-resort attempt) eliminates the empty-body failure mode at the
+    source. Backends that ignore the field are unaffected.
+    """
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if response_json:
+        kwargs["response_format"] = {"type": "json_object"}
+    if not thinking:
+        kwargs["extra_body"] = {"reasoning_effort": "none"}
+    return kwargs
 
 
 def _strip_fences(raw: str) -> str:
@@ -71,18 +107,17 @@ class OpenAICompatBackend:
         temperature: float = 0.3,
         max_tokens: int | None = None,
         response_json: bool = False,
+        thinking: bool = True,
     ) -> str:
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens or settings.llm_max_tokens_default,
-        }
-        if response_json:
-            kwargs["response_format"] = {"type": "json_object"}
+        kwargs = build_completion_kwargs(
+            self._model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens or settings.llm_max_tokens_default,
+            response_json=response_json,
+            thinking=thinking,
+        )
         resp = self._client.chat.completions.create(**kwargs)
         if getattr(resp, "usage", None):
             record_usage(
@@ -197,6 +232,7 @@ def chat(
     max_tokens: int | None = None,
     response_json: bool = False,
     strong: bool = False,
+    thinking: bool = True,
 ) -> str:
     model = strong_model() if strong else settings.llm_model
     budget = max_tokens or settings.llm_max_tokens_default
@@ -207,6 +243,7 @@ def chat(
         "temperature": temperature,
         "max_tokens": budget,
         "json": response_json,
+        "thinking": thinking,
     }
     cached = cache.get("llm", cache_key)
     if cached is not None:
@@ -217,6 +254,7 @@ def chat(
         temperature=temperature,
         max_tokens=budget,
         response_json=response_json,
+        thinking=thinking,
     )
     if text:  # never cache empty outputs (reasoning-model failure mode)
         cache.put("llm", cache_key, text)
@@ -230,6 +268,7 @@ def chat_json(
     temperature: float = 0.3,
     max_tokens: int | None = None,
     strong: bool = False,
+    thinking: bool = True,
 ) -> dict:
     """Call the LLM and parse a JSON response.
 
@@ -251,6 +290,7 @@ def chat_json(
             max_tokens=budget,
             response_json=True,
             strong=strong,
+            thinking=thinking,
         )
 
     raw = _strip_fences(_call(max_tokens))

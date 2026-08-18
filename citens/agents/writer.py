@@ -12,6 +12,7 @@ produced jointly with the Synth / Verifier agents.
 from __future__ import annotations
 
 import re
+import time
 
 from citens.config import settings
 from citens.llm import chat, run_concurrent
@@ -45,15 +46,28 @@ shown before each paper below. A sentence making a claim about a paper MUST carr
 evidence — never state specifics a title alone suggests. When the abstract is thin, make the \
 claim appropriately general rather than fabricating detail. Prefer fewer, defensible claims over \
 many speculative ones.
-7. Do NOT write any heading line — start directly with prose.
-8. Fluent, scholarly prose."""
+7. **NO-ABSTRACT papers**: a paper marked "无摘要 / NO ABSTRACT" has no ground text. Cite it at \
+most for title-level bibliographic context ("related work includes [4]"). NEVER describe its \
+methods, findings, or design — your own memory of a paper is NOT a source, and specifics about an \
+unseen paper cannot be verified and will be flagged as unsupported.
+8. **Keep YOUR argument outside the citation brackets.** [n] marks only what the cited source \
+itself supports. Interpretive or synthesis sentences of your own ("开创了范式", "the field's \
+central question has shifted", "this answers a different-level question") must stand WITHOUT a \
+citation rather than borrow one. Every [n] you do attach must back the specific statement it is \
+attached to — and AT MOST 3 citation markers per sentence (a 4th only when each demonstrably \
+backs a distinct part). NEVER stack 5+ citations on one sentence: if several papers matter, \
+split the sentence or name only the load-bearing sources.
+9. Do NOT write any heading line — start directly with prose.
+10. Fluent, scholarly prose."""
 
 CRIT_SYNTH_PROMPT = """You are an academic survey writer. Write a "Critical Synthesis" section \
 (400-700 words) that takes a position across the whole literature.
 Use the provided cross-paper consensus and contradictions. Argue, do not merely list — \
 a review may take a view, but it must SHOW its reasoning, not assert it. Where the evidence \
 conflicts, map the disagreement (who claims what, on which data/method) instead of averaging it away.
-Cite papers by [index], and keep claims grounded in what those papers' abstracts support.
+Cite papers by [index], and keep claims grounded in what those papers' abstracts support. Your own \
+argument and framing stand WITHOUT a citation — [n] marks only what the cited source itself says, \
+and every [n] must back the specific statement it is attached to.
 Do NOT write a heading line. Fluent, scholarly prose."""
 
 CONCLUSION_PROMPT = """You are an academic survey writer. Write "Conclusion & Outlook" (400-600 \
@@ -63,7 +77,8 @@ where the live disagreements stand, and which open questions are most worth atta
 (anchor them in the listed research gaps where possible).
 2. Note current shortcomings.
 3. Cite ONLY the papers listed below, using their EXACT [index]. Never invent papers, \
-authors, or numbering not in the list — a conclusion citing unknown work is worthless.
+authors, or numbering not in the list — a conclusion citing unknown work is worthless. Cite [n] \
+only for claims that paper's abstract supports; your own outlook and framing need no citation.
 4. Do NOT write any heading, bold title, or references list.
 5. Fluent, scholarly prose."""
 
@@ -83,6 +98,26 @@ _TERMINALS = "。．.!?！？；;”\"')]}】》…"
 _ZH_ALIASES = {"zh", "cn", "chinese", "中文", "ch"}
 _ZH_LANG_LINE = "输出语言：全文使用中文撰写，学术书面语；术语首次出现时在括号内附英文原文。"
 _EN_LANG_LINE = "Output language: write all prose in English."
+
+# Formal-register rules distilled from the nature-writing / nature-polishing
+# skills (sentence discipline, no essayistic commentary, verb-evidence
+# calibration). The 2026-08-18 review averaged 98 chars/sentence with 31
+# sentences over 150 chars — comma-chained multi-proposition sentences were
+# the dominant informality, not colloquial vocabulary.
+_ZH_FORMALITY_LINE = """学术语体规范（严格执行）：
+- 一句只承载一个主要命题。禁止用逗号/分号串联多个命题的超长句（中文句子超过约60字即应拆分，或改用"因此/与之相反/这一局限在于"等显式逻辑连接）。
+- 禁用评述性、随笔式表达与修辞设问："耐人寻味""有趣的是""值得玩味""我们不妨""可以说""不难发现"等一律不得出现；综述者的判断必须以论证呈现，不得以修辞断言。
+- 动词与证据强度校准："证明/表明"仅用于强证据，"提示/与……一致"用于间接证据；禁止无比较对象的"显著提升/大幅改善"。
+- 每段首句为该段主题句；段内各句与前一句保持显式逻辑关系（因果、对比、限定、例证）。
+- 避免泛化断言（"许多研究表明""大量工作"）——要么落到具体引用，要么删除。"""
+
+_EN_FORMALITY_LINE = """Formal-register rules (strict): one main proposition per sentence — split
+comma-chained multi-proposition sentences (target ≤30 words); no essayistic
+commentary or rhetorical questions; calibrate verbs to evidence strength
+("show/demonstrate" only for strong evidence, "suggest/consistent with" for
+indirect); every paragraph opens with its topic sentence and each sentence
+bears an explicit logical relation to the previous one; replace vague
+quantifiers ("many studies show") with specific citations or delete them."""
 
 _HEADINGS = {
     "zh": {
@@ -108,6 +143,11 @@ def _lang() -> str:
 def lang_instruction() -> str:
     """One line appended to every writer system prompt."""
     return _ZH_LANG_LINE if _lang() == "zh" else _EN_LANG_LINE
+
+
+def formality_instruction() -> str:
+    """Formal-register rules appended to every writer system prompt."""
+    return "\n" + (_ZH_FORMALITY_LINE if _lang() == "zh" else _EN_FORMALITY_LINE)
 
 
 def localized_heading(key: str) -> str:
@@ -146,23 +186,33 @@ def _complete(text: str) -> bool:
 
 def _chat_section(system: str, user: str, max_tokens: int, label: str = "") -> str:
     """chat() with writer-grade retries: reasoning models sometimes return an
-    empty body (thinking ate the budget) or truncate mid-sentence. Retry once
-    with double the budget; still return whatever we have after that.
+    empty body (thinking ate the budget) or truncate mid-sentence.
+
+    Ladder: normal budget → double budget → double budget WITHOUT thinking
+    (a complete section without deliberation beats no section — observed
+    live when a provider spell returned empty for every concurrent section).
+    A short pause between attempts also gives a throttling provider room.
 
     Writer sections run on the STRONG model tier (see citens.llm)."""
     text = ""
-    for attempt in range(2):
-        budget = max_tokens * (attempt + 1)
+    for attempt in range(3):
+        budget = max_tokens * (2 if attempt else 1)
         try:
-            text = chat(system, user, max_tokens=budget, strong=True)
+            text = chat(
+                system, user, max_tokens=budget, strong=True,
+                thinking=attempt < 2,
+            )
         except Exception as e:  # noqa: BLE001
             print(f"    [writer:{label}] attempt {attempt + 1} failed: {e}")
             text = ""
         if len(text) >= 200 and _complete(text):
             return text
+        if attempt < 2:
+            time.sleep(2.0)
         print(
             f"    [writer:{label}] attempt {attempt + 1} "
-            f"({'empty' if not text else 'truncated'}; retrying with more tokens)"
+            f"({'empty' if not text else 'truncated'}; "
+            f"{'retrying with more tokens' if attempt == 0 else 'retrying without thinking'})"
         )
     return text
 
@@ -177,6 +227,11 @@ def _papers_block(indexed: list[tuple[int, ExtractedPaper]]) -> str:
             f"  发现: {'; '.join(p.key_findings)}\n"
             f"  局限: {'; '.join(p.limitations)}\n"
         )
+        if not (p.abstract or "").strip():
+            parts.append(
+                "  ⚠ 无摘要 / NO ABSTRACT — cite for title-level context ONLY; "
+                "never describe its methods, findings, or design\n"
+            )
     return "".join(parts)
 
 
@@ -202,7 +257,12 @@ def _supporting_block(supporting: list[tuple[int, Paper]] | None) -> str:
         lines.append(
             f"[{idx}] {p.title}"
             + (f" — {venue} ({year})" if venue or year else "")
-            + (f": {abstract}…" if abstract else "\n")
+            + (
+                f": {abstract}…"
+                if abstract
+                else " — 无摘要 / NO ABSTRACT: bibliography presence only; "
+                "do not cite it for any specific claim\n"
+            )
         )
     return "\n".join(lines) + "\n"
 
@@ -217,6 +277,7 @@ def write_review_body(
     evidence_for=None,
     terminology: dict[str, str] | None = None,
     supporting: list[tuple[int, Paper]] | None = None,
+    coverage_note: str = "",
 ) -> str:
     """Generate the review BODY (title + intro + theme sections + critical
     synthesis + conclusion).
@@ -257,9 +318,19 @@ def write_review_body(
             f"on first and later occurrence): {pairs}\n"
         )
     support_block = _supporting_block(supporting)
+    coverage_block = (
+        "\n覆盖性声明素材 / COVERAGE HONESTY (deterministic, from retrieval):\n"
+        f"{coverage_note}\n"
+        "RULE: in the conclusion, state these coverage weaknesses in one honest "
+        "paragraph（如\"公开检索对X方向的覆盖有限（本综述仅纳入N篇），相关结论应视为阶段性\"），"
+        "naming thin directions explicitly. Never silently narrow the scope; never "
+        "claim coverage you do not have.\n"
+        if coverage_note
+        else ""
+    )
     jobs: list[dict] = [
         {"kind": "intro", "label": "intro",
-         "system": INTRO_PROMPT + "\n" + lang_line + term_line,
+         "system": INTRO_PROMPT + "\n" + lang_line + formality_instruction() + term_line,
          "user": f"研究主题 / Topic: {topic}", "budget": 4096}
     ]
 
@@ -278,7 +349,7 @@ def write_review_body(
             f"包含论文 / Papers (index in [brackets]):{_papers_block(indexed)}\n"
             f"{support_block}"
         )
-        system_prompt = SECTION_PROMPT + "\n" + lang_line + term_line
+        system_prompt = SECTION_PROMPT + "\n" + lang_line + formality_instruction() + term_line
         if evidence_for is not None:
             excerpts = evidence_for(theme)
             if excerpts:
@@ -309,8 +380,8 @@ def write_review_body(
         )
         jobs.append(
             {"kind": "crit", "label": "critical-synthesis",
-             "system": CRIT_SYNTH_PROMPT + "\n" + lang_line + term_line,
-             "user": synth_prompt, "budget": 4096}
+             "system": CRIT_SYNTH_PROMPT + "\n" + lang_line + formality_instruction() + term_line,
+             "user": synth_prompt + coverage_block, "budget": 4096}
         )
 
     summary = "".join(f"- {t.name}: {t.description}\n" for t in themes.themes)
@@ -319,12 +390,13 @@ def write_review_body(
         gaps = "研究空白 / Research gaps:\n" + "".join(f"- {g}\n" for g in synthesis.gaps)
     jobs.append(
         {"kind": "conclusion", "label": "conclusion",
-         "system": CONCLUSION_PROMPT + "\n" + lang_line + term_line,
+         "system": CONCLUSION_PROMPT + "\n" + lang_line + formality_instruction() + term_line,
          "user": (
              f"研究主题 / Topic: {topic}\n\n主题结构 / Themes:\n{summary}\n{gaps}\n"
              f"可引用论文 / Citable papers (use EXACT [index]):"
              f"{_papers_block(list(enumerate(papers)))}"
              f"{support_block}"
+             f"{coverage_block}"
          ),
          "budget": 4096}
     )

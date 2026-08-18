@@ -74,7 +74,7 @@ def generate_keywords(topic: str, filters: dict | None = None) -> list[str]:
         "applications, theory, empirical findings, and surveys. "
         "(Translate the topic first if it is not English.)"
     )
-    result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+    result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048, thinking=False)
     queries = result.get("queries", [])
     return [q for q in queries if isinstance(q, str) and q.strip()][:12]
 
@@ -208,3 +208,40 @@ def refine_queries(
         ][:5]
     except Exception:  # noqa: BLE001
         return []
+
+FACETS_PROMPT = """You are a systematic-review methodologist. Split the research topic into 5-8 SEARCH FACETS — the sub-directions a comprehensive survey of this field must cover.
+
+Facet design rules:
+- Cover: foundational/classic works, systematic surveys, each major method family, data & evaluation, applications, and the most recent advances (LLM-era, new architectures).
+- Facets should not overlap heavily; together they must cover the field.
+- For each facet give 2-3 diverse ENGLISH search queries.
+
+Output JSON only:
+{"facets": [{"name": "short facet name", "queries": ["query 1", "query 2"]}]}"""
+
+
+def generate_facets(topic: str, filters: dict | None = None) -> list[dict]:
+    """Plan the topic's search facets (the coverage-by-design layer).
+
+    Keywords fan out per query; facets make coverage *measurable*: the
+    pipeline counts papers per facet, feeds thin facets to the reflector's
+    supplementary retrieval, and hands the writer an honest coverage
+    statement. Mechanical call — thinking off.
+    """
+    user_prompt = (
+        f"研究主题 / Topic: {topic}\n"
+        f"{filters_block(filters)}\n\n"
+        "Plan the search facets."
+    )
+    try:
+        result = chat_json(
+            FACETS_PROMPT, user_prompt, max_tokens=2048, thinking=False
+        )
+    except Exception:  # noqa: BLE001 — facets are an accelerator, not a pillar
+        return []
+    facets = result.get("facets", [])
+    return [
+        {"name": str(f.get("name", ""))[:60],
+         "queries": [str(q) for q in f.get("queries", [])][:3]}
+        for f in facets if f.get("name") and f.get("queries")
+    ][:8]

@@ -20,7 +20,7 @@ class FakeBackend:
         self.calls: list[tuple[str, str]] = []
         self.lock = threading.Lock()
 
-    def chat(self, system, user, *, temperature=0.3, max_tokens=None, response_json=False):
+    def chat(self, system, user, *, temperature=0.3, max_tokens=None, response_json=False, thinking=True):
         with self.lock:
             self.calls.append((self.model, user[:20]))
         return f"ok:{user}"

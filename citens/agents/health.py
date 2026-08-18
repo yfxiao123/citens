@@ -40,6 +40,7 @@ def check_health(
     ver_results: list[VerificationResult],
     absence_audit: dict,
     theme_paper_counts: dict[str, int],
+    canary: dict | None = None,
 ) -> dict:
     """Check pipeline health and detect systematic biases.
 
@@ -48,6 +49,8 @@ def check_health(
         ver_results: All verification results
         absence_audit: Output from audit_coverage()
         theme_paper_counts: Map from theme name to number of papers
+        canary: Output from canary_check() — the judge's false-accept rate on
+            synthetic unsupported claims (None when not measured)
 
     Returns:
         Dict with 'issues' (list), 'adversarial_queries' (list),
@@ -60,8 +63,11 @@ def check_health(
     background = sum(1 for r in verifiable if r.verdict == Verdict.BACKGROUND)
     contradictory = sum(1 for r in verifiable if r.verdict == Verdict.CONTRADICTORY)
     unsupported = sum(1 for r in verifiable if r.verdict == Verdict.UNSUPPORTED)
+    unverifiable = sum(1 for r in ver_results if r.verdict == Verdict.UNVERIFIABLE)
 
     precision = (supported + partial) / len(verifiable) if verifiable else 0.0
+    unverifiable_rate = unverifiable / len(ver_results) if ver_results else 0.0
+    canary_far = (canary or {}).get("false_accept_rate")
 
     n_consensus = len(synthesis.consensus)
     n_contradictions = len(synthesis.contradictions)
@@ -71,6 +77,7 @@ def check_health(
 
     metrics = {
         "precision": precision,
+        "unverifiable_rate": round(unverifiable_rate, 3),
         "n_consensus": n_consensus,
         "n_contradictions": n_contradictions,
         "n_gaps": n_gaps,
@@ -79,6 +86,8 @@ def check_health(
         "n_contradictory": contradictory,
         "n_absent": absent_count,
     }
+    if canary_far is not None:
+        metrics["canary_false_accept_rate"] = canary_far
 
     # Detect issues
     issues = []
@@ -90,6 +99,10 @@ def check_health(
         issues.append("absence_blindness")
     if len(verifiable) >= 10 and background > 0.2 * len(verifiable):
         issues.append("reviews_cited_as_primary")
+    # measured (not inferred) leniency: canaries are unsupported by
+    # construction, so even one passing is a calibration failure
+    if canary_far is not None and (canary or {}).get("injected", 0) >= 2 and canary_far > 0.34:
+        issues.append("verifier_false_accept")
 
     # Generate adversarial queries if issues detected
     adversarial_queries = []
@@ -113,6 +126,11 @@ def check_health(
     recommendation = ""
     if "premature_convergence" in issues:
         recommendation = "Search for papers that contradict the consensus findings."
+    elif "verifier_false_accept" in issues:
+        recommendation = (
+            f"Judge passed {round((canary_far or 0) * 100)}% of synthetic unsupported "
+            "claims — verifier calibration is broken, review verdicts manually."
+        )
     elif "verifier_too_lenient" in issues:
         recommendation = "Tighten verification criteria or manually review high-confidence claims."
     elif "absence_blindness" in issues:

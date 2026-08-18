@@ -6,11 +6,19 @@ several sources by DOI and take the first that returns an abstract. This
 directly cuts the number of "unverifiable" claims in the Verifier and raises
 citation precision.
 
+Root cause this addresses (2026-08-18 run: 7/20 core papers abstract-less,
+enrichment filled 0/7): Elsevier journals deposit no abstract to OpenAlex
+(``abstract_inverted_index`` null) or Crossref, and SSRN preprint DOIs carry
+none in Crossref — while Semantic Scholar, which crawls publisher and preprint
+landing pages itself, often has them. S2 is therefore tried by DOI whenever a
+key is configured (its authenticated tier allows 1 request/second shared).
+
 Driven by the access layer: a Springer key, if provided, adds another source.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Sequence
 
 import httpx
@@ -19,6 +27,12 @@ from citens.config import settings
 from citens.models import Paper
 from citens.search.crossref import fetch_abstract_by_doi
 from citens.search.openalex import OpenAlexSearcher
+
+# S2 authenticated tier: 1 rps shared across ALL endpoints. Enrichment runs
+# after the search stage (no overlap with the async search throttle), so a
+# module-level sync spacing is enough — spaced starts + one 429 retry.
+_S2_MIN_INTERVAL = 1.2
+_s2_last = 0.0
 
 
 def _openalex_by_doi(doi: str) -> str:
@@ -32,6 +46,41 @@ def _openalex_by_doi(doi: str) -> str:
             return OpenAlexSearcher.decode_abstract(r.json().get("abstract_inverted_index"))
     except Exception:  # noqa: BLE001
         return ""
+
+
+def _s2_get(doi: str) -> tuple[int, str]:
+    """One S2 DOI attempt. Returns (status_code, abstract)."""
+    try:
+        with httpx.Client(
+            timeout=20, headers={"x-api-key": settings.semantic_scholar_api_key}
+        ) as client:
+            r = client.get(
+                f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
+                params={"fields": "abstract"},
+            )
+        if r.status_code == 200:
+            return 200, (r.json().get("abstract") or "").strip()
+        return r.status_code, ""
+    except Exception:  # noqa: BLE001
+        return -1, ""
+
+
+def _s2_by_doi(doi: str) -> str:
+    global _s2_last
+    if not doi or not settings.semantic_scholar_api_key:
+        return ""
+    for _attempt in range(2):
+        wait = _S2_MIN_INTERVAL - (time.monotonic() - _s2_last)
+        if wait > 0:
+            time.sleep(wait)
+        _s2_last = time.monotonic()
+        status, abstract = _s2_get(doi)
+        if status == 200:
+            return abstract
+        if status != 429:  # 404 etc. — retrying won't help
+            return ""
+        time.sleep(2.0)
+    return ""
 
 
 def _springer_by_doi(doi: str) -> str:
@@ -58,6 +107,9 @@ def _fill_one(paper: Paper) -> tuple[str | None, str]:
         ab = _openalex_by_doi(doi)
         if ab:
             return ("openalex", ab)
+        ab = _s2_by_doi(doi)
+        if ab:
+            return ("semantic_scholar", ab)
         ab = fetch_abstract_by_doi(doi)
         if ab:
             return ("crossref", ab)

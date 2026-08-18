@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sys
+import threading
 import traceback
+import webbrowser
 from pathlib import Path
 
 import typer
@@ -538,6 +540,38 @@ def _download_to(url: str, path: Path) -> None:
 def version():
     """Show version."""
     console.print(f"citens {__version__}")
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Bind host"),
+    port: int = typer.Option(8000, help="Bind port"),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="启动后自动打开浏览器"
+    ),
+    reload: bool = typer.Option(False, help="开发模式: 代码变更自动重载"),
+):
+    """启动 Web 控制台 (FastAPI + SSE) — http://host:port"""
+    try:
+        import uvicorn
+    except ImportError:  # pragma: no cover - env dependent
+        console.print(
+            "[red]缺少 Web 依赖[/] — 先安装: [bold]pip install 'citens[api]'[/]"
+        )
+        raise typer.Exit(1)
+
+    if not settings.llm_api_key:
+        console.print(
+            "[yellow]⚠ 未配置 LLM_API_KEY[/] — 控制台可以打开，但运行综述会失败。"
+            "复制 .env.example 为 .env 并填入你的 key。"
+        )
+
+    url = f"http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}"
+    if open_browser:
+        # give uvicorn a beat to bind before the browser knocks
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    console.print(f"▶ [bold cyan]CiteLens Console[/] {url}  (Ctrl+C 停止)")
+    uvicorn.run("citens.api.app:app", host=host, port=port, reload=reload)
 
 
 def main() -> None:  # pragma: no cover

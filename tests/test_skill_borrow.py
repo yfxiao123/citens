@@ -135,9 +135,9 @@ def test_writer_ledger_line_reaches_prompts(monkeypatch):
 
     seen: list[str] = []
 
-    def fake_chat(system, user, max_tokens=0, strong=False):
+    def fake_chat(system, user, max_tokens=0, strong=False, thinking=True):
         seen.append(system)
-        return "正文一句。" + "x" * 200
+        return "正文一句。" + "x" * 200 + "。"
 
     monkeypatch.setattr(writer_mod, "chat", fake_chat)
     monkeypatch.setattr(settings, "review_language", "zh")
@@ -437,9 +437,9 @@ def test_writer_passes_supporting_into_prompts(monkeypatch):
 
     seen: list[str] = []
 
-    def fake_chat(system, user, max_tokens=0, strong=False):
+    def fake_chat(system, user, max_tokens=0, strong=False, thinking=True):
         seen.append(user)
-        return "正文一句。" + "x" * 200
+        return "正文一句。" + "x" * 200 + "。"
 
     monkeypatch.setattr(writer_mod, "chat", fake_chat)
     monkeypatch.setattr(settings, "review_language", "zh")
@@ -566,3 +566,254 @@ def test_clarify_rewrites_stale_year_ranges():
     assert _fresh_years("近5年（2019-2024）") == f"近5年（{cy - 4}-{cy}）"
     assert _fresh_years("2000年至今") == "2000年至今"  # anchor year kept
     assert _fresh_years("不限时间") == "不限时间"
+
+
+# --- blind-paper demotion + S2 enrichment + writer register (2026-08-19) ---
+
+
+def test_demote_blind_papers_swaps_in_abstract_alternates():
+    from citens.models import ScoredPaper
+    from citens.orchestration.pipeline import demote_blind_papers
+
+    def _sp(title, abstract, score=4.0):
+        return ScoredPaper(title=title, abstract=abstract, rank_score=score)
+
+    core = [_sp("blind one", ""), _sp("sighted", "real abstract " * 10)]
+    supporting = [_sp("alt one", "alternate abstract " * 10, score=3.5)]
+    new_core, new_supporting, log = demote_blind_papers(core, supporting)
+    titles_core = {p.title for p in new_core}
+    assert "blind one" not in titles_core and "alt one" in titles_core
+    assert any(p.title == "blind one" for p in new_supporting)
+    demoted = [s for s in log if s["action"] == "demoted_to_supporting"]
+    assert len(demoted) == 1 and demoted[0]["replaced_by"] == "alt one"
+
+
+def test_demote_blind_keeps_pdf_capable_papers():
+    from citens.models import ScoredPaper
+    from citens.orchestration.pipeline import demote_blind_papers
+
+    core = [ScoredPaper(title="oa blind", abstract="", pdf_url="https://x/p.pdf")]
+    new_core, _, log = demote_blind_papers(core, [])
+    assert len(new_core) == 1 and not log  # fulltext-capable: not blind
+
+
+def test_enrichment_fills_via_semantic_scholar(monkeypatch):
+    from citens.grounding import enrichment as en
+
+    monkeypatch.setattr(en, "_openalex_by_doi", lambda doi: "")
+    monkeypatch.setattr(en, "_s2_by_doi", lambda doi: "S2 has the abstract")
+    monkeypatch.setattr(en, "fetch_abstract_by_doi", lambda doi: "")
+    paper = Paper(title="Elsevier no-abstract", abstract="", doi="10.1016/j.x")
+    filled, log = en.enrich_abstracts([paper])
+    assert filled == 1
+    assert paper.abstract == "S2 has the abstract"
+    assert log[0]["via"] == "semantic_scholar"
+
+
+def test_s2_by_doi_throttles_and_retries_429(monkeypatch):
+    import citens.grounding.enrichment as en
+
+    monkeypatch.setattr(en.settings, "semantic_scholar_api_key", "k-test", raising=False)
+    attempts = iter([(429, ""), (200, "recovered abstract")])
+    sleeps = []
+    monkeypatch.setattr(en, "_s2_get", lambda doi: next(attempts))
+    monkeypatch.setattr(en.time, "sleep", lambda s: sleeps.append(s))
+    got = en._s2_by_doi("10.1/x")
+    assert got == "recovered abstract"  # 429 -> backoff -> success
+    assert any(s >= 2.0 for s in sleeps)  # backed off before the retry
+
+
+def test_s2_by_doi_gives_up_on_404(monkeypatch):
+    import citens.grounding.enrichment as en
+
+    monkeypatch.setattr(en.settings, "semantic_scholar_api_key", "k-test", raising=False)
+    calls = []
+    monkeypatch.setattr(en, "_s2_get", lambda doi: (calls.append(doi), (404, ""))[1])
+    assert en._s2_by_doi("10.1/y") == ""
+    assert len(calls) == 1  # a 404 is not retried
+
+
+def test_writer_formality_and_stacking_rules_wired(monkeypatch):
+    from citens.agents import writer as w
+
+    # hard numeric stacking cap in the section prompt
+    assert "AT MOST 3 citation markers" in w.SECTION_PROMPT
+    assert "NEVER stack 5+" in w.SECTION_PROMPT
+    # nature-writing register rules, localized per output language
+    monkeypatch.setattr(w.settings, "review_language", "zh", raising=False)
+    assert "一句只承载一个主要命题" in w.formality_instruction()
+    assert "耐人寻味" in w.formality_instruction()  # banned patterns listed
+    monkeypatch.setattr(w.settings, "review_language", "en", raising=False)
+    assert "one main proposition per sentence" in w.formality_instruction()
+
+
+def test_claim_stack_stats_flags_stacked_claims():
+    from citens.agents.verifier import claim_stack_stats
+
+    claims = [
+        Claim(text="a [0]", citation_indices=[0]),
+        Claim(text="b [0][1][2][3][4][5]", citation_indices=[0, 1, 2, 3, 4, 5]),
+        Claim(text="c [1][2][3][4][5][6][7][8][9][10][11][12]",
+              citation_indices=list(range(13))),
+    ]
+    stats = claim_stack_stats(claims)
+    assert stats == {"max_citations_per_claim": 13, "stacked_claims": 2}
+
+
+def test_organize_degrades_to_fallback_grouping(monkeypatch):
+    from citens.agents import organize as org
+    from citens.models import ExtractedPaper
+
+    papers = [ExtractedPaper(title=f"p{i}", abstract="abs", year=2020)
+              for i in range(9)]
+    # a truncated/garbled LLM response must not kill the run
+    monkeypatch.setattr(org, "chat_json",
+                        lambda *a, **k: (_ for _ in ()).throw(ValueError("bad json")))
+    structure = org.organize_themes(papers, "topic")
+    assert structure.themes  # deterministic rank-order grouping kicked in
+    assert all("自动分组" in t.name for t in structure.themes)
+    covered = [i for t in structure.themes for i in t.paper_indices]
+    assert sorted(covered) == list(range(9))  # every paper assigned
+
+
+# --- thinking-budget control (deepseek-v4-flash shares completion tokens
+# between thinking and the visible body; long deliberation starves the body) ---
+
+
+def test_build_completion_kwargs_thinking_toggle():
+    from citens.llm import build_completion_kwargs
+
+    base = build_completion_kwargs(
+        "m", system_prompt="s", user_prompt="u", temperature=0.3,
+        max_tokens=100, response_json=True,
+    )
+    assert base["response_format"] == {"type": "json_object"}
+    assert "extra_body" not in base  # thinking on: no interference
+
+    off = build_completion_kwargs(
+        "m", system_prompt="s", user_prompt="u", temperature=0.3,
+        max_tokens=100, response_json=False, thinking=False,
+    )
+    assert off["extra_body"] == {"reasoning_effort": "none"}
+
+
+def test_writer_last_resort_attempt_disables_thinking(monkeypatch):
+    from citens.agents import writer as w
+
+    calls = []
+
+    def fake_chat(system, user, *, max_tokens=0, strong=False, thinking=True, **kw):
+        calls.append({"budget": max_tokens, "thinking": thinking})
+        if len(calls) < 3:
+            return ""  # provider spell: two empty bodies
+        return "一个完整的段落，以句号结尾。" * 20  # attempt 3 succeeds
+
+    monkeypatch.setattr(w, "chat", fake_chat)
+    monkeypatch.setattr(w.time, "sleep", lambda s: None)
+    text = w._chat_section("sys", "user", 4096, "test")
+    assert len(text) > 200  # recovered
+    assert [c["thinking"] for c in calls] == [True, True, False]
+    assert calls[1]["budget"] == 8192 and calls[2]["budget"] == 8192
+
+
+# --- facet coverage / stacking lint / verdict cache / supplement gate (08-19) ---
+
+
+def test_facet_coverage_report_and_note():
+    from citens.orchestration.pipeline import coverage_note_text, facet_coverage_report
+    from citens.models import ThemeInfo
+
+    facets = [{"name": "Transformer", "queries": ["transformer attention forecasting"]},
+              {"name": "GNN", "queries": ["graph neural network relational"]}]
+    papers = [
+        _p("Transformer models for stock prediction", abstract="transformer attention"),
+        _p("Graph neural networks in finance", abstract="gnn graphs"),
+        _p("Unrelated econometrics paper", abstract="instrumental variables"),
+    ]
+    report = facet_coverage_report(facets, papers)
+    assert report == [
+        {"facet": "Transformer", "papers": 1},
+        {"facet": "GNN", "papers": 1},
+    ]
+    themes = [ThemeInfo(name="thin theme", description="", paper_indices=[0, 1])]
+    note = coverage_note_text(report, themes, n_blind=2)
+    assert "Transformer(1篇)" in note and "GNN(1篇)" in note
+    assert "thin theme" in note and "2 篇论文无摘要" in note
+
+
+def test_prune_citation_stacking_enforces_cap():
+    from citens.orchestration.pipeline import prune_citation_stacking
+
+    papers = [
+        _p(f"paper {i}", abstract=f"alpha topic {i} " * 3) for i in range(8)
+    ]
+    # paper 3's abstract shares terms with the sentence -> must survive;
+    # the decorative cites get stripped
+    papers[3] = _p("niche market making paper", abstract="market making spread alpha")
+    sent = "Market making and the spread mechanism are central[0][1][2][3][4][5]。后续讨论展开。"
+    review, log = prune_citation_stacking(sent, papers, max_cites=2)
+    assert len(log) == 1
+    assert 3 in log[0]["kept"] and len(log[0]["kept"]) == 2
+    assert review.count("[") == 2  # only the two keepers remain
+    assert "后续讨论展开。" in review  # untouched sentence intact
+
+
+def test_verdict_cache_skips_unchanged_claims(monkeypatch):
+    from citens.agents import verifier as V
+
+    papers = [_p("Grounded one"), _p("Grounded two")]
+    table = CitationTable(papers)
+    store = ChunkStore()
+    for i, p in enumerate(papers):
+        store._by_paper[p.id] = [
+            Chunk(paper_id=p.id, chunk_id=f"c{i}", text=f"abstract {i}",
+                  kind=ChunkKind.ABSTRACT)
+        ]
+    calls = []
+
+    def fake_chat_json(system, user, **k):
+        calls.append(1)
+        return {"results": [
+            {"claim_index": j, "verdict": "supported", "note": "ok"}
+            for j in range(10)
+        ]}
+
+    monkeypatch.setattr(V, "chat_json", fake_chat_json)
+    claims = [Claim(text=f"claim {i} [0]", citation_indices=[0]) for i in range(3)]
+    cache: dict = {}
+    r1, p1 = V.verify_claims(claims, table, store, verdict_cache=cache)
+    assert p1 == 1.0 and len(cache) == 3
+    n_first = len(calls)
+    r2, p2 = V.verify_claims(claims, table, store, verdict_cache=cache)
+    assert len(calls) == n_first  # second round: all cache hits, zero judge calls
+    assert p2 == 1.0
+    assert [r.verdict for r in r2] == [r.verdict for r in r1]
+
+
+def test_gate_supplement_papers_demotes_blind():
+    from citens.orchestration.pipeline import _gate_supplement_papers
+
+    fresh = [_p("sighted supplement", abstract="real abstract"),
+             _p("blind supplement", abstract="")]
+    kept, supporting, blind = _gate_supplement_papers(fresh, [])
+    assert [p.title for p in kept] == ["sighted supplement"]
+    assert [p.title for p in blind] == ["blind supplement"]
+    assert supporting == blind
+
+
+def test_generate_facets_parses_and_is_resilient(monkeypatch):
+    from citens.agents import planner as pl
+
+    monkeypatch.setattr(
+        pl, "chat_json",
+        lambda *a, **k: {"facets": [{"name": "Classics", "queries": ["survey lob"]},
+                                    {"name": "", "queries": ["x"]}]},
+    )
+    facets = pl.generate_facets("order book")
+    assert facets == [{"name": "Classics", "queries": ["survey lob"]}]
+
+    monkeypatch.setattr(
+        pl, "chat_json",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("backend down")),
+    )
+    assert pl.generate_facets("order book") == []  # accelerator, never a pillar

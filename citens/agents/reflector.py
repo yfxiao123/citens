@@ -30,20 +30,28 @@ Output JSON:
   "needs_supplement": true,
   "rationale": "why supplement (or not)",
   "supplementary_keywords": ["english query 1", "english query 2", ...]
-}"""
+}
+
+When a COVERAGE REPORT is provided, use it: classify each gap as one of
+(foundational classic / systematic survey / recent advance / method family) and target the thinnest facets first. When a CHANNEL STATUS notes a source that returned nothing this run, prefer queries that other sources can answer."""
 
 
 def reflect(
     synthesis: SynthesisResult,
     topic: str,
     current_paper_count: int,
+    coverage: str = "",
 ) -> dict:
     """Decide whether to supplement and produce gap-targeted queries."""
     gaps_text = "\n".join(f"- {g}" for g in synthesis.gaps) or "(none identified)"
+    coverage_block = (
+        f"\n检索面覆盖报告 / Facet coverage report:\n{coverage}\n" if coverage else ""
+    )
     user_prompt = (
         f"研究主题 / Topic: {topic}\n"
         f"当前论文数 / Current papers: {current_paper_count}\n\n"
-        f"已识别的覆盖空白 / Coverage gaps:\n{gaps_text}\n\n"
+        f"已识别的覆盖空白 / Coverage gaps:\n{gaps_text}\n"
+        f"{coverage_block}\n"
         "Decide whether a supplementary retrieval round is warranted."
     )
     try:

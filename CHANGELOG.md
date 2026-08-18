@@ -4,9 +4,114 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0] — 2026-08-19
+
+### Added
+- **Facet-based coverage (borrowed from academic-harness plans)**: the planner
+  now emits 5-8 search facets (`01c_facets.json`); per-facet paper counts are
+  computed deterministically, thin facets drive the reflector's supplementary
+  queries (with a gap taxonomy — foundational classic / survey / recent
+  advance — and dead-channel awareness), and the writer receives a
+  coverage-honesty paragraph requirement naming thin directions explicitly
+  instead of silently narrowing scope.
+- **Hard citation-stacking enforcement**: a post-write BM25 lint caps
+  citations per sentence at 4 (prompt rules only softened: the 08-19 run
+  still had a 13-citation sentence); keepers are the most relevant cited
+  papers, dropped markers are logged (`06b_stack_lint.json`).
+- **Cross-round verdict cache**: compose rounds re-judge only claims whose
+  text, citations, or cited ground text changed — re-compose rounds stop
+  paying full verification cost. Verify batches grew 6→10.
+- **Supplement-path blind gate**: reflect-supplemented papers now pass the
+  same abstract gate as the main path (enrich, then demote blind papers to
+  the supporting layer) — the 08-19 order-book run's 7/26 blind core papers
+  entered exactly this way.
+
+### Fixed
+- verify_claims now returns results parallel to the claims list (unverifiable
+  verdicts used to be appended at the end, misaligning every downstream index
+  — rewriter, spot-check, defense).
+
+### Added
+- **Web console** (`citens/api/static/`, zero-build): the minimal run page is
+  now a three-pane agent console — run history sidebar (reopen any past run),
+  live pipeline timeline with per-step elapsed times and collapsible messages,
+  a metrics strip (precision / canary false-accept / leniency corrections /
+  unverifiable rate, live-sniffed from step messages and finalized from
+  `verification.json`), and an artifact viewer with tabs (review · references
+  with .bib/.ris download · fetch list · per-claim verdicts · audit-browser
+  link). marked.js is vendored locally so rendering works offline. Backed by
+  a new `GET /artifact/{run_id}/{filename}` route — whitelist + resolved-path
+  containment, traversal-proof, bearer-auth'd like /run.
+- **Per-request thinking control** (`reasoning_effort: "none"` via the new
+  `thinking=` flag on `chat`/`chat_json`): hybrid reasoning backends
+  (deepseek-v4-flash) share one completion budget between thinking and the
+  visible body, so a long deliberation starves the body to empty — the
+  failure mode behind today's empty verify batches, truncated organize JSON,
+  dead rewriter call and an all-sections-empty writer spell. Mechanical
+  callers (intent, planner) now run with thinking off; the writer's retry
+  ladder escalates budget → budget → budget-without-thinking, so a provider
+  spell degrades prose deliberation instead of deleting sections (live:
+  3 sections rescued on the no-thinking attempt, 33 claims vs 5 without it).
+- **Semantic Scholar authenticated tier**: `SEMANTIC_SCHOLAR_API_KEY` now
+  rides as `x-api-key` with a process-wide 1 req/sec throttle (the key's
+  shared budget) and a 429 backoff-retry; abstract enrichment gained an S2
+  by-DOI source — S2 crawls publisher and preprint pages itself, so it holds
+  abstracts that OpenAlex/Crossref lack (Elsevier journals deposit none;
+  SSRN DOIs carry none). Live effect on the same topic: enrichment fill rate
+  0/7 → 4/7.
+- **Blind-paper demotion**: after enrichment, core papers with no abstract
+  and no OA pdf (neither extractable nor verifiable) are swapped for the
+  next-ranked abstract-bearing alternates and demoted to the supporting
+  layer — `-n` now means "-n verifiable papers". Swaps logged in
+  `steps/03e_blind_demotion.json`.
+- `verification.json` now carries a `citation_stacking` lint
+  (max citations per claim, count of >4-citation claims).
 
 ### Changed
+- Writer register: formal-academic rules distilled from the nature-writing /
+  nature-polishing skills now bind every section prompt — one proposition
+  per sentence (split comma-chains), no essayistic commentary or rhetorical
+  questions, verbs calibrated to evidence strength, topic-first paragraphs,
+  no vague quantifiers. The 08-18 review averaged 98 chars/sentence with 31
+  sentences over 150 chars; comma-chained multi-proposition sentences were
+  the dominant informality.
+- Citation-stacking cap is now numeric: at most 3 `[n]` markers per sentence
+  (a 4th only when each backs a distinct part), never 5+ — the 08-18 review
+  had one claim wearing 13 citations.
+- Theme organization degrades instead of dying: a truncated/garbled judge
+  response falls back to deterministic rank-order grouping (previously it
+  killed the whole run — observed live), with the fallback visible in the
+  headings ("主题 N（自动分组）").
+- Verifier recalibrated from a human audit (run 201038: machine self-report
+  100% vs strict-audit grounded rate 68%, 12 lenient / 1 strict verdicts).
+  The leniency tie-break ("when in doubt prefer supported/partial") is
+  REMOVED from the judge prompt and replaced with three calibration rules:
+  no-ground-text citations contribute nothing (core resting on them →
+  unsupported), interpretive framing caps a claim at partial, and every
+  citation in a multi-cite claim must back its part. A/B on the same 22
+  claims (`runs/ab_reverify_201038`): agreement 41%→55%, lenient 12→6,
+  self-reported precision 100%→68.2% — now equal to the audited grounded rate.
+- Verifier fallback for a missing/malformed judge response is `unverifiable`
+  (excluded from the denominator) instead of `partial` (free precision).
+- Judge-call token budgets raised (2k→8k): the calibration rules make the
+  judge reason longer, and a tight budget let reasoning squeeze the JSON
+  body to empty (observed live on the A/B batch).
+- Leniency spot-check now has teeth: strict re-audit downgrades are ADOPTED
+  (supported→partial) into the final verdicts and headline precision, not
+  just reported.
+- Canary honeypot per run: synthetic unsupported claims through the same
+  judge in a separate call; the false-accept rate lands in
+  `verification.json` and trips a `verifier_false_accept` health issue.
+  Live check: 3/3 caught.
+- `verification.json` now reports `unverifiable_rate`, and health metrics
+  include it (thin ground text is a quality signal, not just precision).
+- Writer: papers without abstracts are marked `NO ABSTRACT` in the prompt
+  and fenced to title-level context (the audited run's 7 worst mis-grounds
+  all came from claims about an abstract-less paper); interpretive framing
+  must stand WITHOUT a citation; decorative citation stacking is banned.
+- Golden set + 13 regression tests (`tests/test_verifier_calibration.py`,
+  `tests/golden/verifier_calibration_201038.json`) pin the prompt contract
+  so the calibration cannot silently regress.
 - Large-run performance: relevance filtering (the ~300-candidate pool of a
   100-paper target) now runs on the thread pool instead of sequentially;
   defense rebuttals are parallel too; extraction folds quality grading into

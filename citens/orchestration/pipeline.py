@@ -37,7 +37,13 @@ from citens.agents import (
     verify_claims,
     write_review_body,
 )
-from citens.agents.planner import discover_terms, generate_seed_papers, refine_queries
+from citens.agents.verifier import claim_stack_stats
+from citens.agents.planner import (
+    discover_terms,
+    generate_facets,
+    generate_seed_papers,
+    refine_queries,
+)
 from citens.agents.quality import build_comparison_matrix, render_comparison_md
 from citens.agents.writer import localized_heading
 from citens.artifacts import write_review_browser
@@ -202,6 +208,163 @@ def _emit(bus: EventBus | None, event: Event) -> None:
         bus.emit(event)
 
 
+def demote_blind_papers(
+    scored: list, supporting: list
+) -> tuple[list, list, list[dict]]:
+    """Swap abstract-less core papers for abstract-bearing supporting papers.
+
+    A "blind" paper (no abstract and no OA pdf_url) can be neither extracted
+    nor verified — a core slot spent on one is a wasted slot (2026-08-18 run:
+    7/20 core papers were blind). Demotion is not deletion: blind papers join
+    the supporting layer as bibliography entries; the next-ranked
+    abstract-bearing alternates backfill the core so ``-n`` keeps meaning
+    "-n verifiable papers". Returns (core, supporting, swap_log).
+    """
+    def _blind(p) -> bool:
+        return not p.abstract.strip() and not (p.pdf_url or "").strip()
+
+    blind = [p for p in scored if _blind(p)]
+    if not blind:
+        return scored, supporting, []
+    alts = [p for p in supporting if not _blind(p)][: len(blind)]
+    n_swap = min(len(blind), len(alts))
+    if not n_swap:
+        return scored, supporting, [
+            {"title": p.title[:80], "action": "kept_blind_no_alternates"}
+            for p in blind
+        ]
+    blind_out = blind[:n_swap]
+    alts_in = alts[:n_swap]
+    out_ids = {p.id for p in blind_out}
+    in_ids = {p.id for p in alts_in}
+    new_core = [p for p in scored if p.id not in out_ids] + alts_in
+    new_core.sort(key=lambda p: getattr(p, "rank_score", 0.0), reverse=True)
+    new_supporting = (
+        [p for p in supporting if p.id not in in_ids] + blind_out
+    )
+    swap_log = [
+        {"title": b.title[:80], "action": "demoted_to_supporting",
+         "replaced_by": a.title[:80]}
+        for b, a in zip(blind_out, alts_in, strict=False)
+    ] + [
+        {"title": p.title[:80], "action": "kept_blind_no_alternates"}
+        for p in blind[n_swap:]
+    ]
+    return new_core, new_supporting, swap_log
+
+
+# --- facet coverage (the coverage-by-design layer) ---------------------------
+
+
+def facet_coverage_report(facets: list, papers: list) -> list[dict]:
+    """Deterministic per-facet paper counts (heuristic term overlap).
+
+    A facet "counts" a paper when any 4+ letter term from its queries appears
+    in the paper's title or abstract. Crude but reproducible — good enough to
+    name thin facets for the reflector and the writer's honesty paragraph.
+    """
+    import re as _re
+
+    out = []
+    for f in facets or []:
+        terms = {
+            w
+            for q in (f.get("queries") or [])
+            for w in _re.findall(r"[a-z]{4,}", q.lower())
+        }
+        n = sum(
+            1
+            for p in papers
+            if terms
+            & set(_re.findall(r"[a-z]{4,}", f"{p.title} {getattr(p, 'abstract', '') or ''}".lower()))
+        )
+        out.append({"facet": f.get("name", ""), "papers": n})
+    return out
+
+
+def coverage_note_text(
+    report: list[dict], themes: list, n_blind: int
+) -> str:
+    """Compose the writer's coverage-honesty paragraph from hard numbers."""
+    parts = []
+    thin = [r for r in report if r["papers"] < 3]
+    if thin:
+        parts.append(
+            "检索面覆盖薄弱（<3篇）: "
+            + ", ".join(f"{r['facet']}({r['papers']}篇)" for r in thin)
+        )
+    thin_themes = [t.name for t in themes if len(t.paper_indices) < 3]
+    if thin_themes:
+        parts.append("主题论文数偏少: " + ", ".join(thin_themes))
+    if n_blind:
+        parts.append(f"{n_blind} 篇论文无摘要（仅题录级信息，无法逐条核验其细节）")
+    return "; ".join(parts)
+
+
+_CITE_RE = None  # compiled lazily to keep import time flat
+
+
+def prune_citation_stacking(
+    review: str, papers: list, *, max_cites: int = 4
+) -> tuple[str, list[dict]]:
+    """Hard cap on citation stacking: sentences wearing more than ``max_cites``
+    [n] markers keep only the most relevant cited papers (BM25 of the sentence
+    against each cited paper's title+abstract); the rest of the markers are
+    stripped. The prompt cap softens; this enforces. Returns (review, log)."""
+    import re as _re
+
+    from citens.grounding.retrieval import bm25_rank_texts
+
+    log: list[dict] = []
+    out: list[str] = []
+    for sent in _re.split(r"(?<=。)", review):
+        idxs = sorted({int(m) for m in _re.findall(r"\[(\d+)\]", sent)})
+        if len(idxs) <= max_cites or not any(0 <= i < len(papers) for i in idxs):
+            out.append(sent)
+            continue
+        s_text = _re.sub(r"\[\d+\]", "", sent)
+        corpus = [
+            f"{papers[i].title} {getattr(papers[i], 'abstract', '') or ''}"[:400]
+            if 0 <= i < len(papers) else " "
+            for i in idxs
+        ]
+        ranked = bm25_rank_texts(corpus, s_text)
+        keep = {idxs[j] for j in ranked[:max_cites]}
+        dropped = [i for i in idxs if i not in keep]
+        if dropped:
+            new_sent = _re.sub(
+                r"\[(\d+)\]",
+                lambda m: m.group(0) if int(m.group(1)) in keep else "",
+                sent,
+            )
+            out.append(new_sent)
+            log.append({"kept": sorted(keep), "dropped": dropped})
+        else:
+            out.append(sent)
+    return "".join(out), log
+
+
+def _gate_supplement_papers(
+    fresh: list, supporting: list
+) -> tuple[list, list, list]:
+    """The reflect path's blind-paper gate (the main path demotes after
+    enrichment; supplements used to skip it — 7/26 blind core papers in the
+    2026-08-19 order-book run came in this way). Blind supplements (no
+    abstract, no OA pdf) drop to the supporting layer as bibliography-only."""
+    blind = [
+        p for p in fresh
+        if not p.abstract.strip() and not (p.pdf_url or "").strip()
+    ]
+    if not blind:
+        return fresh, supporting, []
+    blind_ids = {p.id for p in blind}
+    return (
+        [p for p in fresh if p.id not in blind_ids],
+        supporting + blind,
+        blind,
+    )
+
+
 def _compose(
     extracted: list[ExtractedPaper],
     topic: str,
@@ -215,6 +378,8 @@ def _compose(
     chunk_store: ChunkStore | None = None,
     terminology: dict[str, str] | None = None,
     supporting: list | None = None,
+    facets: list | None = None,
+    verdict_cache: dict | None = None,
 ) -> ComposeResult:
     """organize -> synthesize -> write -> verify, persisting all artifacts.
 
@@ -351,11 +516,34 @@ def _compose(
                     return "\n\n".join(parts)
         return "\n\n".join(parts)
 
+    # coverage honesty: hard numbers from retrieval feed the writer's
+    # coverage paragraph (thin facets, thin themes, blind papers)
+    cov_report = facet_coverage_report(facets or [], extracted)
+    n_blind_now = sum(1 for p in extracted if not (p.abstract or "").strip())
+    cov_note = coverage_note_text(cov_report, themes.themes, n_blind_now)
+
     body = write_review_body(
         extracted, themes, topic, synthesis=synthesis, on_step=_write_step,
         evidence_for=_evidence_for, terminology=terminology,
         supporting=[(len(extracted) + j, p) for j, p in enumerate(supporting)],
+        coverage_note=cov_note,
     )
+    # hard citation-stacking cap: the prompt softens, this enforces (keep the
+    # most BM25-relevant cites per overloaded sentence, strip the rest)
+    body, stack_log = prune_citation_stacking(body, list(extracted) + list(supporting or []))
+    if stack_log:
+        persistence.save_step(
+            run_dir, "06b_stack_lint",
+            {"pruned_sentences": len(stack_log), "log": stack_log},
+        )
+        _emit(
+            bus,
+            StepProgress(
+                step="write",
+                message=f"引用堆砌剪枝: {len(stack_log)} 句超限，共剪除 "
+                f"{sum(len(s['dropped']) for s in stack_log)} 个装饰性引用",
+            ),
+        )
     review = body + f"\n## {localized_heading('refs')}\n\n" + table.references_md() + "\n"
     review_path = persistence.save_text(run_dir, "review.md", review)
     persistence.save_text(run_dir, "references.bib", table.to_bibtex())
@@ -420,17 +608,27 @@ def _compose(
             )
 
         ver_results, precision = verify_claims(
-            claims, table, chunk_store, on_progress=_verify_progress
+            claims, table, chunk_store, on_progress=_verify_progress,
+            verdict_cache=verdict_cache,
         )
         verifier_precision = precision
 
+        # stage-specific extras (defense / rewrite / leniency / canary) merged
+        # into every subsequent verification.json save, so no later save drops
+        # the keys an earlier stage added
+        payload_extras: dict = {}
+
         def _verification_payload() -> dict:
-            return {
+            n_verifiable = sum(
+                1 for r in ver_results if r.verdict.value != "unverifiable"
+            )
+            payload = {
                 "citation_precision": round(precision, 3),
                 "total_claims": len(claims),
-                "verifiable_claims": sum(
-                    1 for r in ver_results if r.verdict.value != "unverifiable"
-                ),
+                "verifiable_claims": n_verifiable,
+                "unverifiable_rate": round(
+                    (len(claims) - n_verifiable) / len(claims), 3
+                ) if claims else 0.0,
                 "supported": sum(1 for r in ver_results if r.verdict.value == "supported"),
                 "partial": sum(1 for r in ver_results if r.verdict.value == "partial"),
                 "background": sum(1 for r in ver_results if r.verdict.value == "background"),
@@ -443,11 +641,35 @@ def _compose(
                 ),
                 "papers_cited": len(cited_papers),
                 "papers_total": n_table,
+                "citation_stacking": claim_stack_stats(claims),
                 "results": [r.model_dump() for r in ver_results],
             }
+            payload.update(payload_extras)
+            return payload
 
         persistence.save_json(run_dir, "verification.json", _verification_payload())
         _emit(bus, StepCompleted(step="verify", message=f"引用精度 {precision * 100:.0f}%"))
+
+        # canary honeypot: synthetic unsupported claims through the same judge —
+        # a direct measurement of the false-accept rate behind the headline
+        from citens.agents.verifier import canary_check
+
+        canary = canary_check(table, chunk_store)
+        payload_extras["canary"] = canary
+        if canary.get("injected"):
+            persistence.save_json(run_dir, "verification.json", _verification_payload())
+            rate = canary.get("false_accept_rate")
+            rate_msg = f"{rate * 100:.0f}%" if rate is not None else "n/a"
+            _emit(
+                bus,
+                StepProgress(
+                    step="verify",
+                    message=(
+                        f"蜜罐检测: {canary['injected']} 条无依据论断，"
+                        f"漏判率 {rate_msg}（{canary.get('caught', 0)} 条被抓住）"
+                    ),
+                ),
+            )
 
         # bidirectional verification: defense lawyer challenges defect verdicts
         defect_counts = {
@@ -487,10 +709,9 @@ def _compose(
                     / len(verifiable)
                 )
 
-            payload = _verification_payload()
-            payload["verifier_precision"] = round(verifier_precision, 3)
-            payload["defense_overturned"] = overturned
-            persistence.save_json(run_dir, "verification.json", payload)
+            payload_extras["verifier_precision"] = round(verifier_precision, 3)
+            payload_extras["defense_overturned"] = overturned
+            persistence.save_json(run_dir, "verification.json", _verification_payload())
             persistence.save_step(run_dir, "08_defense", defense_reviews)
             _emit(
                 bus,
@@ -536,7 +757,9 @@ def _compose(
                     )
             if applied:
                 sub_claims = [claims[a["claim_index"]] for a in applied]
-                sub_results, _ = verify_claims(sub_claims, table, chunk_store)
+                sub_results, _ = verify_claims(
+                    sub_claims, table, chunk_store, verdict_cache=verdict_cache
+                )
                 by_text = {r.claim_text: r for r in sub_results}
                 fixed = 0
                 for a in applied:
@@ -556,13 +779,12 @@ def _compose(
                 )
                 persistence.save_step(run_dir, "07_claims", claims)
                 persistence.save_text(run_dir, "review.md", review)
-                payload = _verification_payload()
-                payload["rewrite_fixed"] = fixed
                 # report BOTH sides of the rewrite: the conservative
                 # pre-rewrite number and what the loop bought
-                payload["pre_rewrite_precision"] = round(pre_rewrite_precision, 3)
-                payload["post_rewrite_precision"] = round(precision, 3)
-                persistence.save_json(run_dir, "verification.json", payload)
+                payload_extras["rewrite_fixed"] = fixed
+                payload_extras["pre_rewrite_precision"] = round(pre_rewrite_precision, 3)
+                payload_extras["post_rewrite_precision"] = round(precision, 3)
+                persistence.save_json(run_dir, "verification.json", _verification_payload())
                 _emit(
                     bus,
                     StepCompleted(
@@ -575,10 +797,9 @@ def _compose(
                     ),
                 )
             else:
-                payload = _verification_payload()
-                payload["pre_rewrite_precision"] = round(pre_rewrite_precision, 3)
-                payload["post_rewrite_precision"] = round(pre_rewrite_precision, 3)
-                persistence.save_json(run_dir, "verification.json", payload)
+                payload_extras["pre_rewrite_precision"] = round(pre_rewrite_precision, 3)
+                payload_extras["post_rewrite_precision"] = round(pre_rewrite_precision, 3)
+                persistence.save_json(run_dir, "verification.json", _verification_payload())
                 _emit(
                     bus,
                     StepCompleted(step="rewrite", message="无可安全改写的论断，保持原判"),
@@ -605,12 +826,46 @@ def _compose(
                 ),
             )
 
+        # the sprinkler behind the smoke detector: ADOPT the strict re-audit's
+        # downgrades (supported -> partial) instead of merely reporting them,
+        # so lenient first-pass verdicts cannot survive into the headline
+        adopted = 0
+        for item in leniency.get("results", []):
+            i = item.get("claim_index")
+            if (
+                item.get("verdict") == "downgrade"
+                and isinstance(i, int)
+                and 0 <= i < len(ver_results)
+                and ver_results[i].verdict == Verdict.SUPPORTED
+            ):
+                ver_results[i].verdict = Verdict.PARTIAL
+                ver_results[i].note = (
+                    f"{ver_results[i].note} [leniency: {item.get('note', '')}]".strip()
+                )[:400]
+                adopted += 1
+        if adopted:
+            precision = _recompute_precision()
+            payload_extras["leniency_downgraded"] = adopted
+            persistence.save_json(run_dir, "verification.json", _verification_payload())
+            _emit(
+                bus,
+                StepProgress(
+                    step="verify",
+                    message=(
+                        f"宽严纠偏: {adopted} 条 supported 降级为 partial · "
+                        f"精度修正为 {precision * 100:.0f}%"
+                    ),
+                ),
+            )
+
         # health monitoring: detect systematic biases
         clock.mark(f"{label}:health")
         _emit(bus, StepStarted(step="health", title="对话健康监测"))
         theme_paper_counts = {theme.name: len(theme.paper_indices) for theme in themes.themes}
         absence_audit = audit_coverage(topic, [p.title for p in extracted])
-        health_report = check_health(synthesis, ver_results, absence_audit, theme_paper_counts)
+        health_report = check_health(
+            synthesis, ver_results, absence_audit, theme_paper_counts, canary=canary
+        )
         health_report["citation_coverage"] = {
             "cited": len(cited_papers),
             "total": n_table,
@@ -737,6 +992,11 @@ async def run_pipeline_async(
     # supporting-reference layer: bound here (like profile) because the
     # resume path skips the filter stage that fills it — empty is correct
     supporting: list = []
+    # facet plan + cross-round verdict cache: bound for both paths (the
+    # resume path skips the planner that fills facets — empty is correct)
+    facets: list = []
+    verdict_cache: dict = {}
+    search_health: dict[str, str] = {}
 
     try:
         resumed = options.resume_dir is not None
@@ -842,7 +1102,22 @@ async def run_pipeline_async(
                         ),
                     )
 
-            # Step 2: search (iterative — refine if first round is thin)
+                        # facet plan: coverage-by-design — the reflector targets thin
+            # facets and the writer states them honestly
+            facets = generate_facets(topic, filters=options.filters)
+            if facets:
+                persistence.save_step(run_dir, "01c_facets", facets)
+                _emit(
+                    bus,
+                    StepProgress(
+                        step="planner",
+                        message=f"检索面规划: {len(facets)} 个面（"
+                        + ", ".join(f["name"][:12] for f in facets[:4])
+                        + "…）",
+                    ),
+                )
+
+# Step 2: search (iterative — refine if first round is thin)
             clock.mark("search")
             _emit(bus, StepStarted(step="search", title="检索论文"))
             cache_key = {"keywords": keywords, "max_results": max_results, "sources": options.sources}
@@ -1150,6 +1425,25 @@ async def run_pipeline_async(
                 else:
                     _emit(bus, StepCompleted(step="enrich", message="无缺失摘要"))
 
+            # blind papers (no abstract even after enrichment, no OA pdf) can
+            # be neither extracted nor verified — demote them to the
+            # supporting layer and backfill the core from abstract-bearing
+            # alternates, so -n means "-n verifiable papers"
+            if max_papers:
+                scored, supporting, swap_log = demote_blind_papers(scored, supporting)
+                if swap_log:
+                    meta.filtered_papers = len(scored)
+                    persistence.save_step(run_dir, "03e_blind_demotion", swap_log)
+                    n_demoted = sum(1 for s in swap_log if s["action"] == "demoted_to_supporting")
+                    n_kept = len(swap_log) - n_demoted
+                    if n_demoted:
+                        msg = (
+                            f"⚠ {n_demoted} 篇无摘要论文降级为支持文献（无法抽取/核验），由次序递补"
+                        )
+                        if n_kept:
+                            msg += f"；{n_kept} 篇无递补者，暂留核心集"
+                        _emit(bus, StepProgress(step="enrich", message=msg))
+
             # Step 4: extract
             clock.mark("extract")
             _emit(bus, StepStarted(step="extract", title="信息抽取"))
@@ -1196,6 +1490,8 @@ async def run_pipeline_async(
             chunk_store=shared_store,
             terminology=profile.terminology if profile is not None else None,
             supporting=supporting,
+            facets=facets,
+            verdict_cache=verdict_cache,
         )
         meta.themes = [t.name for t in result.themes.themes]
 
@@ -1209,7 +1505,21 @@ async def run_pipeline_async(
             saturated = False
             while rounds_run < max_rounds:
                 rounds_run += 1
-                decision = reflect(result.synthesis, topic, len(extracted))
+                cov_lines = "; ".join(
+                    f"{r['facet']}={r['papers']}" for r in facet_coverage_report(facets, extracted)
+                )
+                dead = [
+                    k for k, v in search_health.items()
+                    if v == "empty" or str(v).startswith("failed")
+                ]
+                channel = (
+                    " | 渠道状态: " + ", ".join(f"{k}={search_health[k]}" for k in dead)
+                    if dead else ""
+                )
+                decision = reflect(
+                    result.synthesis, topic, len(extracted),
+                    coverage=(cov_lines + channel),
+                )
 
                 # 6a: absence audit — canonical works the set is missing
                 audit = audit_coverage(topic, [p.title for p in extracted])
@@ -1255,6 +1565,17 @@ async def run_pipeline_async(
                 fresh, all_known = await _supplement_search(
                     supplement_queries, {p.id for p in extracted}, options, topic
                 )
+                if options.enrich_abstracts and fresh:
+                    enrich_abstracts(fresh)
+                fresh, supporting, blind_supp = _gate_supplement_papers(fresh, supporting)
+                if blind_supp:
+                    _emit(
+                        bus,
+                        StepProgress(
+                            step="reflect",
+                            message=f"{len(blind_supp)} 篇补充论文无摘要，降级为支持文献（仅题录）",
+                        ),
+                    )
                 if not fresh:
                     # saturation: no NEW relevant paper — extra rounds would
                     # only re-find what the pool already has
@@ -1304,6 +1625,8 @@ async def run_pipeline_async(
                     chunk_store=shared_store,
                     terminology=profile.terminology if profile is not None else None,
                     supporting=supporting,
+                    facets=facets,
+                    verdict_cache=verdict_cache,
                 )
                 meta.themes = [t.name for t in result.themes.themes]
                 _emit(

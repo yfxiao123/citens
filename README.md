@@ -96,8 +96,11 @@ citens run "..." -l en              # English output — Chinese is the DEFAULT
 Web UI (SSE streaming, live step progress, precision panel):
 
 ```bash
+# 最低门槛: 克隆后双击 start.bat (Windows) 或运行 ./start.sh (macOS/Linux)
+# — 自动建 venv、装依赖、打开浏览器控制台
+# 等价的手动方式:
 pip install -e ".[api,pdf]"
-uvicorn citens.api.app:app --port 8000     # open http://localhost:8000
+citens serve --open                # http://localhost:8000 · Ctrl+C 停止
 # or: docker compose up
 # exposing the server beyond localhost? set API_TOKEN (bearer auth on
 # /run & friends — /run spends your LLM credits) and CORS_ORIGINS.
@@ -139,6 +142,8 @@ Precision depends on how much ground text exists. Same topic, same model:
 The number is computed by an LLM-as-judge with the cited paper's retrieved chunks in view — it's a working measure, not a certification. Claims whose cited paper has no ground text are excluded from the denominator and reported as `unverifiable` instead.
 
 The judge grades on a **five-grade scale**: `supported` / `partial` (both count as grounded), `background` (the source — often a survey — backs field context only; the rewriter re-aims the claim at primary sources), `contradictory` (the source disagrees; the rewrite surfaces the disagreement instead of papering over it), and `unsupported` (weaken or drop). A review whose citation is a survey can therefore no longer sneak an empirical claim past the judge.
+
+**The judge is itself audited.** A human/strict-audit calibration pass (22 claims) found the judge self-reporting 100% where the audit grounded only 68% — the gap traced to an explicit leniency tie-break in the prompt and to claims riding on abstract-less papers. The tie-break is gone, three calibration rules now bind the judge, a canary honeypot (synthetic unsupported claims through the same judge) measures the false-accept rate on every run, and a strict spot-check's downgrades are adopted into the final verdicts. Post-fix A/B on the same claims: self-reported precision 68.2% = audited grounded rate. `verification.json` also reports `unverifiable_rate` — thin ground text is a quality signal, not just a precision problem.
 
 Reproduce it yourself — the eval harness runs a topic set (or summarizes existing runs) and writes a comparison table:
 

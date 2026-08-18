@@ -106,7 +106,7 @@ def rewrite_unsupported_claims(
             + f"\n\nRewrite all {len(batch_idx)} claims per the rules."
         )
         try:
-            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=4096, strong=True)
+            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=8192, strong=True)
         except Exception as e:  # noqa: BLE001
             print(f"    rewrite batch failed: {e}")
             continue
