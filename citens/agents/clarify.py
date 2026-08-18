@@ -15,7 +15,15 @@ via RunOptions.filters.
 
 from __future__ import annotations
 
+import datetime
+import re
+
 from citens.llm import chat_json
+
+# option text carrying an explicit year RANGE next to a 近N年 phrase is
+# stale by construction — the LLM wrote its training-cutoff years; rewrite
+# the range relative to today so "近5年" is actually the last 5 years
+_STALE_RANGE_RE = re.compile(r"(?P<lead>近\s*\d+\s*年\s*[（(])(?P<y1>20\d{2})[-–—](?P<y2>20\d{2})(?P<tail>[）)])")
 
 SYSTEM_PROMPT = """You are a research-scoping assistant. Given a research topic, generate 2-4 \
 clarifying questions that would meaningfully shape a literature review OF THIS TOPIC.
@@ -51,15 +59,36 @@ def generate_clarifying_questions(topic: str) -> list[dict]:
         qtext = str(q.get("question", "")).strip()
         options = [str(o).strip() for o in q.get("options", []) if str(o).strip()]
         if qid and qtext and len(options) >= 2:
+            default = str(q.get("default", options[0])).strip() or options[0]
+            options = [_fresh_years(o) for o in options[:5]]
+            default = _fresh_years(default)
             out.append(
                 {
                     "id": qid,
                     "question": qtext,
-                    "options": options[:5],
-                    "default": str(q.get("default", options[0])).strip() or options[0],
+                    "options": options,
+                    "default": default,
                 }
             )
     return out[:4]
+
+
+def _fresh_years(option: str) -> str:
+    """Rewrite stale year ranges in timeframe options relative to today.
+
+    The LLM generates options from its training cutoff ("近5年（2019-2024）"
+    in 2026 is a six-year-stale window); the relative phrase is the user's
+    actual intent, so recompute the explicit years from it."""
+    cy = datetime.date.today().year
+
+    def _recount(m: re.Match) -> str:
+        n = int(re.search(r"\d+", m.group("lead")).group())  # type: ignore[union-attr]
+        return f"{m.group('lead')}{cy - n + 1}-{cy}{m.group('tail')}"
+
+    if _STALE_RANGE_RE.search(option):
+        return _STALE_RANGE_RE.sub(_recount, option)
+    # "2000年至今"-style: keep the anchor year, nothing to recompute
+    return option
 
 
 def questions_to_query_filters(questions: list[dict]) -> dict:

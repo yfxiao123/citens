@@ -731,6 +731,8 @@ async def run_pipeline_async(
     # domain-preferred source order (dedup keeps the first reporter of a
     # preprint/published pair — finance wants the journal record to win)
     options.sources = order_sources(options.sources, profile)
+    # venue whitelist (used by retrieval-side strict mode AND the ranking)
+    _venue_boost = profile.venue_boost_set() if profile is not None else None
 
     # supporting-reference layer: bound here (like profile) because the
     # resume path skips the filter stage that fills it — empty is correct
@@ -910,12 +912,18 @@ async def run_pipeline_async(
             # write this run's finds back so the pool grows with every run.
             if options.use_pool:
                 from citens.collect import append_pool, pool_path, recall_from_pool
+                from citens.search.filters import parse_constraints
 
+                constraints = parse_constraints(options.filters)
                 if pool_path(topic).is_file():
                     # pre-recall keeps LLM screening cost flat as the pool
                     # grows: BM25 picks the top slice (reviews always pass),
                     # the rest stays a deep reservoir
-                    pooled = recall_from_pool(topic, keywords, max_results * 2)
+                    pooled = recall_from_pool(
+                        topic, keywords, max_results * 2,
+                        constraints=constraints,
+                        venue_whitelist=_venue_boost,
+                    )
                     if pooled:
                         papers = deduplicate(papers + pooled)
                         _emit(
@@ -928,6 +936,52 @@ async def run_pipeline_async(
                                 ),
                             ),
                         )
+
+                # venue-strict clarification: fetch the top-journal papers the
+                # pool lacks instead of filtering whatever it happens to have
+                if constraints.venue_strict and _venue_boost:
+                    from citens.search.openalex import (
+                        resolve_source_ids,
+                        search_venue_restricted,
+                    )
+
+                    source_ids = resolve_source_ids(
+                        [v for v in profile.venue_whitelist if v][:30]
+                        if profile is not None else []
+                    )
+                    if source_ids:
+                        restricted = await search_venue_restricted(
+                            keywords[:8], source_ids, constraints.year_from
+                        )
+                        if restricted:
+                            papers = deduplicate(papers + restricted)
+                            _emit(
+                                bus,
+                                StepProgress(
+                                    step="search",
+                                    message=(
+                                        f"顶刊受限检索补充 {len(restricted)} 条"
+                                        f"（{len(source_ids)} 本白名单期刊"
+                                        + (
+                                            f"，{constraints.year_from} 年起"
+                                            if constraints.year_from
+                                            else ""
+                                        )
+                                        + "）"
+                                    ),
+                                ),
+                            )
+                elif constraints.venue_strict:
+                    _emit(
+                        bus,
+                        StepProgress(
+                            step="search",
+                            message=(
+                                "⚠ 仅顶刊约束但未加载领域 profile（--profile finance），"
+                                "无法在检索端限制期刊，将仅靠筛选"
+                            ),
+                        ),
+                    )
                 added_to_pool = append_pool(topic, papers)
                 if added_to_pool:
                     runlog.snapshot("pool_writeback", added=added_to_pool)
@@ -951,7 +1005,6 @@ async def run_pipeline_async(
             )
             # venue-aware composite ranking (relevance x citations x SJR quartile),
             # applied when deciding which papers survive the cap
-            _venue_boost = profile.venue_boost_set() if profile is not None else None
             scored = rank_papers(scored, venue_boost=_venue_boost)
             persistence.save_step(
                 run_dir,
@@ -1010,6 +1063,25 @@ async def run_pipeline_async(
             hist = quartile_histogram(scored)
             hist_msg = " · ".join(f"{k}:{v}" for k, v in sorted(hist.items()))
             _emit(bus, StepCompleted(step="filter", message=f"{len(scored)} 篇通过（{hist_msg}）"))
+            # constraint-strictness warning: a tiny pass set under a strict
+            # clarification (顶刊/近5年/实证) starves BOTH the core and the
+            # supporting layer — the user should know why, not wonder
+            if max_papers and len(scored) < min(6, max_papers):
+                from citens.search.filters import parse_constraints as _pc
+
+                c = _pc(options.filters)
+                why = c.describe() or "澄清约束"
+                _emit(
+                    bus,
+                    StepProgress(
+                        step="filter",
+                        message=(
+                            f"⚠ 仅 {len(scored)} 篇通过（约束: {why}）。"
+                            "候选池内符合约束的文献不足——建议放宽一档（如'顶刊+计算机顶会'、"
+                            "'近10年'），或先 citens collect 补池"
+                        ),
+                    ),
+                )
 
             # Step 3.2: citation snowballing — expand pool via refs/citations of top papers
             if options.mode != RunMode.QUICK_SCAN:

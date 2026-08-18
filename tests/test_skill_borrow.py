@@ -481,3 +481,88 @@ def test_default_support_papers_is_15():
     from citens.config import Settings
 
     assert Settings(_env_file=None).default_support_papers == 15
+
+
+# --- clarifications reach the retrieval side -----------------------------
+
+
+def test_parse_constraints_reads_timeframe_and_venue():
+    from citens.search.filters import parse_constraints
+
+    filters = {
+        "focus": "深度学习模型（如LSTM、Transformer）",
+        "scope": "以实证研究为主（含回测）",
+        "timeframe": "近5年（2019-2024）",   # stale years; 近N年 must win
+        "venue": "仅顶级金融/经济期刊",
+    }
+    c = parse_constraints(filters)
+    import datetime
+
+    cy = datetime.date.today().year
+    assert c.year_from == cy - 4 and c.year_to == cy
+    assert c.venue_strict is True
+
+    c2 = parse_constraints({"timeframe": "2000年至今"})
+    assert c2.year_from == 2000 and c2.year_to is None
+    c3 = parse_constraints({"timeframe": "2014-2024"})
+    assert (c3.year_from, c3.year_to) == (2014, 2024)
+    c4 = parse_constraints({"venue": "所有同行评审期刊"})
+    assert c4.venue_strict is False
+    assert parse_constraints(None).describe() == ""
+
+
+def test_constraints_matches_paper_year_window():
+    from citens.search.filters import RetrievalConstraints
+
+    c = RetrievalConstraints(year_from=2022, year_to=2026)
+    assert c.matches_paper(_p("new", year=2024))
+    assert not c.matches_paper(_p("old", year=2015))
+    assert not c.matches_paper(_p("no-year", year=None))
+
+
+def test_recall_from_pool_applies_constraints(tmp_path, monkeypatch):
+    monkeypatch.setattr(collect_mod.settings, "litdb_dir", str(tmp_path))
+    collect_mod.append_pool("t", [
+        _p("deep learning returns", year=2023),
+        _p("classic DID paper", year=2008),
+        _p("recent transformer forecasting", year=2025),
+    ])
+    from citens.search.filters import RetrievalConstraints
+
+    got = collect_mod.recall_from_pool(
+        "t", ["deep learning stock"], 10,
+        constraints=RetrievalConstraints(year_from=2022, year_to=2026),
+    )
+    years = {p.year for p in got}
+    assert 2008 not in years and years <= {2023, 2025}
+
+
+def test_recall_venue_strict_keeps_whitelist_and_reviews(tmp_path, monkeypatch):
+    monkeypatch.setattr(collect_mod.settings, "litdb_dir", str(tmp_path))
+    collect_mod.append_pool("t", [
+        _p("top journal paper", year=2023, venue="Journal of Finance"),
+        _p("mid journal paper", year=2023, venue="Random Journal"),
+        _p("a field survey", year=2023, venue="arXiv", is_review=True),
+    ])
+    from citens.search.filters import RetrievalConstraints
+
+    got = collect_mod.recall_from_pool(
+        "t", ["survey"], 10,
+        constraints=RetrievalConstraints(venue_strict=True),
+        venue_whitelist={"journal of finance"},
+    )
+    titles = {p.title for p in got}
+    assert "top journal paper" in titles
+    assert "mid journal paper" not in titles
+    assert "a field survey" in titles  # reviews stay citable as context
+
+
+def test_clarify_rewrites_stale_year_ranges():
+    import datetime
+
+    from citens.agents.clarify import _fresh_years
+
+    cy = datetime.date.today().year
+    assert _fresh_years("近5年（2019-2024）") == f"近5年（{cy - 4}-{cy}）"
+    assert _fresh_years("2000年至今") == "2000年至今"  # anchor year kept
+    assert _fresh_years("不限时间") == "不限时间"

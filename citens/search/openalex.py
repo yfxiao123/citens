@@ -12,9 +12,85 @@ import asyncio
 
 import httpx
 
+from citens import cache
 from citens.config import settings
 from citens.models import Paper
 from citens.search.base import SearchSource, register
+
+_SOURCES_URL = "https://api.openalex.org/sources"
+
+
+def resolve_source_ids(venue_names: list[str]) -> list[str]:
+    """OpenAlex source IDs (W...) for venue display names, disk-cached.
+
+    One lookup per name (first hit wins — venue whitelists use exact journal
+    names, so the top display_name.search hit is the right record)."""
+    ids: list[str] = []
+    for name in venue_names:
+        if not name:
+            continue
+        hit = cache.get("oasources", {"name": name})
+        if hit is None:
+            try:
+                r = httpx.get(
+                    _SOURCES_URL,
+                    params={"filter": f"display_name.search:{name}", "per_page": 1},
+                    timeout=20,
+                )
+                r.raise_for_status()
+                results = r.json().get("results") or []
+                hit = results[0].get("id", "") if results else ""
+            except Exception:  # noqa: BLE001
+                hit = ""
+            cache.put("oasources", {"name": name}, hit)
+        if hit:
+            ids.append(str(hit))
+    return ids
+
+
+async def search_venue_restricted(
+    queries: list[str],
+    source_ids: list[str],
+    year_from: int | None = None,
+    per_query: int = 15,
+) -> list[Paper]:
+    """Title search constrained to whitelisted journal source IDs (+ year).
+
+    This is how a "top journals only" clarification reaches the retrieval
+    side: instead of filtering whatever the pool contains, go get the
+    top-journal papers the pool is missing."""
+    if not source_ids:
+        return []
+    select = (
+        "id,title,authorships,publication_year,abstract_inverted_index,"
+        "cited_by_count,doi,primary_location,open_access,topics,keywords,biblio"
+    )
+    src_filter = "|".join(source_ids[:40])
+
+    async def _one(client: httpx.AsyncClient, q: str) -> list[Paper]:
+        flt = f"title.search:{q},primary_location.source.id:{src_filter}"
+        if year_from:
+            flt += f",from_publication_date:{year_from}-01-01"
+        try:
+            resp = await client.get(
+                OpenAlexSearcher.BASE_URL,
+                params={"filter": flt, "per_page": min(per_query, 25),
+                        "sort": "cited_by_count:desc", "select": select},
+            )
+            resp.raise_for_status()
+            return [OpenAlexSearcher.to_paper(w) for w in resp.json().get("results", [])]
+        except Exception:  # noqa: BLE001
+            return []
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        results = await asyncio.gather(
+            *(_one(client, q) for q in queries[:8]), return_exceptions=True
+        )
+    out: list[Paper] = []
+    for r in results:
+        if isinstance(r, list):
+            out.extend(r)
+    return out
 
 
 def best_venue(work: dict) -> str:

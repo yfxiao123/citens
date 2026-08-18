@@ -520,7 +520,19 @@ def embed_pool(topic: str) -> int:
     return len(missing)
 
 
-def recall_from_pool(topic: str, queries: list[str], k: int) -> list[Paper]:
+def _norm_venue(venue: str) -> str:
+    from citens.ranking import _norm
+
+    return _norm(venue or "")
+
+
+def recall_from_pool(
+    topic: str,
+    queries: list[str],
+    k: int,
+    constraints=None,
+    venue_whitelist: set[str] | None = None,
+) -> list[Paper]:
     """Hybrid pre-recall: BM25 + vector (RRF-fused), top-k pool records.
 
     Lexical catches exact terminology (LOB, OFI), embeddings catch semantic
@@ -528,10 +540,24 @@ def recall_from_pool(topic: str, queries: list[str], k: int) -> list[Paper]:
     ranked lists without needing score calibration. Falls back to BM25-only
     when no embedding index/model is available; the rest of the pool stays
     a deep reservoir (nothing is deleted).
+
+    ``constraints`` (search.filters.RetrievalConstraints) applies the run's
+    clarification answers at recall time — a year window and, in strict mode,
+    the venue whitelist — so candidates can SATISFY the filter instead of
+    being killed by it (the "仅顶刊+近5年 -> 6 篇通过" failure mode).
     """
     from citens.grounding.retrieval import bm25_rank_texts, cosine, embed_texts
 
     pool = read_pool(topic)
+    if constraints is not None:
+        pool = [p for p in pool if constraints.matches_paper(p)]
+        if constraints.venue_strict and venue_whitelist:
+            # reviews stay citable even off-whitelist: they are the field's
+            # maps, and the writer only uses them as context anyway
+            pool = [
+                p for p in pool
+                if p.is_review or _norm_venue(p.venue) in venue_whitelist
+            ]
     if len(pool) <= k:
         return pool
     texts = [
