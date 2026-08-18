@@ -116,6 +116,10 @@ class StepClock:
 class RunOptions:
     max_results: int | None = None
     max_papers: int | None = None
+    # Supporting-reference layer size (None = settings default, 0 = off):
+    # filtered-relevant papers beyond the core cap join the bibliography as
+    # abstract-only citations instead of being thrown away.
+    support_papers: int | None = None
     sources: list[str] | None = None
     use_cache: bool = True
     # Seed the candidate pool from `citens collect`'s persistent literature
@@ -210,6 +214,7 @@ def _compose(
     label: str = "compose",
     chunk_store: ChunkStore | None = None,
     terminology: dict[str, str] | None = None,
+    supporting: list | None = None,
 ) -> ComposeResult:
     """organize -> synthesize -> write -> verify, persisting all artifacts.
 
@@ -218,9 +223,17 @@ def _compose(
     invoked with (queries, message) when verification finds unsupported claims
     that could be resolved by targeted retrieval (the caller decides whether
     to actually supplement).
+
+    ``supporting`` joins the bibliography beyond the deep-dive set: abstract-
+    only citations the writer may use for background/comparison claims (the
+    verifier checks them against the abstract like any other claim).
     """
     if clock is None:
         clock = StepClock()
+
+    core_ids = {p.id for p in extracted}
+    supporting = [p for p in (supporting or []) if p.id not in core_ids]
+    table_papers = list(extracted) + supporting
 
     def _recompute_precision() -> float:
         verifiable = [r for r in ver_results if r.verdict.value != "unverifiable"]
@@ -263,7 +276,10 @@ def _compose(
     # shared across compose rounds so fulltext fetch/parse happens once
     chunk_store = chunk_store or ChunkStore()
     chunk_store.build_from(extracted, fetch_full=fetch_fulltext, on_progress=_ground_progress)
-    table = CitationTable(extracted)
+    # supporting layer: abstract-only ground text (no fetch, no extract)
+    if supporting:
+        chunk_store.build_from(supporting, fetch_full=False)
+    table = CitationTable(table_papers)
     n_full = sum(
         1
         for p in extracted
@@ -275,6 +291,7 @@ def _compose(
         {
             "with_fulltext": n_full,
             "total": len(extracted),
+            "supporting": len(supporting),
             "papers": [
                 {
                     "index": i,
@@ -337,6 +354,7 @@ def _compose(
     body = write_review_body(
         extracted, themes, topic, synthesis=synthesis, on_step=_write_step,
         evidence_for=_evidence_for, terminology=terminology,
+        supporting=[(len(extracted) + j, p) for j, p in enumerate(supporting)],
     )
     review = body + f"\n## {localized_heading('refs')}\n\n" + table.references_md() + "\n"
     review_path = persistence.save_text(run_dir, "review.md", review)
@@ -346,10 +364,12 @@ def _compose(
 
     claims = parse_claims_from_review(review)
     persistence.save_step(run_dir, "07_claims", claims)
-    # citation coverage: which kept papers never got cited anywhere (breadth
-    # signal — pairs with the writer's cite-broadly rule and the health issue)
+    # citation coverage: which bibliography papers (core + supporting) never
+    # got cited anywhere (breadth signal — pairs with the writer's
+    # cite-broadly rule and the health issue below)
+    n_table = len(table_papers)
     cited_papers = {
-        i for c in claims for i in c.citation_indices if 0 <= i < len(extracted)
+        i for c in claims for i in c.citation_indices if 0 <= i < n_table
     }
     _emit(
         bus,
@@ -422,7 +442,7 @@ def _compose(
                     1 for r in ver_results if r.verdict.value == "unverifiable"
                 ),
                 "papers_cited": len(cited_papers),
-                "papers_total": len(extracted),
+                "papers_total": n_table,
                 "results": [r.model_dump() for r in ver_results],
             }
 
@@ -593,12 +613,12 @@ def _compose(
         health_report = check_health(synthesis, ver_results, absence_audit, theme_paper_counts)
         health_report["citation_coverage"] = {
             "cited": len(cited_papers),
-            "total": len(extracted),
+            "total": n_table,
         }
-        if len(extracted) >= 8 and len(cited_papers) < 0.7 * len(extracted):
+        if n_table >= 8 and len(cited_papers) < 0.7 * n_table:
             health_report.setdefault("issues", []).append(
-                f"thin_citation_coverage: only {len(cited_papers)}/{len(extracted)} "
-                "papers cited anywhere in the review"
+                f"thin_citation_coverage: only {len(cited_papers)}/{n_table} "
+                "bibliography papers cited anywhere in the review"
             )
         persistence.save_step(run_dir, "08_health", health_report)
         
@@ -711,6 +731,10 @@ async def run_pipeline_async(
     # domain-preferred source order (dedup keeps the first reporter of a
     # preprint/published pair — finance wants the journal record to win)
     options.sources = order_sources(options.sources, profile)
+
+    # supporting-reference layer: bound here (like profile) because the
+    # resume path skips the filter stage that fills it — empty is correct
+    supporting: list = []
 
     try:
         resumed = options.resume_dir is not None
@@ -946,11 +970,43 @@ async def run_pipeline_async(
             )
             # Save filter log with exclusion reasons
             persistence.save_step(run_dir, "03_filter_log", filter_log)
+            # supporting-reference layer: relevant papers beyond the core cap
+            # become abstract-only citations instead of being discarded —
+            # the bibliography no longer equals the deep-dive set
+            support_n = (
+                options.support_papers
+                if options.support_papers is not None
+                else settings.default_support_papers
+            )
+            supporting = []
+            if support_n and max_papers and len(scored) > max_papers:
+                supporting = [
+                    p
+                    for p in scored[max_papers:]
+                    if p.relevance_score >= 3 and len(p.abstract.strip()) >= 80
+                ][:support_n]
             if max_papers and len(scored) > max_papers:
                 scored = scored[:max_papers]
             meta.filtered_papers = len(scored)
-            runlog.snapshot("filter", papers=len(scored))
+            runlog.snapshot("filter", papers=len(scored), supporting=len(supporting))
             persistence.save_step(run_dir, "03_filtered", scored)
+            if supporting:
+                persistence.save_step(
+                    run_dir,
+                    "03d_supporting",
+                    [
+                        {"title": p.title[:80], "venue": p.venue,
+                         "citations": p.citation_count, "score": p.relevance_score}
+                        for p in supporting
+                    ],
+                )
+                _emit(
+                    bus,
+                    StepProgress(
+                        step="filter",
+                        message=f"另保留 {len(supporting)} 篇支持文献（仅摘要引用，充实参考文献）",
+                    ),
+                )
             hist = quartile_histogram(scored)
             hist_msg = " · ".join(f"{k}:{v}" for k, v in sorted(hist.items()))
             _emit(bus, StepCompleted(step="filter", message=f"{len(scored)} 篇通过（{hist_msg}）"))
@@ -1067,6 +1123,7 @@ async def run_pipeline_async(
             label="compose1",
             chunk_store=shared_store,
             terminology=profile.terminology if profile is not None else None,
+            supporting=supporting,
         )
         meta.themes = [t.name for t in result.themes.themes]
 
@@ -1174,6 +1231,7 @@ async def run_pipeline_async(
                     label=f"compose{rounds_run + 1}",
                     chunk_store=shared_store,
                     terminology=profile.terminology if profile is not None else None,
+                    supporting=supporting,
                 )
                 meta.themes = [t.name for t in result.themes.themes]
                 _emit(

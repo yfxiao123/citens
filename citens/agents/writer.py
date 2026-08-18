@@ -15,7 +15,7 @@ import re
 
 from citens.config import settings
 from citens.llm import chat, run_concurrent
-from citens.models import ExtractedPaper, SynthesisResult, ThemeStructure
+from citens.models import ExtractedPaper, Paper, SynthesisResult, ThemeStructure
 
 INTRO_PROMPT = """You are an academic survey writer. Write the "Introduction" (500-800 words) for \
 the following research topic.
@@ -180,6 +180,33 @@ def _papers_block(indexed: list[tuple[int, ExtractedPaper]]) -> str:
     return "".join(parts)
 
 
+def _supporting_block(supporting: list[tuple[int, Paper]] | None) -> str:
+    """Render the abstract-only supporting layer for the writer's prompts.
+
+    These papers are real bibliography entries (verifiable against their
+    abstracts) but carry no deep extraction — the writer may cite them for
+    background, context, and comparisons, never for primary method/result
+    claims. This is what lets a review cite far more than it dissects.
+    """
+    if not supporting:
+        return ""
+    lines = [
+        "\n支持文献 / Supporting references (abstract-only; cite with their [index] "
+        "for BACKGROUND, CONTEXT or COMPARISON claims — NOT for primary claims "
+        "about methods, findings or magnitudes):\n"
+    ]
+    for idx, p in supporting[:18]:
+        abstract = " ".join(p.abstract.split())[:180]
+        venue = p.venue or ""
+        year = p.year or ""
+        lines.append(
+            f"[{idx}] {p.title}"
+            + (f" — {venue} ({year})" if venue or year else "")
+            + (f": {abstract}…" if abstract else "\n")
+        )
+    return "\n".join(lines) + "\n"
+
+
 def write_review_body(
     papers: list[ExtractedPaper],
     themes: ThemeStructure,
@@ -189,6 +216,7 @@ def write_review_body(
     on_step=None,
     evidence_for=None,
     terminology: dict[str, str] | None = None,
+    supporting: list[tuple[int, Paper]] | None = None,
 ) -> str:
     """Generate the review BODY (title + intro + theme sections + critical
     synthesis + conclusion).
@@ -228,6 +256,7 @@ def write_review_body(
             "\nTERMINOLOGY LEDGER (use these exact renderings, consistently, "
             f"on first and later occurrence): {pairs}\n"
         )
+    support_block = _supporting_block(supporting)
     jobs: list[dict] = [
         {"kind": "intro", "label": "intro",
          "system": INTRO_PROMPT + "\n" + lang_line + term_line,
@@ -247,6 +276,7 @@ def write_review_body(
             f"逻辑关系 / Relations: {theme.logical_relations}\n"
             f"{synth_context}"
             f"包含论文 / Papers (index in [brackets]):{_papers_block(indexed)}\n"
+            f"{support_block}"
         )
         system_prompt = SECTION_PROMPT + "\n" + lang_line + term_line
         if evidence_for is not None:
@@ -275,6 +305,7 @@ def write_review_body(
             f"研究主题 / Topic: {topic}\n"
             f"共识 / Consensus:\n" + "".join(f"- {c}\n" for c in synthesis.consensus)
             + "矛盾 / Contradictions:\n" + "".join(f"- {c}\n" for c in synthesis.contradictions)
+            + support_block
         )
         jobs.append(
             {"kind": "crit", "label": "critical-synthesis",
@@ -293,6 +324,7 @@ def write_review_body(
              f"研究主题 / Topic: {topic}\n\n主题结构 / Themes:\n{summary}\n{gaps}\n"
              f"可引用论文 / Citable papers (use EXACT [index]):"
              f"{_papers_block(list(enumerate(papers)))}"
+             f"{support_block}"
          ),
          "budget": 4096}
     )

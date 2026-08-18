@@ -413,3 +413,71 @@ def test_default_max_papers_is_20():
 
     # _env_file=None: ignore the user's .env so the code default is what we test
     assert Settings(_env_file=None).default_max_papers == 20
+
+
+# --- supporting-reference layer ------------------------------------------
+
+
+def test_supporting_block_renders_indices_and_guardrail():
+    from citens.agents.writer import _supporting_block
+
+    supp = [(7, _p("Context survey of the field", venue="Journal of Finance",
+                   abstract="A broad survey " * 20))]
+    block = _supporting_block(supp)
+    assert "[7] Context survey of the field" in block
+    assert "Journal of Finance (2020)" in block
+    assert "NOT for primary claims" in block  # guardrail travels with the block
+    assert _supporting_block(None) == ""
+
+
+def test_writer_passes_supporting_into_prompts(monkeypatch):
+    from citens.agents import writer as writer_mod
+    from citens.config import settings
+    from citens.models import ExtractedPaper, ThemeInfo, ThemeStructure
+
+    seen: list[str] = []
+
+    def fake_chat(system, user, max_tokens=0, strong=False):
+        seen.append(user)
+        return "正文一句。" + "x" * 200
+
+    monkeypatch.setattr(writer_mod, "chat", fake_chat)
+    monkeypatch.setattr(settings, "review_language", "zh")
+    papers = [
+        ExtractedPaper(title="core", authors=["A"], year=2020, abstract="a",
+                       research_question="q", methodology="m", key_findings=["f"],
+                       limitations=["l"]),
+    ]
+    themes = ThemeStructure(themes=[ThemeInfo(name="主题", description="d",
+                                              paper_indices=[0])])
+    writer_mod.write_review_body(
+        papers, themes, "topic",
+        supporting=[(1, _p("Supporting context paper",
+                           abstract="supporting abstract " * 10))],
+    )
+    # theme + conclusion prompts carry the supporting entry with its index
+    assert any("[1] Supporting context paper" in u for u in seen)
+
+
+def test_citation_table_includes_supporting_after_core():
+    core = [_p("Core one")]
+    supp = [_p("Supporting one"), _p("Supporting two")]
+    table = CitationTable(core + supp)
+    assert table.paper_id(0) == core[0].id
+    assert table.paper_id(1) == supp[0].id
+    assert len(table) == 3
+
+
+def test_chunk_store_abstract_only_for_supporting():
+    store = ChunkStore()
+    p = _p("Supporting abstract paper", abstract="a real abstract here")
+    store.build_from([p], fetch_full=False)
+    chunks = store.chunks_for(p.id)
+    assert len(chunks) == 1 and chunks[0].kind.value == "abstract"
+    assert store.has(p.id)  # verifier can check claims against it
+
+
+def test_default_support_papers_is_15():
+    from citens.config import Settings
+
+    assert Settings(_env_file=None).default_support_papers == 15

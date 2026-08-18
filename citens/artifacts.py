@@ -113,6 +113,7 @@ def write_review_browser(run_dir: str) -> str | None:
         "papers": papers,
         "papers_cited": ver.get("papers_cited"),
         "papers_total": ver.get("papers_total"),
+        "supporting": ground.get("supporting", 0),
         "leni": {k: leni.get(k) for k in ("sampled", "downgraded", "agreement_rate")},
         "review_md": review_md,
         "bib_uri": _b64_data_uri(bib, "text/plain") if bib else "",
@@ -290,7 +291,9 @@ for (const p of DATA.papers) {
 }
 if (DATA.papers.length)
   papers.insertAdjacentHTML("afterbegin", '<div class="meta">全文 ' + ft + "/" +
-    DATA.papers.length + " 篇</div>");
+    DATA.papers.length + " 篇" +
+    (DATA.supporting ? " · 支持文献（仅摘要）" + DATA.supporting + " 篇" : "") +
+    "</div>");
 
 const dl = document.getElementById("dl");
 dl.innerHTML = "";

@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     # --- Defaults for a run (overridable via CLI / RunOptions) ---------------
     default_max_results: int = 60  # candidate pool target before filtering
     default_max_papers: int = 20  # final papers kept after filtering (0 = no cap)
+    # Supporting-reference layer: filtered-relevant papers beyond the core cap
+    # that join the bibliography as abstract-only citations (background /
+    # comparison cites). This is what separates "papers deep-read" from
+    # "papers cited" — a real survey cites far more than it dissects.
+    default_support_papers: int = 15
     enrich_abstracts: bool = True  # cross-source DOI enrichment for missing abstracts
     output_dir: str = "runs"
     # Persistent literature pools built by `citens collect` (JSONL per topic).

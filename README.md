@@ -65,6 +65,8 @@ runs/<topic>-<timestamp>/
 
 References render as complete APA-style entries — full author list, `*venue*`, volume(issue), pages, DOI (journal/volume/issue/pages are harvested from OpenAlex `biblio` / Crossref and backfilled into the pool). `verification.json` also reports **citation coverage** (`papers_cited`/`papers_total`); below 70% the health report flags `thin_citation_coverage`, and the writer is under a cite-broadly rule within every theme.
 
+**Two citation tiers.** A survey cites far more than it dissects, so the bibliography is not capped at the deep-dive set: papers that pass the relevance filter but fall beyond `-n` join as a *supporting layer* (`--support-papers`, default 15) — abstract-only bibliography entries the writer may cite for background, context, and comparisons (never primary method/result claims; the verifier checks those cites against the abstracts like any other). Core papers get full extraction and full-text grounding; supporting papers cost nothing beyond a reference entry. `-n 20` therefore yields up to ~35 references.
+
 ## Quick start
 
 ```bash

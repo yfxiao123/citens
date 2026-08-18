@@ -82,6 +82,11 @@ def run(
     no_fulltext: bool = typer.Option(
         False, "--no-fulltext", help="不获取全文（仅用摘要溯源，精度较低）"
     ),
+    support_papers: int | None = typer.Option(
+        None, "--support-papers",
+        help="支持文献层数量: 筛选通过但未进 -n 的论文按摘要并入参考文献"
+             "（默认 15，0 关闭）——精读 n 篇、引用 n+support 篇",
+    ),
     no_clarify: bool = typer.Option(
         False, "--no-clarify", help="跳过跑前澄清问题（直接运行）"
     ),
@@ -135,6 +140,7 @@ def run(
         use_pool=not no_pool,
         profile=profile,
         fetch_fulltext=not no_fulltext,
+        support_papers=support_papers,
         mode=run_mode,
     )
     # pre-run clarification (interactive) — shape the search before it starts
