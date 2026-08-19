@@ -87,6 +87,57 @@ from citens.search import (
 from citens.search.seeds import resolve_seeds
 from citens.search.snowball import snowball
 
+_NUMBER_DENSITY_RE = None  # compiled lazily; keep module import cheap
+
+
+def _number_density(text: str) -> int:
+    """Count effect-size-shaped tokens (37%, 0.92, 1.5M-style decimals)."""
+    global _NUMBER_DENSITY_RE
+    if _NUMBER_DENSITY_RE is None:
+        import re
+
+        _NUMBER_DENSITY_RE = re.compile(r"\d+(?:\.\d+)?\s*%|\d+\.\d+")
+    return len(_NUMBER_DENSITY_RE.findall(text))
+
+
+def number_dense_excerpts(
+    paper_indices: list[int],
+    extracted: list[ExtractedPaper],
+    chunk_store: ChunkStore,
+    *,
+    query: str,
+    per_paper: int = 3,
+    excerpt_chars: int = 900,
+    budget: int = 7500,
+) -> str:
+    """Full-text excerpts for the writer, biased toward number-bearing chunks.
+
+    Plain BM25 top-k favors intro/method prose; effect sizes live in results
+    sections and tables deeper in the paper. Candidates are re-ranked with a
+    number-density boost (BM25 order preserved within tiers) before the top
+    `per_paper` chunks are excerpted — the writer's EVIDENCE RULE then carries
+    the numbers into the review body.
+    """
+    from citens.models import ChunkKind
+
+    parts: list[str] = []
+    for idx in paper_indices:
+        if not 0 <= idx < len(extracted):
+            continue
+        p = extracted[idx]
+        candidates = [
+            c for c in chunk_store.retrieve(p.id, query, k=per_paper * 2)
+            if c.kind == ChunkKind.FULLTEXT
+        ]
+        ranked = sorted(candidates, key=lambda c: -_number_density(c.text))
+        for c in ranked[:per_paper]:
+            excerpt = c.text[:excerpt_chars]
+            parts.append(f"[{idx}] {p.title[:60]} — {excerpt}")
+            budget -= len(excerpt)
+            if budget <= 0:
+                return "\n\n".join(parts)
+    return "\n\n".join(parts)
+
 
 class StepClock:
     """Ordered wall-time marks; a stage's duration is the delta to the next mark.
@@ -365,6 +416,30 @@ def _gate_supplement_papers(
     )
 
 
+def search_summary_text(
+    sources: list | None,
+    n_candidates: int,
+    n_core: int,
+    n_support: int,
+    date_str: str = "",
+) -> str:
+    """The review's own retrieval-methodology statement — every number here is
+    measured by this run (candidates screened, papers included), which is what
+    the introduction reports PRISMA-style."""
+    import datetime as _dt
+
+    src = "、".join(sources) if sources else "arXiv、Semantic Scholar、OpenAlex、Crossref"
+    parts = [
+        f"检索源：{src}",
+        f"共获得 {n_candidates} 篇候选论文",
+        f"经相关性筛选与复合排序（相关性×引用×期刊分区）纳入核心文献 {n_core} 篇",
+    ]
+    if n_support:
+        parts.append(f"另保留 {n_support} 篇支持文献（仅摘要引用）")
+    parts.append(f"检索日期：{date_str or _dt.date.today().isoformat()}")
+    return "；".join(parts) + "。"
+
+
 def _compose(
     extracted: list[ExtractedPaper],
     topic: str,
@@ -380,6 +455,8 @@ def _compose(
     supporting: list | None = None,
     facets: list | None = None,
     verdict_cache: dict | None = None,
+    verdict_fuzzy: dict | None = None,
+    n_candidates: int = 0,
 ) -> ComposeResult:
     """organize -> synthesize -> write -> verify, persisting all artifacts.
 
@@ -494,27 +571,10 @@ def _compose(
 
     def _evidence_for(theme) -> str:
         """Full-text excerpts for a theme's papers (write-time grounding)."""
-        from citens.models import ChunkKind
-
-        parts: list[str] = []
-        budget = 6000  # chars per theme — enough signal, bounded prompt cost
-        for idx in theme.paper_indices:
-            if not 0 <= idx < len(extracted):
-                continue
-            p = extracted[idx]
-            chunks = [
-                c for c in chunk_store.retrieve(
-                    p.id, f"{theme.name} {theme.description}", k=2
-                )
-                if c.kind == ChunkKind.FULLTEXT
-            ]
-            for c in chunks:
-                excerpt = c.text[:800]
-                parts.append(f"[{idx}] {p.title[:60]} — {excerpt}")
-                budget -= len(excerpt)
-                if budget <= 0:
-                    return "\n\n".join(parts)
-        return "\n\n".join(parts)
+        return number_dense_excerpts(
+            theme.paper_indices, extracted, chunk_store,
+            query=f"{theme.name} {theme.description}",
+        )
 
     # coverage honesty: hard numbers from retrieval feed the writer's
     # coverage paragraph (thin facets, thin themes, blind papers)
@@ -522,11 +582,15 @@ def _compose(
     n_blind_now = sum(1 for p in extracted if not (p.abstract or "").strip())
     cov_note = coverage_note_text(cov_report, themes.themes, n_blind_now)
 
+    ssum = search_summary_text(
+        None, n_candidates, len(extracted), len(supporting or [])
+    ) if n_candidates else ""
     body = write_review_body(
         extracted, themes, topic, synthesis=synthesis, on_step=_write_step,
         evidence_for=_evidence_for, terminology=terminology,
         supporting=[(len(extracted) + j, p) for j, p in enumerate(supporting)],
         coverage_note=cov_note,
+        search_summary=ssum,
     )
     # hard citation-stacking cap: the prompt softens, this enforces (keep the
     # most BM25-relevant cites per overloaded sentence, strip the rest)
@@ -609,7 +673,7 @@ def _compose(
 
         ver_results, precision = verify_claims(
             claims, table, chunk_store, on_progress=_verify_progress,
-            verdict_cache=verdict_cache,
+            verdict_cache=verdict_cache, verdict_fuzzy=verdict_fuzzy,
         )
         verifier_precision = precision
 
@@ -744,6 +808,14 @@ def _compose(
             for i, rw in sorted(rewrites.items()):
                 old_text = claims[i].text
                 if old_text in review:
+                    # rewritten text re-enters the same stacking discipline as
+                    # the first draft (the rewriter's multi-sentence output can
+                    # otherwise re-stack citations the post-write lint removed)
+                    new_text, rw_lint = prune_citation_stacking(
+                        rw["new_text"], table_papers
+                    )
+                    if rw_lint:
+                        rw = {**rw, "new_text": new_text}
                     review = review.replace(old_text, rw["new_text"], 1)
                     claims[i].text = rw["new_text"]
                     ver_results[i].claim_text = rw["new_text"]
@@ -758,7 +830,8 @@ def _compose(
             if applied:
                 sub_claims = [claims[a["claim_index"]] for a in applied]
                 sub_results, _ = verify_claims(
-                    sub_claims, table, chunk_store, verdict_cache=verdict_cache
+                    sub_claims, table, chunk_store, verdict_cache=verdict_cache,
+                    verdict_fuzzy=verdict_fuzzy,
                 )
                 by_text = {r.claim_text: r for r in sub_results}
                 fixed = 0
@@ -996,6 +1069,9 @@ async def run_pipeline_async(
     # resume path skips the planner that fills facets — empty is correct)
     facets: list = []
     verdict_cache: dict = {}
+    # (normalized text, citations) -> (grounding sig, verdict): lets the
+    # post-supplement recompose reuse verdicts for reworded-but-same claims
+    verdict_fuzzy: dict = {}
     search_health: dict[str, str] = {}
 
     try:
@@ -1492,6 +1568,8 @@ async def run_pipeline_async(
             supporting=supporting,
             facets=facets,
             verdict_cache=verdict_cache,
+            verdict_fuzzy=verdict_fuzzy,
+            n_candidates=meta.total_papers,
         )
         meta.themes = [t.name for t in result.themes.themes]
 
@@ -1500,7 +1578,9 @@ async def run_pipeline_async(
         if options.allow_supplement:
             clock.mark("reflect")
             _emit(bus, StepStarted(step="reflect", title="反思与补充"))
-            max_rounds = 2 if options.mode == RunMode.DEEP_REVIEW else 1
+            # configurable ceiling (deep used to hardcode 2 — round 2 alone
+            # cost ~37 min in the 08-19 run; see settings.reflect_max_rounds)
+            max_rounds = max(1, settings.reflect_max_rounds)
             rounds_run = 0
             saturated = False
             while rounds_run < max_rounds:
@@ -1627,6 +1707,8 @@ async def run_pipeline_async(
                     supporting=supporting,
                     facets=facets,
                     verdict_cache=verdict_cache,
+                    verdict_fuzzy=verdict_fuzzy,
+                    n_candidates=meta.total_papers,
                 )
                 meta.themes = [t.name for t in result.themes.themes]
                 _emit(

@@ -39,7 +39,7 @@ class LLMBackend(Protocol):
         temperature: float = 0.3,
         max_tokens: int | None = None,
         response_json: bool = False,
-        thinking: bool = True,
+        thinking: bool | str = True,
     ) -> str: ...
 
 
@@ -51,7 +51,7 @@ def build_completion_kwargs(
     temperature: float,
     max_tokens: int,
     response_json: bool,
-    thinking: bool = True,
+    thinking: bool | str = True,
 ) -> dict[str, Any]:
     """Chat-completions payload shared by the OpenAI-compatible backends.
 
@@ -73,8 +73,12 @@ def build_completion_kwargs(
     }
     if response_json:
         kwargs["response_format"] = {"type": "json_object"}
-    if not thinking:
+    if thinking is False or thinking == "none":
         kwargs["extra_body"] = {"reasoning_effort": "none"}
+    elif isinstance(thinking, str):
+        # named effort ("low"/"medium"/...) — hybrid models budget a short
+        # deliberation instead of the default full one
+        kwargs["extra_body"] = {"reasoning_effort": thinking}
     return kwargs
 
 
@@ -107,7 +111,7 @@ class OpenAICompatBackend:
         temperature: float = 0.3,
         max_tokens: int | None = None,
         response_json: bool = False,
-        thinking: bool = True,
+        thinking: bool | str = True,
     ) -> str:
         kwargs = build_completion_kwargs(
             self._model,
@@ -232,7 +236,7 @@ def chat(
     max_tokens: int | None = None,
     response_json: bool = False,
     strong: bool = False,
-    thinking: bool = True,
+    thinking: bool | str = True,
 ) -> str:
     model = strong_model() if strong else settings.llm_model
     budget = max_tokens or settings.llm_max_tokens_default
@@ -268,7 +272,7 @@ def chat_json(
     temperature: float = 0.3,
     max_tokens: int | None = None,
     strong: bool = False,
-    thinking: bool = True,
+    thinking: bool | str = True,
 ) -> dict:
     """Call the LLM and parse a JSON response.
 

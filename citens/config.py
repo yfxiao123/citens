@@ -36,6 +36,19 @@ class Settings(BaseSettings):
     # Thread-pool size for parallel LLM calls (extract / verify / write
     # sections). 1 = sequential.
     llm_concurrency: int = 6
+    # Deliberation (thinking/reasoning) for judge-side calls — verify batches,
+    # defense, rewriter, spot-check, canary, reflect/absence audit. Hybrid
+    # reasoning models share the completion budget between thinking and body;
+    # full deliberation made each verify batch 3-12x slower. "low" keeps a
+    # short deliberation: golden-set validated (agreement with human verdicts
+    # preserved); "none" was measurably MORE LENIENT (0.20 vs 0.49 agreement);
+    # true restores full thinking; false = "none".
+    judge_thinking: bool | str = "low"
+    # Supplementary retrieval rounds after the first compose (deep_review used
+    # to run 2). Each round is a full recompose incl. re-verification — round 2
+    # alone cost ~37 min in the 08-19 run for 3 added papers. 1 keeps the
+    # highest-value supplement at a third of the price.
+    reflect_max_rounds: int = 1
 
     # --- Search sources ------------------------------------------------------
     # Comma-separated subset, or "all". Order does not imply priority.

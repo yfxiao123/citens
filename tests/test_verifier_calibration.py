@@ -240,3 +240,69 @@ def test_golden_calibration_set_is_intact():
     downgrades = [c for c in data["claims"] if c["machine"] == "partial"
                   and c["human"] == "unsupported"]
     assert len(downgrades) == 7
+
+
+def test_fuzzy_verdict_reuse_and_grounding_invalidation():
+    # a reworded restatement with the same citations reuses the earlier
+    # verdict; the same restatement against CHANGED ground text (the paper
+    # gained fulltext between rounds) must NOT reuse the stale verdict
+    from citens.agents.verifier import _fuzzy_lookup, _norm_claim_text
+    from citens.grounding.chunkstore import ChunkStore
+    from citens.grounding.citations import CitationTable
+    from citens.models import Chunk, ChunkKind, Claim, Paper, Verdict, VerificationResult
+
+    paper = Paper(id="p1", title="T", abstract="abs", year=2024)
+    table = CitationTable([paper])
+    store = ChunkStore()
+    pid = table.paper_id(0)  # Paper regenerates its id — key by the table's
+    store._by_paper[pid] = [
+        Chunk(paper_id=pid, chunk_id="abs", kind=ChunkKind.ABSTRACT, text="abs")
+    ]
+    claim = Claim(text="TALLRec仅需128条样本即可改善推荐性能", citation_indices=[0])
+    result = VerificationResult(
+        claim_text=claim.text, verdict=Verdict.SUPPORTED,
+        citation_indices=[0], note="",
+    )
+
+    def sig():
+        from citens.agents.verifier import _grounding_sig
+        return _grounding_sig(claim, table, store)
+
+    fuzzy = {(_norm_claim_text(claim.text), (0,)): (sig(), result)}
+
+    # exact normalized restatement (whitespace/punct noise) -> reuse
+    hit = _fuzzy_lookup(
+        Claim(text="TALLRec 仅需 128 条样本，即可改善推荐性能。", citation_indices=[0]),
+        table, store, fuzzy,
+    )
+    assert hit is not None and hit.verdict == Verdict.SUPPORTED
+
+    # different citations -> no reuse
+    miss = _fuzzy_lookup(
+        Claim(text=claim.text, citation_indices=[0, 1]), table, store, fuzzy
+    )
+    assert miss is None
+
+    # same claim, but the paper's ground text changed -> no reuse
+    store._by_paper[pid] = [
+        Chunk(paper_id=pid, chunk_id="abs", kind=ChunkKind.ABSTRACT, text="abs"),
+        Chunk(paper_id=pid, chunk_id="ft", kind=ChunkKind.FULLTEXT,
+              text="full text arrived between rounds " * 5),
+    ]
+    miss2 = _fuzzy_lookup(claim, table, store, fuzzy)
+    assert miss2 is None
+
+
+def test_reasoning_effort_levels_map_to_payload():
+    # "low" keeps a short deliberation; False/"none" kills it entirely;
+    # True leaves the provider default (no extra_body)
+    from citens.llm import build_completion_kwargs
+
+    kw = dict(system_prompt="s", user_prompt="u", temperature=0.3,
+              max_tokens=128, response_json=False)
+    low = build_completion_kwargs("m", thinking="low", **kw)
+    assert low.get("extra_body") == {"reasoning_effort": "low"}
+    none_off = build_completion_kwargs("m", thinking=False, **kw)
+    assert none_off.get("extra_body") == {"reasoning_effort": "none"}
+    default = build_completion_kwargs("m", thinking=True, **kw)
+    assert "extra_body" not in default

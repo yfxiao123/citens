@@ -12,6 +12,7 @@ actual retrieval/extraction lives in the orchestration layer.
 
 from __future__ import annotations
 
+from citens.config import settings
 from citens.llm import chat_json
 from citens.models import SynthesisResult
 
@@ -55,7 +56,8 @@ def reflect(
         "Decide whether a supplementary retrieval round is warranted."
     )
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048,
+                              thinking=settings.judge_thinking)
     except Exception:  # noqa: BLE001
         print("    reflect failed: unparseable LLM JSON")
         result = {}

@@ -59,7 +59,8 @@ def organize_themes(papers: list[ExtractedPaper], topic: str) -> ThemeStructure:
         + _localization_line()
     )
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=8192, strong=True)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=8192, strong=True,
+                           thinking=settings.judge_thinking)
         themes = [ThemeInfo(**t) for t in result.get("themes", [])]
     except Exception as e:  # noqa: BLE001
         print(f"    [organize] LLM theme organization failed ({e}); "

@@ -133,6 +133,7 @@ class ScoredPaper(Paper):
 class ExtractedPaper(ScoredPaper):
     """A paper enriched with structured, abstract-grounded fields."""
 
+    system_name: str = ""  # named framework/model ("TALLRec", "FactorVAE", ...)
     research_question: str = ""
     methodology: str = ""
     key_findings: list[str] = Field(default_factory=list)

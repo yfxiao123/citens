@@ -18,60 +18,53 @@ from citens.config import settings
 from citens.llm import chat, run_concurrent
 from citens.models import ExtractedPaper, Paper, SynthesisResult, ThemeStructure
 
-INTRO_PROMPT = """You are an academic survey writer. Write the "Introduction" (500-800 words) for \
+INTRO_PROMPT = """You are an academic survey writer. Write the "Introduction" (for Chinese \
+output: 900-1400 characters; English: 600-900 words) for \
 the following research topic.
 1. Establish background and significance.
 2. Surface the open problems.
 3. State the review's purpose and structure.
 4. Refer to the survey as "this review", never "this paper"/"本研究".
-5. Fluent, scholarly prose."""
+5. If a SEARCH METHODOLOGY block with real funnel numbers is provided, report it in \
+the introduction's closing paragraph (检索源、候选数、纳入数): these are measured facts \
+of this review's own retrieval — state them as the review's methodology, PRISMA-style.
+6. Fluent, scholarly prose."""
 
-SECTION_PROMPT = """You are an academic survey writer. Using the theme info and paper list below, \
-write this theme section (600-900 words).
-1. A review is NOT a survey list. Never write "Author A reported X. Author B reported Y." \
-sequences — organize the section by mechanism / method / finding and cite papers INSIDE the \
-synthesis, letting each paragraph advance one point of the argument.
-2. Analyze inter-paper relations (agreement, contradiction, evolution, complementarity). Where the \
-CROSS-PAPER SYNTHESIS notes consensus or contradictions, foreground them and argue a position.
-3. Use connectives that signal logical relation — "in contrast", "building on this", \
-"the remaining disagreement is", "this contrast persists because ..." — and avoid contentless \
-"furthermore"/"additionally" chains.
-4. **Cite BROADLY within the theme**: draw on every listed paper that bears on the \
-argument — a section that cites only two or three of its listed papers is incomplete. \
-Papers not yet cited anywhere should surface where they genuinely fit.
-5. **Cite a paper by writing its index in square brackets, e.g. [0] or [3].** Use the EXACT index \
-shown before each paper below. A sentence making a claim about a paper MUST carry its [index].
-6. **Ground every cited claim in what the paper's abstract actually says.** Do NOT invent specifics \
-(methods, numbers, mechanisms) the abstract does not state. A paper's TITLE looking related is not \
-evidence — never state specifics a title alone suggests. When the abstract is thin, make the \
-claim appropriately general rather than fabricating detail. Prefer fewer, defensible claims over \
-many speculative ones.
-7. **NO-ABSTRACT papers**: a paper marked "无摘要 / NO ABSTRACT" has no ground text. Cite it at \
-most for title-level bibliographic context ("related work includes [4]"). NEVER describe its \
-methods, findings, or design — your own memory of a paper is NOT a source, and specifics about an \
-unseen paper cannot be verified and will be flagged as unsupported.
-8. **Keep YOUR argument outside the citation brackets.** [n] marks only what the cited source \
-itself supports. Interpretive or synthesis sentences of your own ("开创了范式", "the field's \
-central question has shifted", "this answers a different-level question") must stand WITHOUT a \
-citation rather than borrow one. Every [n] you do attach must back the specific statement it is \
-attached to — and AT MOST 3 citation markers per sentence (a 4th only when each demonstrably \
-backs a distinct part). NEVER stack 5+ citations on one sentence: if several papers matter, \
-split the sentence or name only the load-bearing sources.
-9. Do NOT write any heading line — start directly with prose.
-10. Fluent, scholarly prose."""
+SECTION_PROMPT = """You are an academic survey writer. Using the theme info and paper list below, write this theme section (for Chinese output: 1500-2200 characters; English: 1000-1400 words).
+
+STRUCTURE — unfold the literature, do not compress it:
+- Opening paragraph (定位段): where this theme sits in the field and the organizing axis you will follow (mechanism / method family / evolution).
+- 2-4 argument paragraphs: each advances ONE point and DEVELOPS its representative works (1-3 papers per paragraph) in depth — for each: motivation -> method mechanism (specific enough to retell: model class, data structure, key design) -> evidence (use the abstract's stated numbers, datasets, sample sizes whenever present) -> significance (what it established, what it leaves open).
+- Closing paragraph (收束段): one-sentence synthesis of the theme's evolution logic and the hinge to the next theme.
+
+RULES:
+1. A review is NOT a survey list. Never write "Author A reported X. Author B reported Y." sequences — organize by mechanism / method / finding and cite papers INSIDE the synthesis.
+2. Analyze inter-paper relations (agreement, contradiction, evolution, complementarity). Where the CROSS-PAPER SYNTHESIS notes consensus or contradictions, foreground them and argue a position.
+3. NAMED SYSTEMS: use the 系统名 field — first mention as "作者等人[n]提出的 X"; afterwards refer to it as X. Named systems make a review read as a map of the field; bare indices read as a list.
+4. **Cite BROADLY within the theme**: draw on every listed paper that bears on the argument — a section that cites only two or three of its listed papers is incomplete.
+5. **Cite a paper by writing its index in square brackets, e.g. [0] or [3].** Use the EXACT index shown before each paper below. A sentence making a claim about a paper MUST carry its [index].
+6. **Ground every cited claim in what the paper's abstract actually says.** Do NOT invent specifics (methods, numbers, mechanisms) the abstract does not state. When the abstract carries numbers, CARRY THEM INTO THE PROSE — a quantitative result must not be flattened into "显著提升" (name the metric and the magnitude).
+7. **NO-ABSTRACT papers**: a paper marked "无摘要 / NO ABSTRACT" has no ground text. Cite it at most for title-level bibliographic context. NEVER describe its methods, findings, or design.
+8. **Keep YOUR argument outside the citation brackets.** [n] marks only what the cited source itself supports; interpretive sentences of your own stand WITHOUT a citation. AT MOST 3 citation markers per sentence (a 4th only when each demonstrably backs a distinct part); NEVER 5+.
+9. DENSITY: every paragraph must carry concrete information the previous paragraphs did not (机制、数字、对比、数据集). No filler, no pure-transition paragraphs, no restating the theme description.
+10. Discursive academic narrative is ENCOURAGED where it earns its place — "从X到Y的演进"、"这一发现的意义在于"、"与之相对"、"值得注意的是" (colloquial/essayistic flourishes remain banned).
+11. Do NOT write any heading line — start directly with prose.
+12. Fluent, scholarly prose."""
 
 CRIT_SYNTH_PROMPT = """You are an academic survey writer. Write a "Critical Synthesis" section \
-(400-700 words) that takes a position across the whole literature.
+(for Chinese output: 900-1300 characters; English: 600-900 words) that takes a position across \
+the whole literature.
 Use the provided cross-paper consensus and contradictions. Argue, do not merely list — \
 a review may take a view, but it must SHOW its reasoning, not assert it. Where the evidence \
 conflicts, map the disagreement (who claims what, on which data/method) instead of averaging it away.
+Use named systems (系统名) where available — "作者等人[n]提出的 X" on first mention, X after.
 Cite papers by [index], and keep claims grounded in what those papers' abstracts support. Your own \
 argument and framing stand WITHOUT a citation — [n] marks only what the cited source itself says, \
 and every [n] must back the specific statement it is attached to.
 Do NOT write a heading line. Fluent, scholarly prose."""
 
-CONCLUSION_PROMPT = """You are an academic survey writer. Write "Conclusion & Outlook" (400-600 \
-words) for the topic.
+CONCLUSION_PROMPT = """You are an academic survey writer. Write "Conclusion & Outlook" (for \
+Chinese output: 900-1300 characters; English: 600-900 words) for the topic.
 1. Close with a USABLE MAP of the field, not a replay of the sections: what is settled, \
 where the live disagreements stand, and which open questions are most worth attacking next \
 (anchor them in the listed research gaps where possible).
@@ -81,6 +74,21 @@ authors, or numbering not in the list — a conclusion citing unknown work is wo
 only for claims that paper's abstract supports; your own outlook and framing need no citation.
 4. Do NOT write any heading, bold title, or references list.
 5. Fluent, scholarly prose."""
+
+ABSTRACT_PROMPT = """You are an academic survey writer. Write the structured ABSTRACT and \
+KEYWORDS for the FINISHED review text provided below (do not rewrite the review).
+
+- Abstract (Chinese output: 280-380 characters; English: 180-240 words), structured as: \
+background (1 sentence) -> scope and method (dimensions organized, number of papers if the \
+review states it) -> main findings along the review's OWN argument (2-3 sentences) -> the \
+review's position and outlook (1 sentence).
+- Keywords: 5-6 terms, separated by "；", most specific first.
+- State ONLY what the review below actually says — no new claims, NO [n] citation markers, \
+no numbers the review does not contain.
+
+Output format (exactly this shape, no headings of your own):
+摘要：<abstract text>
+关键词：<k1>；<k2>；<k3>；<k4>；<k5>"""
 
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
 _BOLD_TITLE_RE = re.compile(r"^\s{0,3}\*\*[^*\n]+\*\*\s*$")
@@ -188,10 +196,14 @@ def _chat_section(system: str, user: str, max_tokens: int, label: str = "") -> s
     """chat() with writer-grade retries: reasoning models sometimes return an
     empty body (thinking ate the budget) or truncate mid-sentence.
 
-    Ladder: normal budget → double budget → double budget WITHOUT thinking
-    (a complete section without deliberation beats no section — observed
-    live when a provider spell returned empty for every concurrent section).
-    A short pause between attempts also gives a throttling provider room.
+    Ladder: normal budget WITHOUT thinking → double budget without thinking →
+    double budget WITH thinking as the last resort. No-thinking goes first:
+    hybrid models share the completion budget between deliberation and body,
+    and with large evidence prompts the thinking prefix is exactly what
+    starved the body (the 08-19 run: 9 sections came back empty on the
+    thinking attempt and were rescued by the no-thinking retry — so skip the
+    wasted round and its ~60-90s per section). A short pause between attempts
+    also gives a throttling provider room.
 
     Writer sections run on the STRONG model tier (see citens.llm)."""
     text = ""
@@ -200,7 +212,7 @@ def _chat_section(system: str, user: str, max_tokens: int, label: str = "") -> s
         try:
             text = chat(
                 system, user, max_tokens=budget, strong=True,
-                thinking=attempt < 2,
+                thinking=attempt == 2,
             )
         except Exception as e:  # noqa: BLE001
             print(f"    [writer:{label}] attempt {attempt + 1} failed: {e}")
@@ -212,7 +224,7 @@ def _chat_section(system: str, user: str, max_tokens: int, label: str = "") -> s
         print(
             f"    [writer:{label}] attempt {attempt + 1} "
             f"({'empty' if not text else 'truncated'}; "
-            f"{'retrying with more tokens' if attempt == 0 else 'retrying without thinking'})"
+            f"{'retrying with more tokens' if attempt == 0 else 'retrying WITH thinking'})"
         )
     return text
 
@@ -222,10 +234,11 @@ def _papers_block(indexed: list[tuple[int, ExtractedPaper]]) -> str:
     for idx, p in indexed:
         parts.append(
             f"\n[{idx}] {p.title}\n"
-            f"  研究问题: {p.research_question}\n"
-            f"  方法: {p.methodology}\n"
-            f"  发现: {'; '.join(p.key_findings)}\n"
-            f"  局限: {'; '.join(p.limitations)}\n"
+            + (f"  系统名: {p.system_name}\n" if (p.system_name or "").strip() else "")
+            + f"  研究问题: {p.research_question}\n"
+            + f"  方法: {p.methodology}\n"
+            + f"  发现: {'; '.join(p.key_findings)}\n"
+            + f"  局限: {'; '.join(p.limitations)}\n"
         )
         if not (p.abstract or "").strip():
             parts.append(
@@ -278,6 +291,7 @@ def write_review_body(
     terminology: dict[str, str] | None = None,
     supporting: list[tuple[int, Paper]] | None = None,
     coverage_note: str = "",
+    search_summary: str = "",
 ) -> str:
     """Generate the review BODY (title + intro + theme sections + critical
     synthesis + conclusion).
@@ -331,7 +345,10 @@ def write_review_body(
     jobs: list[dict] = [
         {"kind": "intro", "label": "intro",
          "system": INTRO_PROMPT + "\n" + lang_line + formality_instruction() + term_line,
-         "user": f"研究主题 / Topic: {topic}", "budget": 4096}
+         "user": f"研究主题 / Topic: {topic}"
+                 + (f"\n\nSEARCH METHODOLOGY (measured facts of this run):\n{search_summary}"
+                    if search_summary else ""),
+         "budget": 8192}
     ]
 
     theme_jobs: list[dict] = []
@@ -367,7 +384,7 @@ def write_review_body(
                 )
         theme_jobs.append(
             {"kind": "theme", "label": f"theme-{ti+1}", "name": theme.name,
-             "system": system_prompt, "user": section_prompt, "budget": 6144}
+             "system": system_prompt, "user": section_prompt, "budget": 10240}
         )
     jobs.extend(theme_jobs)
 
@@ -381,7 +398,7 @@ def write_review_body(
         jobs.append(
             {"kind": "crit", "label": "critical-synthesis",
              "system": CRIT_SYNTH_PROMPT + "\n" + lang_line + formality_instruction() + term_line,
-             "user": synth_prompt + coverage_block, "budget": 4096}
+             "user": synth_prompt + coverage_block, "budget": 8192}
         )
 
     summary = "".join(f"- {t.name}: {t.description}\n" for t in themes.themes)
@@ -398,7 +415,7 @@ def write_review_body(
              f"{support_block}"
              f"{coverage_block}"
          ),
-         "budget": 4096}
+         "budget": 8192}
     )
 
     # --- generate concurrently, assemble in reading order --------------------
@@ -427,6 +444,24 @@ def write_review_body(
     if offset < len(bodies):
         conclusion = _strip_tail_references(_strip_leading_headings(bodies[offset]))
         sections.append(f"## {localized_heading('conclusion')}\n\n{conclusion}\n")
+
+    # --- second wave: the abstract abstracts the WRITTEN review -------------
+    # generated after the body so it states what the review actually says;
+    # carries no [n] markers, so it never enters the verification pipeline
+    body_so_far = "\n".join(sections[1:])
+    if body_so_far:
+        if on_step:
+            on_step("abstract", "")
+        abstract_md = _strip_leading_headings(
+            _chat_section(
+                ABSTRACT_PROMPT + "\n" + lang_line,
+                f"研究主题 / Topic: {topic}\n\n综述全文 / Finished review text:\n{body_so_far}",
+                4096,
+                "abstract",
+            )
+        )
+        if abstract_md:
+            sections.insert(1, f"{abstract_md}\n")
 
     return "\n".join(sections)
 

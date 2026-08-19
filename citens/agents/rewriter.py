@@ -16,6 +16,7 @@ precision stops being a report and becomes a pipeline behavior.
 from __future__ import annotations
 
 from citens.grounding import ChunkStore, CitationTable
+from citens.config import settings
 from citens.llm import chat_json
 from citens.models import Claim, VerificationResult
 
@@ -106,7 +107,8 @@ def rewrite_unsupported_claims(
             + f"\n\nRewrite all {len(batch_idx)} claims per the rules."
         )
         try:
-            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=8192, strong=True)
+            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=8192, strong=True,
+                              thinking=settings.judge_thinking)
         except Exception as e:  # noqa: BLE001
             print(f"    rewrite batch failed: {e}")
             continue

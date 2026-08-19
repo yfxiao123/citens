@@ -4,6 +4,60 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [1.1.0] — 2026-08-19
+
+### Changed — speed package (88-min deep run → target ≈ half)
+- **Judge-side thinking → "low"** (`JUDGE_THINKING=true|low|none`): verify
+  batches, defense, rewriter, spot-check, canary, reflect/absence audit,
+  organize/synth/health — every structured-JSON call on the strong tier —
+  now reason at low effort instead of the provider default. Hybrid models
+  share the completion budget between thinking and body; full deliberation
+  made each verify batch 2-12x slower. Golden-set A/B (49 claims, labels
+  inherited from the 22-claim audit): HIGH 0.49 human-agreement / precision
+  0.682 / ~106s · LOW 0.388 / 0.659 / 48s (errors balanced 16 lenient vs 14
+  strict) · NONE 0.204 / 0.864 / 9s but systematically LENIENT (31
+  lenient) — rejected as the verify default, kept reachable via env.
+- **Writer ladder flipped**: sections now generate WITHOUT thinking first
+  (normal → double budget → double budget WITH thinking as last resort).
+  The thinking-first ladder wasted a full call per section whenever the
+  thinking prefix starved the body (9 sections in the 08-19 run returned
+  empty on attempt 1 and were rescued by the no-thinking retry anyway).
+- **Supplementary retrieval capped at 1 round** (`REFLECT_MAX_ROUNDS`):
+  deep_review used to run 2; round 2 alone cost ~37 min (a full recompose
+  incl. re-verification) for 3 added papers. The absence audit still runs
+  every round and its findings land in `08a_absence_audit.json` for manual
+  follow-up.
+- **Fuzzy verdict reuse across rounds**: a recompose round now reuses
+  verdicts for near-identical restatements (similarity ≥ 0.88, identical
+  citations, unchanged ground text — a paper that gained fulltext is always
+  re-judged). The writer restates most unchanged facts with light rewording;
+  re-judging them cost the majority of each post-supplement verify pass.
+
+### Fixed
+- **Full-text grounding was silently dead**: `markitdown[pdf]` was declared as
+  an optional extra but never installed in the working venv — every PDF fetch
+  (auto or user-dropped) raised `ModuleNotFoundError` inside a broad `except`
+  and degraded to abstract-only grounding with no signal (0/20 full texts in
+  the 08-19 stock-prediction run). It is now a core dependency, and a missing
+  install prints a loud one-time warning instead of failing silently.
+- **Decimal points no longer shatter claims**: the sentence splitter (widened
+  to zero-width for Chinese prose in 1.0.0) also split after every Latin `.`,
+  fragmenting `0.92` into `0.` + `92[15]。` — the verifier then judged
+  context-free fragments. Latin `.!?` now require a following space
+  (`(?<=[。！？])\s*|(?<=[.!?])\s+`); decimals (`AUC≈0.5`, `gpt-3.5`) stay
+  inside one claim. Re-verification of the 08-19 LLM-recsys run with the fixed
+  parser: 108 claims, precision 100% → 99% (the fixed text surfaces one
+  honestly-failing claim).
+
+### Changed
+- **Number-dense evidence excerpts**: the writer's full-text excerpts
+  (top BM25 chunks per paper) favored intro/method prose; candidates are now
+  re-ranked with an effect-size density boost (`37%`-style tokens) before
+  excerpting (top 3 per paper, 900 chars, 7.5k-char theme budget). The 08-19
+  LLM-recsys run — first with a live PDF chain — carried full-text-only
+  numbers into the body (`AUC≈0.5`, 128-sample tuning result, Kendall's τ
+  0.92), none of which appear in the abstracts.
+
 ## [1.0.0] — 2026-08-19
 
 ### Added

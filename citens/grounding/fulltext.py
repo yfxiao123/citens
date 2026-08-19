@@ -32,6 +32,7 @@ _NON_ALNUM_RE = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")  # keep CJK (zh topics)
 _CHUNK_SIZE = 1200
 _HEADERS = {"User-Agent": "CiteLens/0.1 (open literature-review agent)"}
 _md = None  # lazy MarkItDown singleton
+_warned_missing = False
 
 
 def slugify(text: str) -> str:
@@ -71,8 +72,21 @@ def _local_pdf(paper: Paper) -> Path | None:
 def _markitdown():
     global _md
     if _md is None:
-        from markitdown import MarkItDown
-
+        try:
+            from markitdown import MarkItDown
+        except ImportError:
+            # Loud and once: without this dependency every PDF (auto-fetched
+            # or user-dropped) silently fails and grounding degrades to
+            # abstracts — the run looks healthy but carries no full text.
+            global _warned_missing
+            if not _warned_missing:
+                _warned_missing = True
+                print(
+                    "    [fulltext] WARNING: markitdown is not installed — "
+                    "PDF grounding is DISABLED (abstracts only). "
+                    "Fix: uv sync (markitdown[pdf] is a core dependency)."
+                )
+            raise
         _md = MarkItDown()
     return _md
 
@@ -102,7 +116,7 @@ def _arxiv_title_lookup(paper: Paper) -> str | None:
     if len(title) < 10:
         return None
     try:
-        with sync_client(timeout=20, headers=_HEADERS) as client:
+        with sync_client(timeout=12, headers=_HEADERS) as client:
             r = client.get(
                 "https://export.arxiv.org/api/query",
                 params={"search_query": f'ti:"{title}"', "max_results": 3},
@@ -138,7 +152,7 @@ def _core_pdf_url(doi: str) -> str | None:
     if not key or not doi:
         return None
     try:
-        with sync_client(timeout=20, headers=_HEADERS) as client:
+        with sync_client(timeout=12, headers=_HEADERS) as client:
             r = client.get(
                 "https://api.core.ac.uk/v3/search/works",
                 params={"q": f'doi:"{doi}"', "limit": 3},
@@ -158,7 +172,7 @@ def _core_pdf_url(doi: str) -> str | None:
 def _unpaywall_pdf_url(doi: str) -> str | None:
     email = settings.openalex_email or "citelens@example.com"
     try:
-        with sync_client(timeout=20) as client:
+        with sync_client(timeout=12) as client:
             r = client.get(
                 f"https://api.unpaywall.org/v2/{doi}",
                 params={"email": email},
@@ -194,7 +208,7 @@ def _pdf_bytes_to_text(content: bytes) -> str | None:
 def _download_and_convert(url: str) -> str | None:
     try:
         url = rewrite_url(url)  # ride the user's EZproxy/declared access
-        with sync_client(url, timeout=60, headers=_HEADERS) as client:
+        with sync_client(url, timeout=30, headers=_HEADERS) as client:
             r = client.get(url)
         if r.status_code == 200 and len(r.content) >= 2000:
             ctype = r.headers.get("content-type", "").lower()

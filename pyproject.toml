@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "citens"
-version = "1.0.0"
+version = "1.1.0"
 description = "An open-source literature-review agent that writes critical, citation-grounded surveys — every claim verifiable against its source."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -37,13 +37,14 @@ dependencies = [
     "typer>=0.12",
     "rich>=13",
     "arxiv>=2.0",
+    # Full-text citation grounding: PDF -> MarkItDown -> chunks. Core since
+    # 1.1.0 — without it every PDF fetch silently degrades to abstract-only
+    # grounding and the numbers/effects chain never fires.
+    "markitdown[pdf]>=0.0.1",
 ]
 
 [project.optional-dependencies]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "sse-starlette>=2.0"]
-# Full-text citation grounding: PDF -> MarkItDown -> chunks. Without it the
-# verifier falls back to abstracts only (lower citation precision).
-pdf = ["markitdown[pdf]>=0.0.1"]
 # Native multi-provider routing (Anthropic/Gemini/Bedrock/Cohere) via LiteLLM.
 # The default OpenAI-compatible backend already covers OpenAI/DeepSeek/Ollama/
 # OpenRouter/vLLM/Groq without this extra.

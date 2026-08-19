@@ -22,6 +22,9 @@ specific, verifiable details.
 
 Output JSON (include every field):
 {
+  "system_name": "the NAMED framework/model/method the paper proposes, exactly \
+as the community calls it ('TALLRec', 'FactorVAE', 'Avellaneda-Stoikov', \
+'Kyle model'); empty string if the paper proposes no named system",
   "research_question": "what specific problem the paper tackles (not generic — \
 include the specific aspect, gap, or twist)",
   "methodology": "exact technical approach: model class, algorithm, data structure, \
@@ -54,6 +57,11 @@ CRITICAL RULES:
 1. Findings must be SPECIFIC — include effect direction, magnitude, or statistical \
 significance when the abstract mentions them. "Method X outperforms Y by 15% on \
 dataset Z" is good; "Method X is effective" is bad.
+1b. NUMBERS ARE MANDATORY CARGO: if the abstract states ANY quantitative result \
+(percentages, basis points, sample sizes, dataset scale, error reductions, \
+out-of-sample gains), that number MUST survive verbatim inside a finding, with \
+its metric name and comparator. A finding that drops the number it came from is \
+a failed extraction. Produce 3-5 findings when the abstract supports them.
 2. Methodology must name the specific technique, not just the broad category.
 3. Limitations include both author-acknowledged and evident-from-abstract issues.
 4. Only extract what the abstract actually says — do NOT infer or fabricate.
@@ -85,6 +93,7 @@ def _build_extracted(paper: ScoredPaper, result: dict, assess_quality: bool) -> 
 
     return ExtractedPaper(
         **paper.model_dump(exclude={"id"}),
+        system_name=_s(result.get("system_name")),
         research_question=_s(result.get("research_question")),
         methodology=_s(result.get("methodology")),
         key_findings=_lst(result.get("key_findings")),

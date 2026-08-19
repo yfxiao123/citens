@@ -638,7 +638,7 @@ def test_writer_formality_and_stacking_rules_wired(monkeypatch):
 
     # hard numeric stacking cap in the section prompt
     assert "AT MOST 3 citation markers" in w.SECTION_PROMPT
-    assert "NEVER stack 5+" in w.SECTION_PROMPT
+    assert "NEVER 5+" in w.SECTION_PROMPT
     # nature-writing register rules, localized per output language
     monkeypatch.setattr(w.settings, "review_language", "zh", raising=False)
     assert "一句只承载一个主要命题" in w.formality_instruction()
@@ -712,7 +712,9 @@ def test_writer_last_resort_attempt_disables_thinking(monkeypatch):
     monkeypatch.setattr(w.time, "sleep", lambda s: None)
     text = w._chat_section("sys", "user", 4096, "test")
     assert len(text) > 200  # recovered
-    assert [c["thinking"] for c in calls] == [True, True, False]
+    # flipped ladder: no-thinking first (fast + immune to the budget-eating
+    # thinking prefix), thinking only as the double-budget last resort
+    assert [c["thinking"] for c in calls] == [False, False, True]
     assert calls[1]["budget"] == 8192 and calls[2]["budget"] == 8192
 
 
@@ -817,3 +819,137 @@ def test_generate_facets_parses_and_is_resilient(monkeypatch):
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("backend down")),
     )
     assert pl.generate_facets("order book") == []  # accelerator, never a pillar
+
+
+# --- density & unfolding package (08-19b: length, names, numbers, abstract) ---
+
+
+def test_extract_carries_system_name_and_keeps_numbers():
+    from citens.agents.extract import _build_extracted
+    from citens.models import ScoredPaper
+
+    p = ScoredPaper(title="TALLRec: effective tuning", abstract="abs")
+    result = {
+        "system_name": "TALLRec",
+        "research_question": "align LLM with rec",
+        "key_findings": ["Recall@1 improved by 12.3% over base LLaMA"],
+    }
+    ep = _build_extracted(p, result, assess_quality=False)
+    assert ep.system_name == "TALLRec"
+    assert "12.3%" in ep.key_findings[0]
+    # prompt contract: system_name in schema, numbers mandatory
+    from citens.agents.extract import SYSTEM_PROMPT
+    assert '"system_name"' in SYSTEM_PROMPT
+    assert "NUMBERS ARE MANDATORY CARGO" in SYSTEM_PROMPT
+
+
+def test_papers_block_shows_system_name():
+    from citens.agents import writer as writer_mod
+    from citens.models import ExtractedPaper
+
+    ep = ExtractedPaper(title="Named paper", abstract="a", year=2020,
+                        system_name="FactorVAE")
+    block = writer_mod._papers_block([(5, ep)])
+    assert "系统名: FactorVAE" in block
+
+
+def test_section_prompt_has_unfolding_template_and_length():
+    from citens.agents import writer as writer_mod
+
+    assert "1500-2200" in writer_mod.SECTION_PROMPT  # zh length target
+    assert "定位段" in writer_mod.SECTION_PROMPT and "收束段" in writer_mod.SECTION_PROMPT
+    assert "NAMED SYSTEMS" in writer_mod.SECTION_PROMPT
+    assert "DENSITY" in writer_mod.SECTION_PROMPT
+    assert "作者等人[n]提出的" in writer_mod.SECTION_PROMPT
+
+
+def test_abstract_prompt_contract():
+    from citens.agents import writer as writer_mod
+
+    assert "摘要：" in writer_mod.ABSTRACT_PROMPT
+    assert "关键词：" in writer_mod.ABSTRACT_PROMPT
+    assert "NO [n] citation markers" in writer_mod.ABSTRACT_PROMPT
+
+
+def test_search_summary_text_reports_funnel():
+    from citens.orchestration.pipeline import search_summary_text
+
+    s = search_summary_text(["arxiv", "semantic_scholar"], 40, 26, 8, "2026-08-19")
+    assert "40 篇候选" in s and "26 篇" in s and "8 篇支持文献" in s
+    assert "2026-08-19" in s
+
+
+def test_claim_parser_splits_chinese_sentences_without_spaces():
+    # regression: the old `\s+` requirement merged whole paragraphs into one
+    # claim (no spaces after 。), inflating per-claim citation counts
+    from citens.grounding.citations import parse_claims_from_review
+
+    md = "# t\n\n## 引言\n\n第一句引用了[0]。第二句引用了[1][2]。\n"
+    claims = parse_claims_from_review(md)
+    assert len(claims) == 2
+    assert claims[0].citation_indices == [0]
+    assert claims[1].citation_indices == [1, 2]
+
+
+def test_claim_parser_never_splits_on_decimal_points():
+    # regression: zero-width split after every `.` shattered numbers into
+    # context-free fragments (`0.` + `92[15]。`) — the verifier then judged
+    # claim-text like "92[15]。" with no meaning
+    from citens.grounding.citations import parse_claims_from_review
+
+    md = (
+        "# t\n\n## 实证\n\n"
+        "未经微调的LLM表现接近随机猜测（AUC≈0.5），微调后显著改善[3]。"
+        "系统级排序与人类判断高度一致，Kendall's τ最高可达0.92[15]。"
+        "English too: the model attains 0.879 NDCG on 1.5M interactions[7]. "
+        "Next sentence[8].\n"
+    )
+    claims = parse_claims_from_review(md)
+    assert len(claims) == 4
+    assert "AUC≈0.5" in claims[0].text and "0.92" in claims[1].text
+    assert "0.879" in claims[2].text and "1.5M" in claims[2].text
+    assert claims[3].citation_indices == [8]
+
+
+def test_number_dense_excerpts_prefers_effect_size_chunks():
+    # BM25 order alone favors intro/method prose; the boost must hoist the
+    # results-table chunk (denser in numbers) above it for the same paper
+    from citens.grounding.chunkstore import ChunkStore
+    from citens.models import Chunk, ChunkKind, ExtractedPaper
+    from citens.orchestration.pipeline import number_dense_excerpts
+
+    paper = ExtractedPaper(
+        id="ignored", title="TALLRec-like study", abstract="abs", year=2024
+    )
+    store = ChunkStore()
+    pid = paper.id  # ExtractedPaper regenerates its id — key the store by it
+    store._by_paper[pid] = [
+        Chunk(paper_id=pid, chunk_id=f"{pid}-ft-0", kind=ChunkKind.FULLTEXT, text=(
+            "We introduce the framework and discuss related work on "
+            "recommendation with large language models in detail."
+        )),
+        Chunk(paper_id=pid, chunk_id=f"{pid}-ft-1", kind=ChunkKind.FULLTEXT, text=(
+            "Fine-tuning yields 37.2% Hit@5 versus 24.8% for the zero-shot "
+            "baseline; NDCG@10 improves from 0.31 to 0.44 (p<0.05)."
+        )),
+    ]
+    out = number_dense_excerpts([0], [paper], store, query="recommendation")
+    assert "37.2%" in out
+    assert out.index("37.2%") < out.index("We introduce")
+
+
+def test_number_dense_excerpts_skips_abstract_only_papers():
+    from citens.grounding.chunkstore import ChunkStore
+    from citens.models import Chunk, ChunkKind, ExtractedPaper
+    from citens.orchestration.pipeline import number_dense_excerpts
+
+    store = ChunkStore()
+    store._by_paper["p2"] = [
+        Chunk(paper_id="p2", chunk_id="p2-abs", kind=ChunkKind.ABSTRACT, text="abstract only 12.3%")
+    ]
+    paper = ExtractedPaper(id="p2", title="No fulltext", abstract="abs", year=2024)
+    store._by_paper[paper.id] = [
+        Chunk(paper_id=paper.id, chunk_id="abs", kind=ChunkKind.ABSTRACT,
+              text="abstract only 12.3%")
+    ]
+    assert number_dense_excerpts([0], [paper], store, query="q") == ""

@@ -9,6 +9,7 @@ contradictions feed the writer so sections argue rather than enumerate.
 
 from __future__ import annotations
 
+from citens.config import settings
 from citens.llm import chat_json
 from citens.models import ExtractedPaper, SynthesisResult, ThemeStructure
 
@@ -56,7 +57,8 @@ def synthesize(
         "Identify consensus, contradictions, and gaps across these papers."
     )
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=3072, strong=True)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=3072, strong=True,
+                            thinking=settings.judge_thinking)
     except Exception:  # noqa: BLE001
         print("    synth failed: unparseable LLM JSON")
         result = {}

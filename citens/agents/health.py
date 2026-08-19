@@ -12,6 +12,7 @@ Inspired by Imbad0202/ARS's "Dialogue Health Indicator".
 
 from __future__ import annotations
 
+from citens.config import settings
 from citens.llm import chat_json
 from citens.models import SynthesisResult, Verdict, VerificationResult
 
@@ -118,7 +119,8 @@ def check_health(
         )
 
         try:
-            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=1536, strong=True)
+            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=1536, strong=True,
+                              thinking=settings.judge_thinking)
             adversarial_queries = result.get("adversarial_queries", [])[:3]
         except Exception:  # noqa: BLE001
             adversarial_queries = []

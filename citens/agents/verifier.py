@@ -13,7 +13,10 @@ batches are independent and run on a thread pool.
 
 from __future__ import annotations
 
+import re
+
 from citens.grounding import ChunkStore, CitationTable
+from citens.config import settings
 from citens.llm import chat_json, run_concurrent
 from citens.models import Claim, Verdict, VerificationResult
 
@@ -129,6 +132,70 @@ def claim_stack_stats(claims: list[Claim]) -> dict:
     }
 
 
+def _norm_claim_text(text: str) -> str:
+    """Punctuation/whitespace-insensitive comparison form (fuzzy reuse)."""
+    return re.sub(r"[\s，。；、,.:;!?！？()（）\"'“”‘’·—-]+", "", text)
+
+
+def _grounding_sig(
+    claim: Claim, table: CitationTable, chunk_store: ChunkStore
+) -> str:
+    """Hash of the cited papers' ground text, citations included.
+
+    A reused verdict is only valid while the ground text behind its citations
+    is unchanged — a paper that gained fulltext between rounds must be
+    re-judged against the richer text, not served a stale abstract-era
+    verdict."""
+    import hashlib
+
+    parts = [",".join(str(i) for i in sorted(set(claim.citation_indices)))]
+    for i in sorted(set(claim.citation_indices)):
+        pid = table.paper_id(i)
+        chunks_text = "|".join(c.text for c in chunk_store.chunks_for(pid))
+        parts.append(f"{pid}:{hashlib.sha1(chunks_text.encode()).hexdigest()[:12]}")
+    return hashlib.sha1("\n".join(parts).encode()).hexdigest()
+
+
+_FUZZY_THRESHOLD = 0.88
+
+
+def _fuzzy_lookup(
+    claim: Claim,
+    table: CitationTable,
+    chunk_store: ChunkStore,
+    store: dict,
+) -> VerificationResult | None:
+    """Near-identical claim text + identical citations + unchanged ground
+    text reuses the earlier verdict. The writer restates most unchanged
+    facts across recompose rounds with light rewording; re-judging them
+    costs the majority of a full verify pass for zero information gain."""
+    import difflib
+
+    cites = tuple(sorted(set(claim.citation_indices)))
+    text = _norm_claim_text(claim.text)
+    if not text:
+        return None
+    sig = _grounding_sig(claim, table, chunk_store)
+
+    exact = store.get((text, cites))
+    if exact is not None:
+        return exact[1] if exact[0] == sig else None
+
+    best: tuple[float, VerificationResult | None] = (0.0, None)
+    for (cand_text, cand_cites), (cand_sig, result) in store.items():
+        if cand_cites != cites or cand_sig != sig:
+            continue
+        matcher = difflib.SequenceMatcher(None, text, cand_text)
+        if matcher.quick_ratio() < _FUZZY_THRESHOLD:
+            continue
+        ratio = matcher.ratio()
+        if ratio > best[0]:
+            best = (ratio, result)
+    if best[1] is not None and best[0] >= _FUZZY_THRESHOLD:
+        return best[1]
+    return None
+
+
 def verify_claims(
     claims: list[Claim],
     table: CitationTable,
@@ -137,6 +204,7 @@ def verify_claims(
     batch_size: int = _BATCH_SIZE,
     on_progress=None,
     verdict_cache: dict | None = None,
+    verdict_fuzzy: dict | None = None,
 ) -> tuple[list[VerificationResult], float]:
     """Verify every cited claim.
 
@@ -147,7 +215,9 @@ def verify_claims(
 
     ``verdict_cache`` (threaded across compose rounds by the pipeline) reuses
     verdicts for claims whose text, citations, and cited ground text are all
-    unchanged — the re-compose rounds only pay for what actually changed.
+    unchanged; ``verdict_fuzzy`` additionally catches lightly-reworded
+    restatements (similarity ≥ 0.88, same citations, same ground text) —
+    together the re-compose rounds only pay for what actually changed.
     """
     results: list[VerificationResult] = []
     total = len(claims)
@@ -185,6 +255,28 @@ def verify_claims(
                 remaining.append((slot, claim))
         to_check = remaining
 
+    # Fuzzy pass: lightly-reworded restatements of already-judged claims.
+    # Runs after the exact cache so identical claims never pay the scan.
+    n_fuzzy = 0
+    if verdict_fuzzy:
+        remaining = []
+        for slot, claim in to_check:
+            hit = _fuzzy_lookup(claim, table, chunk_store, verdict_fuzzy)
+            if hit is not None:
+                reused = hit.model_copy()
+                reused.note = (f"{reused.note} [reused: near-identical claim "
+                               f"from a previous round]").strip()
+                placed[slot] = reused
+                n_fuzzy += 1
+            else:
+                remaining.append((slot, claim))
+        to_check = remaining
+    if n_cached or n_fuzzy:
+        print(
+            f"  [verify] reuse: {n_cached} identical · {n_fuzzy} reworded · "
+            f"{len(to_check)} to judge"
+        )
+
     # Second pass: judge the verifiable claims in concurrent batches.
     verifiable = [c for _, c in to_check]
     batches = [
@@ -207,7 +299,8 @@ def verify_claims(
             "Return a verdict for each claim_index (0-based within this batch)."
         )
         try:
-            raw = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=8192, strong=True)
+            raw = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=8192, strong=True,
+                            thinking=settings.judge_thinking)
             verdicts = {int(r.get("claim_index", -1)): r for r in raw.get("results", [])}
         except Exception as e:  # noqa: BLE001
             print(f"    verify batch failed: {e}")
@@ -254,6 +347,20 @@ def verify_claims(
         on_progress(done + n_cached, total)
 
     results = [r for r in placed if r is not None]
+
+    # feed the fuzzy store from EVERY verdict (fresh, cached, reused) keyed
+    # by claim slot — claims[slot] is the text/citations pair that produced it
+    if verdict_fuzzy is not None:
+        for slot, res in enumerate(placed):
+            if res is None:
+                continue
+            claim = claims[slot]
+            verdict_fuzzy[
+                (
+                    _norm_claim_text(claim.text),
+                    tuple(sorted(set(claim.citation_indices))),
+                )
+            ] = (_grounding_sig(claim, table, chunk_store), res)
 
     verifiable_results = [r for r in results if r.verdict != Verdict.UNVERIFIABLE]
     if verifiable_results:
@@ -323,6 +430,7 @@ def spot_check_supported(
             + f"\n\nAudit all {len(sample)} claims.",
             max_tokens=8192,
             strong=True,
+            thinking=settings.judge_thinking,
         )
         verdicts = {int(r.get("claim_index", -1)): r for r in raw.get("results", [])}
     except Exception as e:  # noqa: BLE001
@@ -397,6 +505,7 @@ def canary_check(table: CitationTable, chunk_store: ChunkStore) -> dict:
             "Return a verdict for each claim_index (0-based within this batch).",
             max_tokens=4096,
             strong=True,
+            thinking=settings.judge_thinking,
         )
         verdicts = {int(r.get("claim_index", -1)): str(r.get("verdict", "")).lower()
                     for r in raw.get("results", [])}

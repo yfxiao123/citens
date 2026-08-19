@@ -16,7 +16,13 @@ from collections.abc import Sequence
 from citens.models import Citation, Claim, Paper
 
 _CITE_RE = re.compile(r"\[(\d{1,3})\]")
-_SENT_SPLIT_RE = re.compile(r"(?<=[。.!?！？])\s+")
+# Split at terminal punctuation — Chinese prose carries NO space after 。, and
+# the old `\s+` requirement merged whole paragraphs into single "claims",
+# inflating per-claim citation counts and mismatching the per-sentence caps.
+# Latin `.!?` still require a following space: `0.92`, `AUC≈0.5`, `gpt-3.5`
+# must never split (the zero-width variant shattered decimals into fragments
+# like `0.` + `92[15]。`, feeding the verifier claim-text without context).
+_SENT_SPLIT_RE = re.compile(r"(?<=[。！？])\s*|(?<=[.!?])\s+")
 _REF_HEADER_RE = re.compile(r"参考文献|references", re.IGNORECASE)
 
 

@@ -10,6 +10,7 @@ This implements the "Concession Threshold Protocol" inspired by Imbad0202/ARS.
 
 from __future__ import annotations
 
+from citens.config import settings
 from citens.llm import chat_json, run_concurrent
 from citens.models import Claim, VerificationResult
 
@@ -66,7 +67,8 @@ def challenge_verdict(
     )
 
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=4096, strong=True)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=4096, strong=True,
+                           thinking=settings.judge_thinking)
         score = result.get("score", 0)
         if not isinstance(score, int) or score < 1 or score > 5:
             score = 0

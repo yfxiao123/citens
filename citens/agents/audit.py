@@ -15,6 +15,7 @@ hallucinated canonical paper simply returns nothing and is discarded.
 
 from __future__ import annotations
 
+from citens.config import settings
 from citens.llm import chat_json
 
 SYSTEM_PROMPT = """You are a literature-retrieval auditor. You are given a research topic and the \
@@ -60,7 +61,8 @@ def audit_coverage(
         "Only real, well-known works — never invent."
     )
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=2048,
+                          thinking=settings.judge_thinking)
     except Exception:  # noqa: BLE001
         # reasoning models occasionally emit unparseable JSON; degrade gracefully
         return {"absent_canonical_papers": [], "missing_venue_areas": [], "audit_note": "audit failed, skipped"}

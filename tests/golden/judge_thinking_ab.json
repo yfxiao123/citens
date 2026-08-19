@@ -1,0 +1,35 @@
+{
+  "thinking=HIGH(default)": {
+    "wall_seconds": 0.0,
+    "precision": 0.682,
+    "matched": 49,
+    "agreement": 0.49,
+    "lenient": 14,
+    "strict": 11,
+    "canary_false_accept_rate": 0.0,
+    "canary_caught": 3,
+    "canary_injected": 3
+  },
+  "thinking=LOW": {
+    "wall_seconds": 48.2,
+    "precision": 0.659,
+    "matched": 49,
+    "agreement": 0.388,
+    "lenient": 16,
+    "strict": 14,
+    "canary_false_accept_rate": 0.0,
+    "canary_caught": 3,
+    "canary_injected": 3
+  },
+  "thinking=NONE": {
+    "wall_seconds": 0.0,
+    "precision": 0.864,
+    "matched": 49,
+    "agreement": 0.204,
+    "lenient": 31,
+    "strict": 8,
+    "canary_false_accept_rate": 0.0,
+    "canary_caught": 3,
+    "canary_injected": 3
+  }
+}

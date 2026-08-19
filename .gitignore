@@ -40,3 +40,6 @@ requirements.txt
 
 # local eval reports
 /eval/
+
+# local console logs (run transcripts stay in runs/, which is ignored)
+*.log
