@@ -1,0 +1,31 @@
+{
+  "topic": "基于大语言模型的推荐系统",
+  "keywords": [
+    "large language models recommender systems survey",
+    "LLM-based recommendation methods",
+    "sequential recommendation large language models",
+    "large language models collaborative filtering",
+    "LLM recommendation prompt engineering",
+    "large language models recommendation explainability",
+    "empirical evaluation LLM recommender systems",
+    "large language models cold start recommendation",
+    "LLM recommendation recent advances 2023..2026",
+    "large language models user behavior modeling",
+    "prompt-based recommendation",
+    "generative recommendation",
+    "instruction tuning"
+  ],
+  "total_papers": 47,
+  "filtered_papers": 28,
+  "themes": [
+    "综述与展望",
+    "基于LLM的推荐方法",
+    "可解释推荐",
+    "自动评估与评测",
+    "效率、公平性与鲁棒性",
+    "对话与多模态推荐"
+  ],
+  "review_path": "runs\\基于大语言模型的推荐系统-20260819_082939\\review.md",
+  "run_dir": "runs\\基于大语言模型的推荐系统-20260819_082939",
+  "citation_precision": 0.99
+}

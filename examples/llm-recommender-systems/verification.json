@@ -1,0 +1,1040 @@
+{
+  "citation_precision": 0.99,
+  "previous_precision": 1.0,
+  "defense_overturned": 5,
+  "results": [
+    {
+      "claim_text": "[0]与[1]两篇综述、[5]的立场文章共同构成了这一交叉方向的基础入口：前者分别从适配方式与任务场景两个维度梳理已有研究，后者从个性化目标的角度提出尚未解决的问题。",
+      "verdict": "supported",
+      "citation_indices": [
+        0,
+        1,
+        5
+      ],
+      "note": "[0] systematizes LLM4Rec by modeling/adaptation dimensions, [1] surveys task scenarios, and [5] discusses personalization challenges and open problems; the characterization is consistent with the ground texts.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "领域内新出现的生成式推荐综述[28]、提示驱动的新闻推荐[29]与弱模态增强的多模态推荐[30]等子方向，也将在相应语境中被引用。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        28,
+        29,
+        30
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[0]以建模范式为第一级分类，将LLM推荐方法区分为判别式（discriminative）与生成式（generative）两大类，并汇总了五种训练/域适配方式，包括微调（fine-tuning）、提示/上下文学习（prompting/in-context learning）、提示调优（prompt tuning）与指令调优（instruction tuning）等。",
+      "verdict": "supported",
+      "citation_indices": [
+        0
+      ],
+      "note": "[0] explicitly taxonomizes discriminative vs generative LLM4Rec and describes fine-tuning, prompting/in-context learning, prompt tuning, and instruction tuning as adaptation manners.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "与之相对，[1]从应用场景切入，展示ChatGPT、LLaMA、T5等模型如何被用于top-K推荐、评分预测、会话式推荐与解释生成等任务；其引用的一个代表性方案是采用T5作为推荐系统骨干，允许用户以自然语言表达显式偏好和意图，最终获得优于仅依赖用户—物品交互输入的推荐效果。",
+      "verdict": "partial",
+      "citation_indices": [
+        1
+      ],
+      "note": "[1] supports the task-scenario part (top-K, rating, conversational, explanation with ChatGPT/LLaMA/T5), but the specific T5-backbone scheme with explicit user preferences and superiority over interaction-only input is not present in [1]'s ground text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[0]所区分的两种建模范式恰好对应两种推荐理念：判别式路线将LLM用作特征编码器，保留评分或点击预测的目标函数，文本信息只是增强用户与物品表征的附加信号；生成式路线则把推荐重建为“给定用户上下文生成物品或解释”的文本生成问题。",
+      "verdict": "supported",
+      "citation_indices": [
+        0
+      ],
+      "note": "[0] describes discriminative LLMs as embedding backbones for downstream recommendation tasks (preserving task-specific objectives) and generative LLMs for text/token generation; the claim's two-route characterization is grounded.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "两条路线在[1]所描绘的任务图景中共存，但彼此的前提存在张力：判别式路线默认推荐仍可还原为交互概率估计，生成式路线则认为推荐本质上是序列决策与文本表达问题。",
+      "verdict": "partial",
+      "citation_indices": [
+        1
+      ],
+      "note": "[1] shows both masked-language-modeling and next-token-prediction/LLM-as-recommender elements, so coexistence is broadly grounded, but the claimed conceptual tension and the specific premises attributed to each route are interpretive additions not made in [1].",
+      "defense_result": null
+    },
+    {
+      "claim_text": "从[0]的框架看，这一争论的实质是在选择适配深度：提示式方法将LLM当作冻结的知识库，微调式方法将LLM当作可塑造的策略网络。",
+      "verdict": "partial",
+      "citation_indices": [
+        0
+      ],
+      "note": "[0]'s adaptation taxonomy does distinguish prompting (no LLM parameter update) from fine-tuning, so the adaptation-depth core is grounded; the labels 'frozen knowledge base' and 'moldable policy network' are interpretive framings not present in the source.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "如果说[0]与[1]回答的是技术如何被改造，那么[5]追问的则是改造方向是否正确。",
+      "verdict": "supported",
+      "citation_indices": [
+        0,
+        1,
+        5
+      ],
+      "note": "[0] and [1] are technical surveys of how LLMs are adapted/used for recommendation, while [5] explicitly frames challenges and opportunities for personalization, i.e., questioning whether the direction is correct; the contrast is consistent with the ground texts.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "同时，[5]的分析也隐含一种风险：若推荐系统以语言模型对世界的先验理解为主要依据，可能弱化传统协同过滤所捕捉的行为相似性，而后者恰恰是商业推荐系统实现个性化的支柱。",
+      "verdict": "partial",
+      "citation_indices": [
+        5
+      ],
+      "note": "[5] does support the risk that LLMs lack visibility into platform/behavior data and that omitting such information harms accuracy, but the specific claim that reliance on LLM priors weakens collaborative-filtering behavioral similarity, and that CF is the pillar of commercial personalization, is not explicitly grounded.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "围绕生成式推荐[28]、提示驱动新闻推荐[29]与多模态增强推荐[30]的探索，正是这一未完成议程在具体场景中的延伸。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        28,
+        29,
+        30
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "从[0]对适配方式的体系化梳理、[1]对应用任务的景观式描绘，到[5]对个性化议程的风险提示，本主题的演进逻辑清晰可见：LLM推荐的研究重心正从“如何将模型接入推荐流程”的技术问题，转向“接入之后应当优化何种目标”的目标问题。",
+      "verdict": "partial",
+      "citation_indices": [
+        0,
+        1,
+        5
+      ],
+      "note": "The factual ingredients are grounded: [0] systematizes adaptation, [1] maps tasks, [5] raises personalization risks. However, the asserted 'evolution shift' from technical to objective-level questions is an interpretive framing the sources do not explicitly make.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "传统推荐依赖任务特定的架构与目标函数，难以在不同任务间迁移知识[2]。",
+      "verdict": "partial",
+      "citation_indices": [
+        2
+      ],
+      "note": "The provided ground text for [2] contains experimental tables and prompt templates but no statement about traditional recommenders relying on task-specific architectures/objectives or lacking cross-task knowledge transfer; the claim has no basis in the cited excerpt. [defense: The claim is directly supported by the cited source. In the abstract and introduction of the P5 paper, it states verbatim: 'For a long time, different recommendation tasks typically require designing ]",
+      "defense_result": null
+    },
+    {
+      "claim_text": "LLM凭借丰富知识与强泛化能力，为统一建模提供了新载体[3]。",
+      "verdict": "partial",
+      "citation_indices": [
+        3
+      ],
+      "note": "[3] supports LLMs' knowledge and generalization capabilities for recommendation, but the 'unified modeling' framing is not present in the cited text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "P5[2]提出“预训练、个性化提示与预测”（Pretrain, Personalized Prompt & Predict）范式。",
+      "verdict": "supported",
+      "citation_indices": [
+        2
+      ],
+      "note": "P5's title and abstract explicitly present the 'Pretrain, Personalized Prompt & Predict' paradigm.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "RecGPT[26]沿同一方向却选择领域自适应的全量训练路径。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        26
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "TALLRec[3]的证据最为直接：未经过推荐数据微调的LLM在推荐任务上的表现接近随机猜测（AUC≈0.5），而经过推荐数据微调后性能显著改善。",
+      "verdict": "supported",
+      "citation_indices": [
+        3
+      ],
+      "note": "[3] explicitly states that LLM-based methods perform near random guessing (AUC≈0.5) and that TALLRec achieves significant improvements after recommendation tuning.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "与之相对，文献[16]提出提示式表示学习方法（prompting-based representation learning，P4R），主张无需大规模预训练或微调，仅通过提示即可获得适用于多种候选文本的表示。",
+      "verdict": "partial",
+      "citation_indices": [
+        16
+      ],
+      "note": "[16] supports prompting-based representation learning without extensive pre-training, but the claim's addition of 'or fine-tuning' (或微调) is not grounded in the cited text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "文献[27]指出，基于LLM的推荐中静态模式提示（static schema-based prompting）存在根本局限，主张对上下文知识进行协同整合并消解知识之间的不一致，这实际上是在提示层面为LLM补充更丰富的语义约束。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        27
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "RecBase[19]则走得更远。",
+      "verdict": "partial",
+      "citation_indices": [
+        19
+      ],
+      "note": "[19] supports RecBase as a generative foundation-model pretraining approach for zero-shot recommendation, but the comparative 'goes further' framing is interpretive and not explicitly stated.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "本主题的文献沿\"综述—方法—质量优化\"三条线索展开：综述性工作[6]系统梳理了该方向的早期探索；[9]、[10]、分别从不同角度提出解释生成框架；[11]则针对解释质量不足的问题提出优化方案。",
+      "verdict": "supported",
+      "citation_indices": [
+        6,
+        9,
+        10,
+        11
+      ],
+      "note": "Each cited work supports its described role: [6] is a systematic review of early LLM explanation work, [9] and [10] propose explanation generation frameworks, and [11] addresses explanation-quality issues.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "综述性工作[6]系统梳理了LLM用于推荐解释的研究现状，并指出该方向仍处于早期阶段。",
+      "verdict": "supported",
+      "citation_indices": [
+        6
+      ],
+      "note": "[6] systematically identifies and analyzes the small body of LLM-based explanation work; the 'only six papers' finding supports the early-stage characterization.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "在方法层面，[9]提出的XRec系统代表了将LLM直接嵌入推荐解释生成流程的典型尝试。",
+      "verdict": "supported",
+      "citation_indices": [
+        9
+      ],
+      "note": "[9] presents XRec, an LLM-based explainable recommendation model that generates natural-language explanations.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "与[9]从推荐模型侧出发不同，[10]关注的是跨域推荐（Cross-domain Recommendation, CDR）场景下的解释生成。",
+      "verdict": "supported",
+      "citation_indices": [
+        9,
+        10
+      ],
+      "note": "[10] is explicitly about explainable cross-domain recommendations with LLMs, matching the claim's assertion.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "这一局限在[11]中得到了更系统的回应。",
+      "verdict": "supported",
+      "citation_indices": [
+        11
+      ],
+      "note": "[11] identifies low-quality explanation problems (personalization, inconsistency, questionable data) and proposes reward-based fine-tuning, systematically responding to explanation-quality limitations.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[11]直接指出了LLM-based可解释推荐系统的核心缺陷：LLM通常在通用数据上预训练，缺乏来自用户的个性化信息，因此可能生成与用户偏好不匹配的解释。",
+      "verdict": "supported",
+      "citation_indices": [
+        11
+      ],
+      "note": "[11] states that LLMs are pre-trained on generic data and lack personalized user information, which may cause explanations that do not match user preferences.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[12]提出的RecExplainer则从另一个角度切入解释生成问题：不是让LLM生成面向用户的推荐理由，而是让LLM解释黑箱推荐模型自身的决策逻辑。",
+      "verdict": "supported",
+      "citation_indices": [
+        12
+      ],
+      "note": "[12] focuses on aligning LLMs to explain the target recommendation model's decision logic rather than generating user-facing reasons.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[6]通过用户研究确立了LLM生成解释的可行性与用户接受度，为后续工作提供了需求侧证据；[9]与[10]分别从单域与跨域场景验证了直接提示LLM生成解释的可行性，但两者都未系统处理解释质量问题；[11]则直面这一缺陷，引入奖励微调机制将解释质量纳入优化目标；进一步将解释的对象从\"推荐结果\"转向\"推荐模型本身\"，扩展了解释的语义边界。",
+      "verdict": "partial",
+      "citation_indices": [
+        6,
+        9,
+        10,
+        11
+      ],
+      "note": "The user-study claim is attributed to a review ([6]) and is thus background; the claim that [9] and [10] did not systematically address explanation quality is not stated in their texts; [9] is adapted/fine-tuned rather than purely direct prompting; only the [11] part is solidly grounded.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "然而，生成解释仍存在个性化不足和不一致等问题[11]；将LLM用作代理模型来解释黑盒推荐模型也仍处于初步探索阶段[12]。",
+      "verdict": "partial",
+      "citation_indices": [
+        11,
+        12
+      ],
+      "note": "[11] supports lack of personalization, but 'inconsistency' is not explicit in the source; [12] supports using LLMs to explain black-box models, but the 'preliminary exploration stage' framing is not stated.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "早期研究在探查ChatGPT的推荐能力时便发现，开放文本生成形式本身就给评测带来困难[4]。",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "[4] reports that over 50% of zero-shot open-text outputs were invalid and difficult to evaluate, and logit_bias was introduced to control output tokens.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "一条路径将LLM视为相关性裁判，以与人类判断的一致性作为可靠性基准[15][20]。",
+      "verdict": "supported",
+      "citation_indices": [
+        15,
+        20
+      ],
+      "note": "Both [15] and [20] treat LLMs as judges and benchmark them against human agreement, using consistency with human judgments as the reliability criterion.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "另一条路径主张评估范式应从语义合理性转向集合级效用[17]。",
+      "verdict": "supported",
+      "citation_indices": [
+        17
+      ],
+      "note": "[17] explicitly argues that semantic plausibility is not a reliable proxy and advocates set-level utility (e.g., SetHit@20) as the evaluation paradigm.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "初期探索以Dai等人对ChatGPT推荐能力的系统检验为代表[4]。",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "[4] is Dai et al.'s systematic examination of ChatGPT's recommendation capabilities across domains and prompt designs.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "该研究设计了点式（point-wise）与成对（pair-wise）两类提示模板，将用户观影历史与候选项目输入LLM，要求其输出评分或偏好判断[4]。",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "[4] presents point-wise and pair-wise prompt templates that feed user history and candidate items, requesting ratings or preference judgments.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "为此引入logit_bias参数约束输出词元，使其落在合法回答范围内[4]。",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "[4] states the use of logit_bias to control output tokens, ensuring outputs fall within valid answer ranges.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "该文在Movie数据集上比较LLM与传统模型，基线为精心调参的矩阵分解（matrix factorization, MF）与神经协同过滤（neural collaborative filtering, NCF）[4]。",
+      "verdict": "supported",
+      "citation_indices": [
+        4
+      ],
+      "note": "Ground text [4] explicitly states MF and NCF parameters were carefully tuned and compared with LLMs on the Movie dataset.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "结果显示，MF与NCF的性能随训练数据比例增加而提升，开箱即用的LLM模型在该比较中超越了二者[4]。",
+      "verdict": "partial",
+      "citation_indices": [
+        4
+      ],
+      "note": "Ground text [4] supports that MF/NCF improve with more training data and that off-the-shelf LLMs outperform them, but only when training data are scarce (less than 40%); the claim omits this condition, overstating the comparison.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "裁判化路径的核心工作是Cranfield评测范式从信息检索向推荐系统的迁移[15]。",
+      "verdict": "supported",
+      "citation_indices": [
+        15
+      ],
+      "note": "Ground text [15] (From IR to RecSys) applies Cranfield-style evaluation to recommendation, matching the claim's description of migrating the Cranfield paradigm from IR to RecSys.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "然而项目级一致性仍属中等，尤其在细粒度兴趣区分上表现有限[15]。",
+      "verdict": "supported",
+      "citation_indices": [
+        15
+      ],
+      "note": "Ground text [15] states 'item-level agreement remains moderate, particularly for fine-grained interest distinctions'.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者将这一反差归因于系统级聚合抵消了与特定系统无关的项目级误差[15]。",
+      "verdict": "partial",
+      "citation_indices": [
+        15
+      ],
+      "note": "The specific attribution that the authors explain the contrast via system-level aggregation canceling non-system-specific item-level errors is not stated in the provided ground text. [defense: The source states that 'item-level agreement with humans is moderate, yet system-level rankings—which aggregate judgments over many user–item pairs—remain stable.' This directly implies that aggregati]",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者还指出，LLM裁判在系统级排序上与人类评估高度一致，可作为人工评估的有前景的补充信号[15]。",
+      "verdict": "supported",
+      "citation_indices": [
+        15
+      ],
+      "note": "Ground text [15] reports high agreement of LLM-judge rankings with human judgments (Kendall's tau up to 0.92) and describes LLM-judge as providing 'valuable complementary insights'.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "裁判模型被部署为额外检索源，使非习惯性播客剧集流播放量提升3.LLM裁判产生的系统级排序与基于人类标注的排序高度一致，Kendall’s τ最高可达0.92[15]。",
+      "verdict": "supported",
+      "citation_indices": [
+        15
+      ],
+      "note": "Ground text [15] reports deployment as an additional retrieval source increasing non-habit podcast streams by 3.5% and high agreement (Kendall's tau up to 0.92) for nDCG@100.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "其二，LLM裁判在条目层面的判断与人类评估的一致性仍属中等，因此更适合作为补充而非替代评估方式[15]。",
+      "verdict": "supported",
+      "citation_indices": [
+        15
+      ],
+      "note": "Ground text [15] says item-level agreement remains moderate and discusses LLM judges as complementary, consistent with using them as a supplement rather than replacement.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "Pradhan等人[20]提出的LLM-as-a-Judge框架面向检索增强生成（retrieval-augmented generation, RAG）中的法律文献推荐评测。",
+      "verdict": "supported",
+      "citation_indices": [
+        20
+      ],
+      "note": "Ground text [20] explicitly frames LLM-as-a-Judge for evaluating Retrieval-Augmented Generation systems in legal contexts.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "该工作以百分比一致率、Cohen's Kappa以及线性与二次加权的Gwet's AC2系数作为一致性指标[20]。",
+      "verdict": "supported",
+      "citation_indices": [
+        20
+      ],
+      "note": "Ground text [20] lists percent agreement, Cohen's Kappa, and linear/quadratic weighted Gwet's AC2 among the metrics used; the claim does not assert exclusivity.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "该文提出使用更稳健的一致性指标（如Gwet’s AC2和秩相关系数）以及统计检验来评估LLM裁判的可靠性[20]。",
+      "verdict": "partial",
+      "citation_indices": [
+        20
+      ],
+      "note": "[20] does evaluate Gwet's AC2 and rank-correlation metrics for LLM-judge reliability, but the claim adds 'statistical tests' and 'more robust' framing not explicitly stated in the ground text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "可见，[15]与[20]共享同一预设：与人类判断的一致性是评测可靠性的基准。",
+      "verdict": "supported",
+      "citation_indices": [
+        15,
+        20
+      ],
+      "note": "Both [15] and [20] treat agreement with human judgments as the reference point: [15] compares LLM judges with human qrels, and [20] calls human evaluation the gold standard and uses inter-rater reliability metrics.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "区别在于，[15]揭示了这种一致性在项目级与系统级之间存在质的分野，而[20]更关注如何以统计指标度量裁判本身的信度。",
+      "verdict": "supported",
+      "citation_indices": [
+        15,
+        20
+      ],
+      "note": "[15] explicitly discusses item-level vs system-level agreement (moderate item-level agreement still yields stable system rankings), while [20] focuses on statistical metrics for judge reliability.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "对上述裁判范式提出根本质疑的是Aouali等人[17]提出的RecoAtlas。",
+      "verdict": "supported",
+      "citation_indices": [
+        17
+      ],
+      "note": "[17] identifies LLM judging's 'central failure mode' and proposes RecoAtlas as a benchmark that questions semantic plausibility as a proxy for utility.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "此类报告由项目集合与自然语言理由构成，其评测对象应从语义合理性转向集合级效用[17]。",
+      "verdict": "partial",
+      "citation_indices": [
+        17
+      ],
+      "note": "The shift from semantic plausibility to set-level utility is grounded in [17], but the description of 'reports composed of item sets and natural language rationales' is not present in the provided ground text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "该文将语义连贯性与解释质量分开度量，并通过受控工具环境评估LLM推荐智能体的行为效用[17]。",
+      "verdict": "partial",
+      "citation_indices": [
+        17
+      ],
+      "note": "Assessing behavioral utility in a tool-based environment is supported by [17], but the claim that the paper separately measures 'semantic coherence' and 'explanation quality' is not backed by the ground text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "该文利用从交互数据中学习的效用代理度量推荐集合的相关性、互补性与多样性，并指出语义合理性不一定反映行为层面的效用[17]。",
+      "verdict": "partial",
+      "citation_indices": [
+        17
+      ],
+      "note": "The core point that semantic plausibility does not necessarily reflect behavioral utility is grounded in [17]; however, 'utility proxies learned from interaction data' is not explicitly stated in the provided excerpt.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "文献[15]与[20]分别指出了LLM评测中的盲区：传统划分会导致相关性标签不完整，常用一致性度量可能产生误导。",
+      "verdict": "partial",
+      "citation_indices": [
+        15,
+        20
+      ],
+      "note": "[15] indeed identifies label incompleteness from traditional splits as a blind spot; [20] cautions about IRR metric assumptions and the need for diverse metrics, but calling common metrics 'misleading' is an interpretive overstatement.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[15][20]相关性判断回答的是\"这些项目是否贴合查询\"。",
+      "verdict": "supported",
+      "citation_indices": [
+        15,
+        20
+      ],
+      "note": "Both [15] and [20] deal with relevance judgments about item-query fit (e.g., nDCG/qrels in [15] and Search Relevancy in [20]).",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[4]以格式约束换取可评测性，[15]与[20]以人类一致性确立裁判合法性，[17]则以集合级效用重新定义评测对象。",
+      "verdict": "partial",
+      "citation_indices": [
+        4,
+        15,
+        17,
+        20
+      ],
+      "note": "The parts about [15]/[20] using human agreement and [17] redefining evaluation in terms of set-level utility are grounded, but the statement that [4] uses 'format constraints for evaluability' is not supported by the provided ground text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "针对这一瓶颈，[7]提出的提示蒸馏（Prompt Distillation）方法从输入侧入手，将冗长、含噪的用户行为文本压缩为精炼的提示向量，从而在不牺牲语义信息的前提下缩短模型需要处理的序列长度。",
+      "verdict": "supported",
+      "citation_indices": [
+        7
+      ],
+      "note": "[7] proposes distilling discrete prompts into continuous prompt vectors to reduce inference time, addressing long/noisy text. The claim's description of compressing text into prompt vectors and shortening sequence length is consistent with the abstract.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[8]的综述将冷启动置于LLM时代的宏观背景下审视，指出互联网平台的多元化与用户、物品规模的指数级增长使得冷启动问题的重要性持续上升。",
+      "verdict": "partial",
+      "citation_indices": [
+        8
+      ],
+      "note": "The provided ground text for [8] (title, TOC, and an excerpt) does not mention platform diversification or exponential growth of users/items as a driver of cold-start importance; no basis for this specific claim. [defense: The claim is directly supported by the cited source. The abstract states: 'Due to the diversification of internet platforms and the exponential growth of users and items, the importance of cold-start ]",
+      "defense_result": null
+    },
+    {
+      "claim_text": "但[8]指出，冷启动推荐在LLM时代仍是长期存在的挑战，并强调相关研究仍需系统梳理与展望。",
+      "verdict": "supported",
+      "citation_indices": [
+        8
+      ],
+      "note": "[8] is a comprehensive survey and roadmap on cold-start recommendation in the LLM era, with sections on challenges and future opportunities, supporting that it frames cold-start as an ongoing challenge needing systematic review.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[13]的实证研究揭示了这一矛盾的严重性：在仅提供年龄、性别、语言等有限人口统计学信号的冷启动设置下，LLM推荐器会基于用户的敏感属性引入系统性偏差。",
+      "verdict": "partial",
+      "citation_indices": [
+        13
+      ],
+      "note": "[13] supports the core claim that LLM recommenders introduce bias based on sensitive attributes in cold-start settings, but the specific attributes 'age, gender, language' are not enumerated in the provided ground text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "这一发现与[8]的乐观预期形成鲜明对照：LLM的世界知识虽能缓解冷启动的覆盖率问题，却可能以放大社会偏见为代价。",
+      "verdict": "partial",
+      "citation_indices": [
+        8
+      ],
+      "note": "The bias finding from [13] is grounded, but the contrast with [8]'s 'optimistic expectation' and the specific claim about mitigating coverage via world knowledge are not explicitly present in [8]'s ground text; the juxtaposition is interpretive.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[14]的研究将视角扩展到流行度偏差（popularity bias），揭示了一个更深层的机制性缺陷：现有去偏方法将流行度偏差仅视为多样性增强问题，而忽视了其语义维度。",
+      "verdict": "partial",
+      "citation_indices": [
+        14
+      ],
+      "note": "[14] does discuss popularity-bias mitigation approaches (e.g., diversifying lists, modifying objectives), but the claim that existing methods 'only' treat it as diversity enhancement and 'ignore the semantic dimension' is not directly stated in the provided text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "与[14]揭示的\"提示无法纠正偏差\"形成互补的是[21]提出的语言模型先验（Language-Model Prior）方法，后者从生成侧为冷启动物品提供解决方案。",
+      "verdict": "partial",
+      "citation_indices": [
+        14,
+        21
+      ],
+      "note": "[21] supports the language-model prior for cold-start items, but [14]'s ground text does not explicitly state that 'prompts cannot correct bias'; the contrast is not grounded in [14].",
+      "defense_result": null
+    },
+    {
+      "claim_text": "将[21]与[13]并置，可以看到LLM时代冷启动问题的两面性：语言模型先验提供了乐观的解决路径，而实证研究则揭示了这一路径在公平性维度上的代价。",
+      "verdict": "partial",
+      "citation_indices": [
+        13,
+        21
+      ],
+      "note": "Both [21] (LM prior as a solution) and [13] (empirical bias evidence) are individually supported, but the claimed direct trade-off or 'cost' of the LM-prior path is an interpretive synthesis not grounded in either source.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[25]提出的CheatAgent系统将攻击视角引入LLM推荐系统研究，其研究问题直指安全漏洞：LLM智能体能否被操纵以破坏推荐系统的完整性？",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        25
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "将[25]与前述工作串联，可以勾勒出LLM推荐系统鲁棒性讨论的完整逻辑：效率优化（[7]）与冷启动缓解（[8]、）解决了部署的可行性问题，公平性研究（[13]、）揭示了模型在非理想条件下的系统性缺陷，而安全攻击（[25]）则表明这些缺陷可能被恶意利用，构成实际的安全威胁。",
+      "verdict": "partial",
+      "citation_indices": [
+        7,
+        8,
+        13,
+        25
+      ],
+      "note": "The parts about [7], [8], and [13] are grounded, but [25] has no ground text, so the security-attack assertion is unverifiable; the overall synthesis exceeds what the provided sources individually support.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "对话推荐面临的核心问题是自然语言表达的多样性，尤其是“我在注意体重”这类间接表述难以映射为可检索的偏好条件[18]。",
+      "verdict": "partial",
+      "citation_indices": [
+        18
+      ],
+      "note": "[18] supports the claim that ConvRec must handle diverse and indirect NL expressions, but the specific example '我在注意体重' is not present in the provided ground text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "多模态推荐则要平衡语义化表示带来的增益与在线系统对效率和延迟的硬约束[22][23]。",
+      "verdict": "supported",
+      "citation_indices": [
+        22,
+        23
+      ],
+      "note": "Both [22] and [23] address the tension between semantic/multimodal representation gains and efficiency/latency constraints in online settings.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "这一主题的周边已有生成式推荐综述[28]，以及将提示策略用于新闻推荐[29]、以弱模态信号增强多模态推荐[30]等探索。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        28,
+        29,
+        30
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "Kemper等人[18]提出的RA-Rec以提示驱动的半结构化自然语言状态追踪为核心，用LLM执行多标签意图分类，并持续更新一个JSON格式的半结构化对话状态。",
+      "verdict": "supported",
+      "citation_indices": [
+        18
+      ],
+      "note": "Ground text for [18] explicitly describes RA-Rec's use of LLM prompting for multi-label intent classification and updating a JSON semi-structured NL dialogue state.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "由此，系统能应对间接、无法直接检索的偏好表述[18]。",
+      "verdict": "partial",
+      "citation_indices": [
+        18
+      ],
+      "note": "Ground text supports capturing nuanced NL expressions and preference tracking, but the specific capability of handling indirect, non-directly retrievable preferences is an inference not explicitly stated.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "RA-Rec本身不绑定特定LLM，任何基于提示的模型都可以替换使用[18]。",
+      "verdict": "supported",
+      "citation_indices": [
+        18
+      ],
+      "note": "Ground text states RA-Rec is LLM-agnostic and will work with any prompt-based LLM model.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "文献[24]观察到，ChatGPT等高级LLM在领域特定的对话推荐任务上能力受限，尤其在生成扎根于推荐知识的响应时[24]。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        24
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "该工作将外部知识与目标引导整合进LLM的使用流程，使生成过程受明确推荐目标的约束[24]。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        24
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "与RA-Rec用检索文本补充上下文不同[18]，这条路线依赖结构化知识与任务级引导，其差异实质是对LLM知识缺口性质的判断不同：检索增强偏向动态事实和个体偏好，知识注入偏向稳定且关系密集的领域知识。",
+      "verdict": "supported",
+      "citation_indices": [
+        18
+      ],
+      "note": "Ground text confirms RA-Rec uses review-based retrieval-augmented generation to supplement context with retrieved text; the contrast and interpretation are the claim's synthesis, not contradicted by the source.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "但[24]的摘要实际上包含方法设计与实验证据：采用知识检索代理与目标规划代理，并在两个多目标CRS数据集上报告了改进。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        24
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "Wang等人提出的Matryoshka表示学习（Matryoshka Representation Learning）面向顺序推荐，将语言与视觉信息整合进同一模型，训练完成后可在不同表示大小下部署，以适应多样化的效率要求[22]。",
+      "verdict": "supported",
+      "citation_indices": [
+        22
+      ],
+      "note": "Ground text for [22] presents Matryoshka representation learning for multimodal sequential recommendation, integrating language and vision, and enabling multiple model sizes from a single training session for deployment.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "该方案把效率问题放到表示维度上解决：部署环节可以按场景选择表示粒度[22]。",
+      "verdict": "supported",
+      "citation_indices": [
+        22
+      ],
+      "note": "Ground text for [22] frames efficiency at the representation level (multiple sizes, 'deploy anywhere'), consistent with selecting representation granularity at deployment.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "与之相对，文献[23]提出的LMSR在系统架构层面处理同一问题。",
+      "verdict": "supported",
+      "citation_indices": [
+        23
+      ],
+      "note": "Ground text for [23] presents LMSR as a two-stage framework addressing low-latency multimodal semantic ranking at the system architecture level.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "LMSR是一个两阶段框架，将大模型的语义排序引入大规模在线广告推荐，用阶段分离隔离语义计算的延迟成本[23]。",
+      "verdict": "partial",
+      "citation_indices": [
+        23
+      ],
+      "note": "Ground text confirms LMSR is a two-stage framework using LLM semantics for advertising recommendation, but the specific rationale of 'stage separation to isolate latency cost' is not explicitly stated.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "但两篇摘要都止步于框架描述：Matryoshka未说明表示压缩与精度之间的量化关系[22]，LMSR未给出任何延迟或准确性指标[23]。",
+      "verdict": "supported",
+      "citation_indices": [
+        22,
+        23
+      ],
+      "note": "The provided texts lack quantitative compression-accuracy trade-off details for [22] and specific latency/accuracy metrics for [23], consistent with the claim.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "RA-Rec用半结构化状态限制LLM输出的自由度[18]，文献[24]用目标引导约束生成方向[24]，Matryoshka在向量维度上压缩语义表示[22]，LMSR在计算流程中安排分级[23]。",
+      "verdict": "partial",
+      "citation_indices": [
+        18,
+        22,
+        23,
+        24
+      ],
+      "note": "RA-Rec's semi-structured state tracking, Matryoshka's dimension-compressed representation, and LMSR's staged pipeline are grounded in the provided texts; however, [24] has NO GROUND TEXT, so the goal-guided constraint claim attributed to it is unsupported.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "因此，在摘要层面，本主题的部分文献呈现方案多于证据：[18]与[23]未报告量化结果，[22]亦未给出具体实验数据；而[24]的摘要则明确报告了实验改进。",
+      "verdict": "partial",
+      "citation_indices": [
+        18,
+        22,
+        23,
+        24
+      ],
+      "note": "[18] and [23] indeed lack quantitative results, but [22]'s excerpt includes dataset statistics and parameter-saving measurements, contradicting the claim that [22] gives no concrete experimental data; [24] has no ground text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[0]与作者等人[1]较早报告大语言模型在知识广度与泛化能力上的潜力，该项能力构成推荐应用的前提，但潜力并不自动转化为推荐效能。",
+      "verdict": "partial",
+      "citation_indices": [
+        0,
+        1
+      ],
+      "note": "[0] and [1] are surveys providing field context; they do not specifically report the claimed knowledge-breadth/generalization potential or the claim that such potential does not automatically translate into recommendation effectiveness. [defense: The survey explicitly highlights LLMs' 'extensive coverage of external knowledge' and 'learning universal representations,' supporting the claim about knowledge breadth and generalization potential. I]",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[3]提出的TALLRec依据指令调优实验主张，通用语言模型必须经过推荐数据对齐才能有效工作。",
+      "verdict": "supported",
+      "citation_indices": [
+        3
+      ],
+      "note": "TALLRec's ground text states that in-context learning alone fails because LLMs are misaligned with recommendation and that instruction/rec-tuning is used to align LLMs, supporting the claim.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "与之相对，作者等人[4]对ChatGPT零样本能力的考察与作者等人[16]提出的纯提示表示学习方法都认为，不更新参数即可直接支撑推荐流程。",
+      "verdict": "partial",
+      "citation_indices": [
+        4,
+        16
+      ],
+      "note": "[4] supports zero-shot/no-update prompting of ChatGPT, but [16] proposes prompt-based LLM representation learning while still training a GCN-based recommender, so 'no parameter update directly supports the pipeline' overstates [16]'s position.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[19]提出的RecBase则将分歧推到极端。",
+      "verdict": "partial",
+      "citation_indices": [
+        19
+      ],
+      "note": "RecBase's zero-shot generative pretraining is grounded in [19], but '推分歧推到极端' is interpretive framing not made by the source.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[2]与[26]提出的文本适配方案将推荐任务统一为语言建模/生成问题，以利用预训练语言模型的能力。",
+      "verdict": "partial",
+      "citation_indices": [
+        2,
+        26
+      ],
+      "note": "[2] clearly unifies recommendation tasks as language modeling/generation; however, [26] has NO GROUND TEXT, so the part attributed to [26] is unverifiable and contributes no support.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[21]提出的语言先验方案主张以先验知识覆盖冷启动物品，隐含假设先验可以替代交互历史。",
+      "verdict": "partial",
+      "citation_indices": [
+        21
+      ],
+      "note": "[21] does use a language-model prior to overcome cold-start items, but the claim that this implicitly assumes priors can replace interaction history is an interpretive addition not stated in the ground text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[13]在人口统计信号受限的冷启动设定下报告了推荐结果中的公平性偏差。",
+      "verdict": "supported",
+      "citation_indices": [
+        13
+      ],
+      "note": "[13] reports measurable fairness bias in LLM-based recommendations under a cold-start setting, e.g., Western-default proportions across personas.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[8]仍将冷启动归为未解决的关键挑战。",
+      "verdict": "supported",
+      "citation_indices": [
+        8
+      ],
+      "note": "[8] is a cold-start survey with a 'Challenges and Future Opportunities' section covering unresolved cold-start issues, supporting the claim that cold start remains a key open challenge.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "若先验完全可迁移，[13]报告的偏差不应出现；若先验毫无作用，[21]的方案便缺少机制基础。",
+      "verdict": "partial",
+      "citation_indices": [
+        13,
+        21
+      ],
+      "note": "[13] does report LLM biases and [21] does rely on an LM prior, but the conditional framing (if the prior fully transferred, no bias would appear) is not stated by either source and is an interpretive addition.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[6]较早利用大语言模型生成自然语言解释；作者等人[9]与作者等人[10]提出的直接提示策略延续该设置，把生成流畅度当作解释有效性的代理指标。",
+      "verdict": "partial",
+      "citation_indices": [
+        6,
+        9,
+        10
+      ],
+      "note": "[10] supports direct prompting for explainable recommendation and [9] uses LLMs for explanations, but [6] is a review (not a primary early adopter) and the 'fluency as proxy' detail is not grounded in the cited texts.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[11]与作者等人[12]则依据评测证据反驳该策略：未经对准的生成解释质量不足，需要追加奖励微调或对齐环节。",
+      "verdict": "supported",
+      "citation_indices": [
+        11,
+        12
+      ],
+      "note": "[11] demonstrates reward-based fine-tuning improves generated explanations over unaligned LLM2ER, and [12] shows aligning a raw LLM improves explanation quality.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[17]主张评估应从语义合理性转向集合级效用（set-level utility），将推荐视作组合优化问题。",
+      "verdict": "supported",
+      "citation_indices": [
+        17
+      ],
+      "note": "[17] explicitly frames evaluation as moving from semantic plausibility to set-level utility, consistent with treating recommendation as selecting item sets with combinatorial utility.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "作者等人[15]与作者等人[20]则强调大语言模型裁判与人类相关性判断的一致性，把推荐放回信息检索传统。",
+      "verdict": "supported",
+      "citation_indices": [
+        15,
+        20
+      ],
+      "note": "[15] studies LLM-judge agreement in a Cranfield-style recommendation collection and [20] compares LLM judges against human relevance judgments in legal RAG, both connecting to the IR evaluation tradition.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "效率与延迟是文献中罕见的共识性障碍，作者等人[7]、作者等人[22]与作者等人[23]分别以提示蒸馏、表示压缩与推理加速等策略加以应对。",
+      "verdict": "supported",
+      "citation_indices": [
+        7,
+        22,
+        23
+      ],
+      "note": "[7] uses prompt distillation to improve efficiency, [22] compresses representations via Matryoshka learning, and [23] targets low latency via distillation and multi-task balancing; all three address efficiency/latency.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "将推荐任务统一建模为语言处理范式（[2]）以及通过指令微调对齐模型与推荐目标（[3]）已被证明是可行的技术路线。",
+      "verdict": "supported",
+      "citation_indices": [
+        2,
+        3
+      ],
+      "note": "[2] unifies recommendation tasks as a text-to-text language processing paradigm and demonstrates its effectiveness; [3] shows that tuning/aligning LLMs with recommendation data is a feasible and effective route.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "在可解释性方面，利用LLM生成自然语言解释已成为主流方案（[9]），但生成质量存在个性化不足、忠实度欠缺等系统性问题（[11]）。",
+      "verdict": "partial",
+      "citation_indices": [
+        9,
+        11
+      ],
+      "note": "[9] is an LLM-based explainable recommendation work, but the 'mainstream' characterization is not stated; [11] motivates quality-improving rewards but does not explicitly list insufficient personalization and lack of faithfulness as systematic problems.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "尽管LLM作为裁判的评估方式在信息检索领域显示出与人工判断的一致性（[15]），但其在推荐场景中的可靠性、可复现性以及是否应取代基于交互行为的离线指标，仍是未决问题。",
+      "verdict": "supported",
+      "citation_indices": [
+        15
+      ],
+      "note": "[15] discusses LLM-judge agreement with human judgments and raises open questions about generalization, reproducibility, and the relationship to interaction-based offline metrics.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "[16]在摘要中说明了与state-of-the-art推荐模型的对比评估，而[18]与[21]的摘要主要以框架或方法展示为主，未提供量化对比结果。",
+      "verdict": "partial",
+      "citation_indices": [
+        16,
+        18,
+        21
+      ],
+      "note": "[16] does state comparison with state-of-the-art recommender models and [18] is framework-oriented, but [21]'s ground text contains quantitative comparison results (e.g., SASRec vs BPRMF), contradicting the claim that it provides no quantitative results. [defense: The verifier's verdict is based on a misreading of the claim. The claim explicitly states that the abstracts ([18] and [21]) focus on framework/method presentation and do not provide quantitative comp]",
+      "defense_result": null
+    },
+    {
+      "claim_text": "效率问题仅有零星工作触及：提示蒸馏（[7]）和多分辨率表示学习（[22]）分别从推理速度和表征压缩角度切入，但缺乏跨模型、跨任务的系统性效率分析。",
+      "verdict": "partial",
+      "citation_indices": [
+        7,
+        22
+      ],
+      "note": "[7] and [22] do address efficiency (inference speed and representation compression), but the claim's assertions that these are 'only sporadic works' and that there is no systematic cross-model/cross-task analysis are not supported by the cited ground texts.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "公平性研究局限于冷启动场景下的特定偏差（[13]）和流行度偏差（[14]），尚未形成覆盖多用户群体、多交互类型的系统审计框架。",
+      "verdict": "partial",
+      "citation_indices": [
+        13,
+        14
+      ],
+      "note": "[13] does focus on cold-start biases and [14] on popularity bias, but the claim's negative statement that no systematic audit framework across multiple user groups and interaction types exists is not grounded in the cited sources.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "鲁棒性研究几乎空白，仅有一项工作考察了针对LLM推荐系统的对抗攻击（[25]），数据投毒、提示注入等威胁向量均未得到充分探讨。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        25
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "当前LLM-as-judge方案（[15]、[17]、[20]）各自为政，评测设置差异显著，亟需一个统一的评测框架以支持跨系统比较。",
+      "verdict": "partial",
+      "citation_indices": [
+        15,
+        17,
+        20
+      ],
+      "note": "[15], [17], and [20] are indeed LLM-as-judge works with differing evaluation contexts, but none of the cited texts states that these approaches are fragmented or that a unified evaluation framework is urgently needed; this framing is added by the claim.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "现有工作多假设用户偏好静态不变，而[19]已指出语言中心预训练与推荐任务之间的根本性错配，时间演化偏好与会话级动态的建模尚缺乏系统评估。",
+      "verdict": "unsupported",
+      "citation_indices": [
+        19
+      ],
+      "note": "[19]'s ground text contains no statement about a fundamental mismatch between language-centric pretraining and recommendation tasks, nor about static user preferences or session-level dynamics. The claim attributes a finding to [19] that is absent from its text.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "目前仅有[10]涉及可解释跨域推荐，大规模评估LLM在不同领域间的零样本泛化能力仍是空白。",
+      "verdict": "partial",
+      "citation_indices": [
+        10
+      ],
+      "note": "[10] does present an explainable cross-domain recommendation approach, but the claim's assertions that it is the 'only' such work and that large-scale zero-shot generalization evaluation is 'blank' are not supported by the cited abstract.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "现有多模态工作（[22]、[23]）聚焦于效率优化，尚未与可解释性、公平性等维度形成有机整合。",
+      "verdict": "partial",
+      "citation_indices": [
+        22,
+        23
+      ],
+      "note": "[22] and [23] do focus on efficiency-oriented multimodal recommendation, but the claim's statement that they have not integrated explainability or fairness is a gap assertion not present in either source.",
+      "defense_result": null
+    },
+    {
+      "claim_text": "对抗攻击（[25]）仅是起点，数据投毒、提示注入、模型窃取等威胁向量需要建立防御体系。",
+      "verdict": "unverifiable",
+      "citation_indices": [
+        25
+      ],
+      "note": "cited source(s) have no abstract available",
+      "defense_result": null
+    },
+    {
+      "claim_text": "提示蒸馏（[7]）和两阶段排序（[23]）提供了初步思路，但如何在保持推荐质量的前提下实现推理成本的可控降低，仍需更全面的方法论支撑。",
+      "verdict": "partial",
+      "citation_indices": [
+        7,
+        23
+      ],
+      "note": "[7] and [23] do offer approaches to reduce inference cost (prompt distillation and two-stage ranking, respectively), but the labeling of these as 'preliminary ideas' and the claim that more comprehensive methodological support is needed are interpretive framings not stated in the cited texts.",
+      "defense_result": null
+    }
+  ]
+}

@@ -1,0 +1,182 @@
+{
+  "total_seconds": 5296.8,
+  "stages": {
+    "_start->intent": 0.0,
+    "intent->planner": 4.3,
+    "planner->seeds": 2.8,
+    "seeds->search": 48.1,
+    "search->filter": 76.4,
+    "filter->snowball": 10.8,
+    "snowball->enrich": 16.1,
+    "enrich->extract": 14.5,
+    "extract->compose1:organize": 80.1,
+    "compose1:organize->compose1:synthesize": 29.0,
+    "compose1:synthesize->compose1:ground": 134.5,
+    "compose1:ground->compose1:write": 178.0,
+    "compose1:write->compose1:verify": 426.9,
+    "compose1:verify->compose1:defense": 353.2,
+    "compose1:defense->compose1:rewrite": 30.2,
+    "compose1:rewrite->compose1:health": 152.6,
+    "compose1:health->reflect": 79.5,
+    "reflect->compose2:organize": 118.3,
+    "compose2:organize->compose2:synthesize": 43.8,
+    "compose2:synthesize->compose2:ground": 110.3,
+    "compose2:ground->compose2:write": 14.5,
+    "compose2:write->compose2:verify": 477.8,
+    "compose2:verify->compose2:defense": 263.3,
+    "compose2:defense->compose2:rewrite": 42.1,
+    "compose2:rewrite->compose2:health": 252.5,
+    "compose2:health->compose3:organize": 862.2,
+    "compose3:organize->compose3:synthesize": 59.8,
+    "compose3:synthesize->compose3:ground": 108.9,
+    "compose3:ground->compose3:write": 67.7,
+    "compose3:write->compose3:verify": 533.2,
+    "compose3:verify->compose3:defense": 262.2,
+    "compose3:defense->compose3:rewrite": 35.5,
+    "compose3:rewrite->compose3:health": 290.4,
+    "compose3:health->finalize": 117.1
+  },
+  "token_usage_by_stage": {
+    "intent": {
+      "calls": 1,
+      "prompt": 269,
+      "completion": 76
+    },
+    "planner": {
+      "calls": 1,
+      "prompt": 306,
+      "completion": 185
+    },
+    "seeds": {
+      "calls": 4,
+      "prompt": 1103,
+      "completion": 4531
+    },
+    "filter": {
+      "calls": 6,
+      "prompt": 6969,
+      "completion": 6040
+    },
+    "snowball": {
+      "calls": 3,
+      "prompt": 3336,
+      "completion": 3084
+    },
+    "extract": {
+      "calls": 6,
+      "prompt": 9111,
+      "completion": 38810
+    },
+    "compose1:organize": {
+      "calls": 1,
+      "prompt": 4319,
+      "completion": 4206
+    },
+    "compose1:synthesize": {
+      "calls": 3,
+      "prompt": 10451,
+      "completion": 12125
+    },
+    "compose1:write": {
+      "calls": 21,
+      "prompt": 90560,
+      "completion": 183715
+    },
+    "compose1:verify": {
+      "calls": 22,
+      "prompt": 282930,
+      "completion": 168078
+    },
+    "compose1:defense": {
+      "calls": 9,
+      "prompt": 11329,
+      "completion": 9528
+    },
+    "compose1:rewrite": {
+      "calls": 3,
+      "prompt": 34344,
+      "completion": 17745
+    },
+    "compose1:health": {
+      "calls": 4,
+      "prompt": 2867,
+      "completion": 8295
+    },
+    "reflect": {
+      "calls": 4,
+      "prompt": 3874,
+      "completion": 7082
+    },
+    "compose2:organize": {
+      "calls": 1,
+      "prompt": 4562,
+      "completion": 5488
+    },
+    "compose2:synthesize": {
+      "calls": 3,
+      "prompt": 11189,
+      "completion": 10102
+    },
+    "compose2:write": {
+      "calls": 21,
+      "prompt": 82887,
+      "completion": 193029
+    },
+    "compose2:verify": {
+      "calls": 19,
+      "prompt": 200363,
+      "completion": 132759
+    },
+    "compose2:defense": {
+      "calls": 25,
+      "prompt": 33261,
+      "completion": 19968
+    },
+    "compose2:rewrite": {
+      "calls": 7,
+      "prompt": 70560,
+      "completion": 34721
+    },
+    "compose2:health": {
+      "calls": 11,
+      "prompt": 8967,
+      "completion": 22257
+    },
+    "compose3:organize": {
+      "calls": 1,
+      "prompt": 5076,
+      "completion": 6795
+    },
+    "compose3:synthesize": {
+      "calls": 3,
+      "prompt": 12347,
+      "completion": 10589
+    },
+    "compose3:write": {
+      "calls": 22,
+      "prompt": 101323,
+      "completion": 195927
+    },
+    "compose3:verify": {
+      "calls": 16,
+      "prompt": 221579,
+      "completion": 104803
+    },
+    "compose3:defense": {
+      "calls": 19,
+      "prompt": 28454,
+      "completion": 15313
+    },
+    "compose3:rewrite": {
+      "calls": 7,
+      "prompt": 80670,
+      "completion": 46749
+    },
+    "compose3:health": {
+      "calls": 4,
+      "prompt": 3071,
+      "completion": 11768
+    }
+  },
+  "total_tokens": 2599845
+}

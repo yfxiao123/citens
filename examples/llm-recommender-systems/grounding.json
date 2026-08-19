@@ -1,0 +1,150 @@
+{
+  "with_fulltext": 21,
+  "total": 24,
+  "papers": [
+    {
+      "index": 0,
+      "title": "A survey on large language models for recommendation",
+      "has_fulltext": true,
+      "n_chunks": 103
+    },
+    {
+      "index": 1,
+      "title": "Recommender Systems in the Era of Large Language Models (LLMs)",
+      "has_fulltext": true,
+      "n_chunks": 171
+    },
+    {
+      "index": 2,
+      "title": "Recommendation as Language Processing (RLP): A Unified Pretrain, Personalized Prompt &amp; Predict Paradigm (P5)",
+      "has_fulltext": true,
+      "n_chunks": 132
+    },
+    {
+      "index": 3,
+      "title": "TALLRec: An Effective and Efficient Tuning Framework to Align Large Language Model with Recommendation",
+      "has_fulltext": true,
+      "n_chunks": 43
+    },
+    {
+      "index": 4,
+      "title": "Uncovering ChatGPT’s Capabilities in Recommender Systems",
+      "has_fulltext": true,
+      "n_chunks": 49
+    },
+    {
+      "index": 5,
+      "title": "When large language models meet personalization: perspectives of challenges and opportunities",
+      "has_fulltext": true,
+      "n_chunks": 162
+    },
+    {
+      "index": 6,
+      "title": "On explaining recommendations with Large Language Models: a review",
+      "has_fulltext": true,
+      "n_chunks": 31
+    },
+    {
+      "index": 7,
+      "title": "Prompt Distillation for Efficient LLM-based Recommendation",
+      "has_fulltext": false,
+      "n_chunks": 1
+    },
+    {
+      "index": 8,
+      "title": "Cold-Start Recommendation towards the Era of Large Language Models (LLMs): A Comprehensive Survey and Roadmap",
+      "has_fulltext": true,
+      "n_chunks": 165
+    },
+    {
+      "index": 9,
+      "title": "XRec: Large Language Models for Explainable Recommendation",
+      "has_fulltext": true,
+      "n_chunks": 89
+    },
+    {
+      "index": 10,
+      "title": "Instructing and Prompting Large Language Models for Explainable Cross-domain Recommendations",
+      "has_fulltext": false,
+      "n_chunks": 1
+    },
+    {
+      "index": 11,
+      "title": "Fine-Tuning Large Language Model Based Explainable Recommendation with Explainable Quality Reward",
+      "has_fulltext": true,
+      "n_chunks": 80
+    },
+    {
+      "index": 12,
+      "title": "RecExplainer: Aligning Large Language Models for Explaining Recommendation Models",
+      "has_fulltext": true,
+      "n_chunks": 66
+    },
+    {
+      "index": 13,
+      "title": "Revealing Potential Biases in LLM-Based Recommender Systems in the Cold Start Setting",
+      "has_fulltext": true,
+      "n_chunks": 38
+    },
+    {
+      "index": 14,
+      "title": "Bridging Semantic Understanding and Popularity Bias with LLMs",
+      "has_fulltext": true,
+      "n_chunks": 58
+    },
+    {
+      "index": 15,
+      "title": "From IR to RecSys: Evaluating LLM-based Judges in Cranfield-style Recommendation Collections",
+      "has_fulltext": true,
+      "n_chunks": 79
+    },
+    {
+      "index": 16,
+      "title": "A Prompting-Based Representation Learning Method for Recommendation with Large Language Models",
+      "has_fulltext": true,
+      "n_chunks": 54
+    },
+    {
+      "index": 17,
+      "title": "RecoAtlas: From Semantic Plausibility to Set-Level Utility in LLM Recommendation Agents",
+      "has_fulltext": true,
+      "n_chunks": 90
+    },
+    {
+      "index": 18,
+      "title": "Retrieval-Augmented Conversational Recommendation with Prompt-based Semi-Structured Natural Language State Tracking",
+      "has_fulltext": true,
+      "n_chunks": 25
+    },
+    {
+      "index": 19,
+      "title": "RecBase: Generative Foundation Model Pretraining for Zero-Shot Recommendation",
+      "has_fulltext": true,
+      "n_chunks": 114
+    },
+    {
+      "index": 20,
+      "title": "LLM-as-a-Judge: Rapid Evaluation of Legal Document Recommendation for Retrieval-Augmented Generation",
+      "has_fulltext": true,
+      "n_chunks": 36
+    },
+    {
+      "index": 21,
+      "title": "Language-Model Prior Overcomes Cold-Start Items",
+      "has_fulltext": true,
+      "n_chunks": 52
+    },
+    {
+      "index": 22,
+      "title": "Train Once, Deploy Anywhere: Matryoshka Representation Learning for Multimodal Recommendation",
+      "has_fulltext": true,
+      "n_chunks": 66
+    },
+    {
+      "index": 23,
+      "title": "Low-Latency Multimodal Semantic Ranking for Real-Time Advertising Recommendation",
+      "has_fulltext": false,
+      "n_chunks": 1
+    }
+  ]
+}

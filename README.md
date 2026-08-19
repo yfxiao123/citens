@@ -158,7 +158,7 @@ citens eval --from-runs "runs/*"          # offline: table from existing runs
 citens eval "limit order book modeling" -n 13   # live: run + collect
 ```
 
-A full example run (review, verdicts, comparison matrix, fetch list) lives in [`examples/order-book-modeling/`](examples/order-book-modeling/).
+A full example run — 31-reference LLM-recommender survey, 99% audited precision on 107 claims, 21/24 full-text-grounded, self-contained audit browser — lives in [`examples/llm-recommender-systems/`](examples/llm-recommender-systems/).
 
 ## Runtime at scale
 
@@ -214,4 +214,4 @@ MIT. The runtime-fetched SCImago dataset is CC BY-NC (attributed to SCImago Lab;
 
 快速开始：双击 `start.bat`（Windows）或 `./start.sh`（macOS/Linux）——自动建环境、装依赖、打开网页控制台；手动方式 `uv sync` → 填 `.env` → `citens run 主题 -n 8`。
 
-示例产物见 [`examples/order-book-modeling/`](examples/order-book-modeling/)（主题「订单簿建模」，8 篇论文，70 条论断，引用精度 73%）。
+示例产物见 [`examples/llm-recommender-systems/`](examples/llm-recommender-systems/)（主题「基于大语言模型的推荐系统」，31 篇参考文献，107 条论断，审计后引用精度 99%，21/24 篇全文溯源，附自包含审计浏览器）。

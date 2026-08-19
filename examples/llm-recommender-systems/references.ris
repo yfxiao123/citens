@@ -1,0 +1,466 @@
+TY  - JOUR
+AU  - Likang Wu
+AU  - Zhi Zheng
+AU  - Zhaopeng Qiu
+AU  - Hao Wang
+AU  - Hongchao Gu
+AU  - Tingjia Shen
+AU  - Chuan Qin
+AU  - Chen Zhu
+AU  - Hengshu Zhu
+AU  - Qi Liu
+AU  - Hui Xiong
+AU  - Enhong Chen
+TI  - A survey on large language models for recommendation
+JO  - World Wide Web
+PY  - 2024
+DO  - 10.1007/s11280-024-01291-2
+UR  - https://openalex.org/W4401834466
+ER  - 
+
+TY  - JOUR
+AU  - Zihuai Zhao
+AU  - Wenqi Fan
+AU  - Jiatong Li
+AU  - Yunqing Liu
+AU  - Xiaowei Mei
+AU  - Yiqi Wang
+AU  - Zhen Wen
+AU  - Fei Wang
+AU  - Xiangyu Zhao
+AU  - Jiliang Tang
+AU  - Qing Li
+TI  - Recommender Systems in the Era of Large Language Models (LLMs)
+JO  - IEEE Transactions on Knowledge and Data Engineering
+PY  - 2024
+DO  - 10.1109/tkde.2024.3392335
+UR  - https://openalex.org/W4394994587
+ER  - 
+
+TY  - JOUR
+AU  - Shijie Geng
+AU  - Shuchang Liu
+AU  - Zuohui Fu
+AU  - Yingqiang Ge
+AU  - Yongfeng Zhang
+TI  - Recommendation as Language Processing (RLP): A Unified Pretrain, Personalized Prompt &amp; Predict Paradigm (P5)
+JO  - seed-expansion
+PY  - 2022
+DO  - 10.1145/3523227.3546767
+UR  - https://openalex.org/W4296591867
+ER  - 
+
+TY  - JOUR
+AU  - Keqin Bao
+AU  - Jizhi Zhang
+AU  - Yang Zhang
+AU  - Wenjie Wang
+AU  - Fuli Feng
+AU  - Xiangnan He
+TI  - TALLRec: An Effective and Efficient Tuning Framework to Align Large Language Model with Recommendation
+JO  - 10.1145/3523227.3546767
+PY  - 2023
+DO  - 10.1145/3604915.3608857
+UR  - https://openalex.org/W4386728933
+ER  - 
+
+TY  - JOUR
+AU  - Sunhao Dai
+AU  - Ninglu Shao
+AU  - Haiyuan Zhao
+AU  - Weijie Yu
+AU  - Zihua Si
+AU  - Xu Chen
+AU  - Zhongxiang Sun
+AU  - Xiao Zhang
+AU  - Jun Xu
+TI  - Uncovering ChatGPT’s Capabilities in Recommender Systems
+JO  - seed-expansion
+PY  - 2023
+DO  - 10.1145/3604915.3610646
+UR  - https://openalex.org/W4368755500
+ER  - 
+
+TY  - JOUR
+AU  - Jing Chen
+AU  - Zheng Liu
+AU  - Xu Huang
+AU  - Chenwang Wu
+AU  - Qi Liu
+AU  - Gangwei Jiang
+AU  - Yuanhao Pu
+AU  - Yuxuan Lei
+AU  - Xiaolong Chen
+AU  - Xingmei Wang
+AU  - Kai Zheng
+AU  - Defu Lian
+AU  - Enhong Chen
+TI  - When large language models meet personalization: perspectives of challenges and opportunities
+JO  - World Wide Web
+PY  - 2024
+DO  - 10.1007/s11280-024-01276-1
+UR  - https://openalex.org/W4400118952
+ER  - 
+
+TY  - JOUR
+AU  - Alan Said
+TI  - On explaining recommendations with Large Language Models: a review
+JO  - Frontiers in Big Data
+PY  - 2025
+VL  - 7
+SP  - 1505284
+EP  - 1505284
+DO  - 10.3389/fdata.2024.1505284
+UR  - https://openalex.org/W4406849765
+ER  - 
+
+TY  - JOUR
+AU  - Lei Li
+AU  - Yongfeng Zhang
+AU  - Li Chen
+TI  - Prompt Distillation for Efficient LLM-based Recommendation
+JO  - OpenAlex
+PY  - 2023
+SP  - 1348
+EP  - 1357
+DO  - 10.1145/3583780.3615017
+UR  - https://openalex.org/W4387848745
+ER  - 
+
+TY  - JOUR
+AU  - Weizhi Zhang
+AU  - Yuan-Qi Bei
+AU  - Liangwei Yang
+AU  - Henry Peng Zou
+AU  - Peilin Zhou
+AU  - Aiwei Liu
+AU  - Yinghui Li
+AU  - Hao Chen
+AU  - Jianling Wang
+AU  - Yu Wang
+AU  - Feiran Huang
+AU  - Sheng Zhou
+AU  - Jiajun Bu
+AU  - Allen Lin
+AU  - James Caverlee
+AU  - F. Karray
+AU  - Irwin King
+AU  - Philip S. Yu
+TI  - Cold-Start Recommendation towards the Era of Large Language Models (LLMs): A Comprehensive Survey and Roadmap
+JO  - arXiv.org
+PY  - 2025
+DO  - 10.48550/arXiv.2501.01945
+UR  - https://www.semanticscholar.org/paper/086dc2cd642a76eb18a0878807c5e886e2259531
+ER  - 
+
+TY  - JOUR
+AU  - Qiyao Ma
+AU  - Xubin Ren
+AU  - Chao Huang
+TI  - XRec: Large Language Models for Explainable Recommendation
+JO  - OpenAlex
+PY  - 2024
+SP  - 391
+EP  - 402
+DO  - 10.18653/v1/2024.findings-emnlp.22
+UR  - https://openalex.org/W4404782185
+ER  - 
+
+TY  - JOUR
+AU  - Alessandro Petruzzelli
+AU  - Cataldo Musto
+AU  - L. Laraspata
+AU  - Ivan Rinaldi
+AU  - Marco de Gemmis
+AU  - Pasquale Lops
+AU  - Giovanni Semeraro
+TI  - Instructing and Prompting Large Language Models for Explainable Cross-domain Recommendations
+JO  - OpenAlex
+PY  - 2024
+SP  - 298
+EP  - 308
+DO  - 10.1145/3640457.3688137
+UR  - https://openalex.org/W4403220999
+ER  - 
+
+TY  - JOUR
+AU  - Mengyuan Yang
+AU  - Mengying Zhu
+AU  - Yan Wang
+AU  - Linxun Chen
+AU  - Yi‐Lei Zhao
+AU  - Xiuyuan Wang
+AU  - Bing Han
+AU  - Xiaolin Zheng
+AU  - Jianwei Yin
+TI  - Fine-Tuning Large Language Model Based Explainable Recommendation with Explainable Quality Reward
+JO  - Proceedings of the AAAI Conference on Artificial Intelligence
+PY  - 2024
+VL  - 38
+IS  - 8
+SP  - 9250
+EP  - 9259
+DO  - 10.1609/aaai.v38i8.28777
+UR  - https://openalex.org/W4393148128
+ER  - 
+
+TY  - JOUR
+AU  - Yuxuan Lei
+AU  - Jianxun Lian
+AU  - Jing Yao
+AU  - Xu Huang
+AU  - Defu Lian
+AU  - Xing Xie
+TI  - RecExplainer: Aligning Large Language Models for Explaining Recommendation Models
+JO  - OpenAlex
+PY  - 2024
+SP  - 1530
+EP  - 1541
+DO  - 10.1145/3637528.3671802
+UR  - https://openalex.org/W4401864369
+ER  - 
+
+TY  - JOUR
+AU  - Alexandre Andre
+AU  - G. Roy
+AU  - Eva Dyer
+AU  - Kai Wang
+TI  - Revealing Potential Biases in LLM-Based Recommender Systems in the Cold Start Setting
+JO  - arXiv.org
+PY  - 2025
+DO  - 10.48550/arXiv.2508.20401
+UR  - https://www.semanticscholar.org/paper/02d5d70393ba7a46ba1e332e485b8b71c6f36c75
+ER  - 
+
+TY  - JOUR
+AU  - Renqiang Luo
+AU  - Dong Zhang
+AU  - Yupeng Gao
+AU  - Wen Shi
+AU  - Mingliang Hou
+AU  - Jiaying Liu
+AU  - Zhe Wang
+AU  - Shuo Yu
+TI  - Bridging Semantic Understanding and Popularity Bias with LLMs
+JO  - The Web Conference
+PY  - 2026
+DO  - 10.1145/3774904.3792168
+UR  - https://www.semanticscholar.org/paper/10524830cdfe0970f895ea14c13742eaf751bef3
+ER  - 
+
+TY  - JOUR
+AU  - Gustavo Penha
+AU  - Aleksandr V. Petrov
+AU  - Claudia Hauff
+AU  - Enrico Palumbo
+AU  - Ali Vardasbi
+AU  - Edoardo D'Amico
+AU  - Francesco Fabbri
+AU  - Alice Wang
+AU  - Praveen Chandar
+AU  - Henrik Lindstrom
+AU  - Hugues Bouchard
+AU  - Mounia Lalmas
+TI  - From IR to RecSys: Evaluating LLM-based Judges in Cranfield-style Recommendation Collections
+JO  - arXiv
+PY  - 2025
+UR  - http://arxiv.org/abs/2511.23312v2
+ER  - 
+
+TY  - JOUR
+AU  - Junyi Chen
+AU  - Toyotaro Suzumura
+TI  - A Prompting-Based Representation Learning Method for Recommendation with Large Language Models
+JO  - arXiv
+PY  - 2024
+UR  - http://arxiv.org/abs/2409.16674v3
+ER  - 
+
+TY  - JOUR
+AU  - Imad Aouali
+AU  - Flavian Vasile
+AU  - Otmane Sakhi
+AU  - Alexandre Gilotte
+AU  - Benjamin Heymann
+TI  - RecoAtlas: From Semantic Plausibility to Set-Level Utility in LLM Recommendation Agents
+JO  - arXiv
+PY  - 2026
+UR  - http://arxiv.org/abs/2605.18805v1
+ER  - 
+
+TY  - JOUR
+AU  - Sara Kemper
+AU  - Justin Cui
+AU  - Kai Dicarlantonio
+AU  - Kathy Lin
+AU  - Danjie Tang
+AU  - Anton Korikov
+AU  - Scott Sanner
+TI  - Retrieval-Augmented Conversational Recommendation with Prompt-based Semi-Structured Natural Language State Tracking
+JO  - OpenAlex
+PY  - 2024
+SP  - 2786
+EP  - 2790
+DO  - 10.1145/3626772.3657670
+UR  - https://openalex.org/W4399353928
+ER  - 
+
+TY  - JOUR
+AU  - Sashuai Zhou
+AU  - Weinan Gan
+AU  - Qijiong Liu
+AU  - Ke Lei
+AU  - Jieming Zhu
+AU  - Hai Huang
+AU  - Yan Xia
+AU  - Ruiming Tang
+AU  - Zhenhua Dong
+AU  - Zhou Zhao
+TI  - RecBase: Generative Foundation Model Pretraining for Zero-Shot Recommendation
+JO  - Conference on Empirical Methods in Natural Language Processing
+PY  - 2025
+DO  - 10.48550/arXiv.2509.03131
+UR  - https://www.semanticscholar.org/paper/00bc1d7f2dbe2a771edea3e1c0e4c4dfe166fd63
+ER  - 
+
+TY  - JOUR
+AU  - Anu Pradhan
+AU  - Alexandra Ortan
+AU  - Apurv Verma
+AU  - Madhavan Seshadri
+TI  - LLM-as-a-Judge: Rapid Evaluation of Legal Document Recommendation for Retrieval-Augmented Generation
+JO  - Proceedings of the 2nd Workshop on Evaluating and Applying Recommender Systems with Large Language Models (EARL), RecSys 2025
+PY  - 2025
+UR  - http://arxiv.org/abs/2509.12382v1
+ER  - 
+
+TY  - JOUR
+AU  - Shiyu Wang
+AU  - Hao Ding
+AU  - Yupeng Gu
+AU  - Sergul Aydore
+AU  - Kousha Kalantari
+AU  - Branislav Kveton
+TI  - Language-Model Prior Overcomes Cold-Start Items
+JO  - arXiv
+PY  - 2024
+UR  - http://arxiv.org/abs/2411.09065v1
+ER  - 
+
+TY  - JOUR
+AU  - Yueqi Wang
+AU  - Zhenrui Yue
+AU  - Huimin Zeng
+AU  - Dong Wang
+AU  - Julian McAuley
+TI  - Train Once, Deploy Anywhere: Matryoshka Representation Learning for Multimodal Recommendation
+JO  - Conference on Empirical Methods in Natural Language Processing
+PY  - 2024
+DO  - 10.48550/arXiv.2409.16627
+UR  - https://www.semanticscholar.org/paper/020b09bd0757bf41a8b3c99300feb223404035ed
+ER  - 
+
+TY  - JOUR
+AU  - Shaoqian Tang
+TI  - Low-Latency Multimodal Semantic Ranking for Real-Time Advertising Recommendation
+JO  - Proceedings of the 2025 2nd Symposium on Big Data, Neural Networks, and Deep Learning
+PY  - 2025
+DO  - 10.1145/3784013.3784081
+UR  - https://www.semanticscholar.org/paper/001e43440764da3913c52a551cca5c86cd36f87a
+ER  - 
+
+TY  - JOUR
+AU  - Chuang Li
+AU  - Yang Deng
+AU  - Hengchang Hu
+AU  - Min-Yen Kan
+AU  - Haizhou Li
+TI  - Incorporating External Knowledge and Goal Guidance for LLM-based Conversational Recommender Systems
+JO  - arXiv.org
+PY  - 2024
+DO  - 10.48550/arXiv.2405.01868
+UR  - https://www.semanticscholar.org/paper/9495cefba345dc77a84ec6411fd2e7c8434ad10a
+ER  - 
+
+TY  - JOUR
+AU  - Liang-bo Ning
+AU  - Shijie Wang
+AU  - Wenqi Fan
+AU  - Qing Li
+AU  - Xin Xu
+AU  - Hao Chen
+AU  - Feiran Huang
+TI  - CheatAgent: Attacking LLM-Empowered Recommender Systems via LLM Agent
+JO  - Knowledge Discovery and Data Mining
+PY  - 2024
+DO  - 10.1145/3637528.3671837
+UR  - https://www.semanticscholar.org/paper/4ed96712afa0d0e82cddb3d669d4e9f60195aecb
+ER  - 
+
+TY  - JOUR
+AU  - Hoang Ngo
+AU  - D. Nguyen
+TI  - RecGPT: Generative Pre-training for Text-based Recommendation
+JO  - Annual Meeting of the Association for Computational Linguistics
+PY  - 2024
+DO  - 10.48550/arXiv.2405.12715
+UR  - https://www.semanticscholar.org/paper/fcce3fa58b6ea088bd183164897f77f2f1027d26
+ER  - 
+
+TY  - JOUR
+AU  - Lingyu Mu
+AU  - Hao Deng
+AU  - Haibo Xing
+AU  - Kaican Lin
+AU  - Zhitong Zhu
+AU  - Yu Zhang
+AU  - Xiaoyi Zeng
+AU  - Zhengxiao Liu
+AU  - Zheng Lin
+AU  - Jinxin Hu
+TI  - Synergistic Integration and Discrepancy Resolution of Contextualized Knowledge for Personalized Recommendation
+JO  - arXiv.org
+PY  - 2025
+DO  - 10.48550/arXiv.2510.14257
+UR  - https://www.semanticscholar.org/paper/3ce50e83a4c39b1525563eb67aed049c50474925
+ER  - 
+
+TY  - JOUR
+AU  - Lei Li
+AU  - Yongfeng Zhang
+AU  - Dugang Liu
+AU  - Li Ping Chen
+TI  - Large Language Models for Generative Recommendation: A Survey and Visionary Discussions
+JO  - seed-expansion
+PY  - 2024
+DO  - 10.63317/4pmv5q3r3yc5
+UR  - https://openalex.org/W7131894007
+ER  - 
+
+TY  - JOUR
+AU  - Xinyi Li
+AU  - Yongfeng Zhang
+AU  - Edward C. Malthouse
+TI  - Prompt-Based Generative News Recommendation (PGNR): Accuracy and Controllability
+JO  - Lecture notes in computer science
+PY  - 2024
+SP  - 66
+EP  - 79
+DO  - 10.1007/978-3-031-56060-6_5
+UR  - https://openalex.org/W4392887234
+ER  - 
+
+TY  - JOUR
+AU  - Xue Dong
+AU  - Xuemeng Song
+AU  - Minghui Tian
+AU  - Linmei Hu
+TI  - Prompt-based and weak-modality enhanced multimodal recommendation
+JO  - Information Fusion
+PY  - 2023
+VL  - 101
+SP  - 101989
+EP  - 101989
+DO  - 10.1016/j.inffus.2023.101989
+UR  - https://openalex.org/W4386318603
+ER  - 
