@@ -33,7 +33,7 @@ if not exist .venv (
 )
 if not exist ".venv\Scripts\citens.exe" (
   echo [2/3] installing dependencies with uv, first run takes a minute ...
-  uv pip install -q -e ".[api,pdf]"
+  uv pip install -q -e ".[api]"
 ) else (
   echo [2/3] dependencies ready
 )
@@ -46,7 +46,7 @@ if not exist .venv (
 )
 if not exist ".venv\Scripts\citens.exe" (
   echo [2/3] installing dependencies, first run takes 1-2 minutes ...
-  ".venv\Scripts\python.exe" -m pip install -q -e ".[api,pdf]"
+  ".venv\Scripts\python.exe" -m pip install -q -e ".[api]"
 ) else (
   echo [2/3] dependencies ready
 )

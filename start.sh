@@ -18,7 +18,7 @@ source .venv/bin/activate
 
 if ! python -c "import citens, fastapi" >/dev/null 2>&1; then
   echo "[2/3] 安装依赖 (首次约 1-2 分钟) ..."
-  python -m pip install -q -e ".[api,pdf]"
+  python -m pip install -q -e ".[api]"
 else
   echo "[2/3] 依赖已就绪"
 fi

@@ -25,7 +25,7 @@ Most "AI literature review" tools are summary aggregators: they retrieve, paraph
 
 And one practical bet you won't find elsewhere:
 
-**3. Your access is the agent's access.** Campus EZproxy, VPN proxy, or just "I'll download the PDFs myself" — see [The access layer](#the-access-layer).
+**3. Full text first, honesty always.** The agent automatically fetches open-access PDFs (arXiv → OA link → Unpaywall) so claims ground on methods and results, not 150-word abstracts; what it can't fetch lands in a manual fetch list (or rides your proxy if you have one) — see [The access layer](#the-access-layer).
 
 ## How it works
 
@@ -69,10 +69,19 @@ References render as complete APA-style entries — full author list, `*venue*`,
 
 ## Quick start
 
+**One click** (recommended — auto-creates the venv, installs dependencies including the PDF toolchain, opens the web console in your browser):
+
+```
+双击 start.bat        # Windows
+./start.sh            # macOS / Linux
+```
+
+Then type a topic in the console and press run. Manual equivalent:
+
 ```bash
-pip install -e ".[pdf]"            # or ".[api,pdf]" for the web UI
-cp .env.example .env               # fill in LLM_API_KEY (OpenAI-compatible)
-citens sjr                      # one-time: fetch SCImago journal ranks
+uv sync                      # or: pip install -e .  (PDF toolchain is a core dependency)
+cp .env.example .env         # fill in LLM_API_KEY (OpenAI-compatible)
+citens sjr                   # one-time: fetch SCImago journal ranks
 citens run "limit order book modeling" -n 8
 ```
 
@@ -93,15 +102,12 @@ citens run "..." -l en              # English output — Chinese is the DEFAULT
                                     #   (asked interactively when -l is omitted)
 ```
 
-Web UI (SSE streaming, live step progress, precision panel):
+Web UI (SSE streaming, live step progress, precision panel) — what `start.bat` opens:
 
 ```bash
-# 最低门槛: 克隆后双击 start.bat (Windows) 或运行 ./start.sh (macOS/Linux)
-# — 自动建 venv、装依赖、打开浏览器控制台
-# 等价的手动方式:
-pip install -e ".[api,pdf]"
-citens serve --open                # http://localhost:8000 · Ctrl+C 停止
-# or: docker compose up
+# start.bat / start.sh already do this; manually:
+uv sync --extra api             # or: pip install -e ".[api]"
+citens serve --open             # http://localhost:8000 · Ctrl+C 停止
 # exposing the server beyond localhost? set API_TOKEN (bearer auth on
 # /run & friends — /run spends your LLM credits) and CORS_ORIGINS.
 ```
@@ -110,11 +116,11 @@ CLI reference: `citens run | resume | reverify | eval | sources | sjr | version`
 
 ## The access layer
 
-Open-access sources cover a lot, but the best paper for a section is often paywalled, and publishers aggressively block non-browser traffic. Instead of pretending, CiteLens routes around **your** access in three tiers:
+Grounding claims on full text is the single biggest precision lever, so CiteLens goes after it automatically — no institutional access required:
 
-1. **Proxy / VPN** — set `HTTP_PROXY`/`HTTPS_PROXY` (+ optional `ACCESSIBLE_DOMAINS` allowlist) and all full-text fetches ride it.
-2. **EZproxy rewrite** — set `EZPROXY_PREFIX=https://lib.univ.edu.cn/login?url=` and publisher URLs are rewritten through your library proxy (the standard campus pattern).
-3. **Manual drop (always works)** — papers the agent can't fetch are listed in `fetch_list.md` with DOIs and suggested filenames. Download them in your browser (where your campus login lives), drop the PDFs into `papers/`, and the next run automatically grounds claims on their full text. No filename bookkeeping needed — DOI, arXiv id, or recognizable title words all match.
+1. **Open-access auto-fetch (default, works everywhere)** — every paper runs through arXiv (by link, or by title match for paywalled papers with a preprint), the OA link harvested from OpenAlex, and Unpaywall. In an NLP/ML-heavy pool this lands 80%+ of full texts on its own; the writer's evidence excerpts (biased toward effect-size-dense passages) and the verifier both ground on them.
+2. **Manual drop (always works)** — papers the agent can't fetch are listed in `fetch_list.md` with DOIs and suggested filenames. Download them wherever you have access, drop the PDFs into `papers/`, and the next run (or `citens reverify`) automatically grounds claims on their full text. No filename bookkeeping — DOI, arXiv id, or recognizable title words all match.
+3. **Proxy / EZproxy (optional, for those who have it)** — set `HTTP_PROXY`/`HTTPS_PROXY` (+ `ACCESSIBLE_DOMAINS` allowlist) and full-text fetches ride it; `EZPROXY_PREFIX` rewrites publisher URLs through a library proxy. Purely additive — everything works without them.
 
 The honesty rule: a paper grounded only on its abstract is labeled as such in `grounding.json`; nothing is silently upgraded to "verified".
 
@@ -156,15 +162,15 @@ A full example run (review, verdicts, comparison matrix, fetch list) lives in [`
 
 ## Runtime at scale
 
-Everything LLM-bound is parallel (filter/extract/verify/write/defense run on a thread pool, `LLM_CONCURRENCY`, default 6), extraction folds quality grading into a single call per paper, and both the LLM and search layers are disk-cached — re-runs of the same topic skip repeat calls. A 13-paper deep review takes roughly 8–18 minutes on a fast backend.
+Everything LLM-bound is parallel (filter/extract/verify/write/defense run on a thread pool, `LLM_CONCURRENCY`, default 6), extraction folds quality grading into a single call per paper, and the LLM, search, and full-text layers are all disk-cached — re-runs of the same topic skip repeat calls. Every run writes `timings.json` with per-stage durations — if a run feels slow, that file says exactly where the time went.
 
-For large runs (`-n 50+`), raise concurrency — it's the single biggest lever:
+v1.1 halved deep-run wall time and cost with three knobs (all in `.env`):
 
-```bash
-citens run "..." -n 100 -c 12        # or LLM_CONCURRENCY=12 in .env
-```
+- **`JUDGE_THINKING=low`** (default) — hybrid reasoning models share one budget between thinking and body; the judge reasons at low effort. Golden-set A/B: precision 0.659 vs 0.682 at full effort (human-calibrated level), ~2x faster per verify batch. `none` is fastest but measurably lenient — scans only; `true` restores full deliberation.
+- **`REFLECT_MAX_ROUNDS=1`** (default) — supplementary retrieval recomposes the whole survey (re-verification included); each extra round was ~20+ minutes for a handful of papers.
+- **Fuzzy verdict reuse** — a recompose round re-judges only claims that actually changed; reworded restatements with unchanged citations and ground text reuse their earlier verdicts (the run log prints `reuse: N identical · M reworded · K to judge`).
 
-Cost scales with papers × (extract 1 call + claims ~1 call each) × compose rounds; deep_review recomposes the survey after each supplement round by design. Every run writes `timings.json` with per-stage durations — if a run feels slow, that file says exactly where the time went.
+A 20-paper deep review lands around 40 minutes on a fast backend (`-n 15 REFLECT_MAX_ROUNDS=0` roughly halves that again).
 
 ## Project layout
 
@@ -202,10 +208,10 @@ MIT. The runtime-fetched SCImago dataset is CC BY-NC (attributed to SCImago Lab;
 
 与“摘要拼接器”们的三点不同：
 
-1. **可信引用**：撰写只输出带 `[n]` 标记的论断；核验 agent 逐条对照被引论文的原文（有开放 PDF 时用全文分块，否则用摘要），给出 supported/partial/unsupported/unverifiable 四类判定，并报告**引用精度**。整条链路存在 `provenance.json`，可审计。
+1. **可信引用**：撰写只输出带 `[n]` 标记的论断；核验 agent 逐条对照被引论文的原文（自动抓取开放 PDF——arXiv/OA/Unpaywall，抓不到的给出手动获取清单），给出 supported/partial/unsupported/unverifiable 四类判定，并报告**引用精度**。整条链路存在 `provenance.json`，可审计。
 2. **批判立场**：综合 agent 显式提取跨论文的共识、矛盾与研究空白；反思 agent 发现覆盖缺口后补检并重写——不是罗列，是论证。
-3. **你的权限就是 agent 的权限**：校园代理/EZproxy 重写/手动投递 PDF 三档接入（见 [The access layer](#the-access-layer)），对拿不到全文的论文诚实标注，绝不冒充“已核验”。
+3. **全文优先、诚实标注**：开放获取 PDF 自动抓取并按"效应量密度"挑选证据段落；拿不到全文的论文明确标注"仅摘要核验"，绝不冒充"已核验"（有校园代理/VPN 的可选配，见 [The access layer](#the-access-layer)）。
 
-快速开始：`pip install -e ".[pdf]"` → 填 `.env` → `citens sjr` → `citens run 主题 -n 8`；Web 界面 `uvicorn citens.api.app:app`。
+快速开始：双击 `start.bat`（Windows）或 `./start.sh`（macOS/Linux）——自动建环境、装依赖、打开网页控制台；手动方式 `uv sync` → 填 `.env` → `citens run 主题 -n 8`。
 
 示例产物见 [`examples/order-book-modeling/`](examples/order-book-modeling/)（主题「订单簿建模」，8 篇论文，70 条论断，引用精度 73%）。
