@@ -4,6 +4,68 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed — full-text harvest & arXiv resilience (round 2)
+- **Fetch-time OA lookup now harvests ALL locations, from three sources**:
+  Semantic Scholar `openAccessPdf` by DOI, OpenAlex `locations[].pdf_url`
+  (not just `best_oa_location`), and Unpaywall's full `oa_locations[]`.
+  Repository and author-homepage copies live beyond the "best" location —
+  measured on a 14-paper finance run: +2 full texts (Cornell homepage copy,
+  French institutional repository), 36% → 50% grounding with zero keys.
+- **arXiv source bounded at 90s.** export.arxiv.org server-side rate-limits
+  shared egress IPs with deliberately slow 429s (measured: TCP connect
+  0.1s, then 16s-to-respond 429 / read timeouts), and the arxiv client's
+  urllib layer has no per-request timeout — a 13-query search crawled 21
+  minutes and still returned nothing. The adapter now gives up at its
+  budget, prints why, and lets the other sources carry the run.
+
+### Fixed — recall & full-text hit rate (user report: narrow pools, 1/8 full text)
+- **Candidate-pool cap raised 3×n → 8×n** (bounded by `max_results`) before
+  LLM screening. At `-n 8` the filter used to see only 24 candidates, and
+  `blend_pool`'s citation-based trim cut arXiv's zero-cited records hardest
+  — the OA-richest source was systematically diluted out of the pool.
+- **OpenAlex `title.search` → `default.search`** (title + abstract).
+  3-6-word planner queries had to match the TITLE alone; most relevant
+  papers carry those words in the abstract.
+- **Semantic Scholar `openAccessPdf` harvested** into `paper.pdf_url` —
+  S2 returns free OA links for preprints and green-OA deposits; they were
+  never requested.
+- **Unpaywall landing-page fallback removed** (`url_for_pdf` only): the
+  `url` field is usually an HTML landing page that fails the download
+  step's content-type check after a wasted fetch.
+- **arXiv per-keyword floor 1 → 5** (matches other sources): with 10+
+  queries the OA-richest source contributed ~1 paper per query.
+
+### Changed — fetched PDFs are kept, not discarded
+- Successfully fetched PDFs now persist as `papers/auto-<doi>.pdf` (same
+  slug-matching path as manual drops). Before: download → temp file →
+  convert → delete, leaving only disposable text in `.cache` — a cleared
+  cache or a rotted URL forced a full re-fetch and runs were not
+  re-groundable offline. Unconvertible PDFs are not kept.
+- `fulltext` / `fulltext_local` cache namespaces never expire (derived
+  from persisted PDFs; a stale miss self-heals via the local-first scan).
+- Local-PDF conversion cached by file mtime — re-parsing every dropped
+  PDF on every run was pure repeated work.
+
+### Added — reliability & observability
+- LLM transport retries with exponential backoff (429/5xx/timeout; auth
+  errors surface immediately) for both OpenAI-compatible and LiteLLM
+  backends.
+- Cache TTL (`CACHE_TTL_DAYS`, default 30) with throttled sweep; `llm`
+  and `fulltext*` namespaces are exempt.
+- Token usage attributed per-run (`llm.run_scope`) — concurrent runs in
+  one process no longer cross-attribute; thread-pool jobs tagged too.
+- Health report warns `judge_model_uncalibrated` when the judge
+  model/thinking differs from the human-calibrated golden set — reported
+  precision is unanchored until re-audited.
+- Profile `evidence_bias` field (`number_density` | `none`): theoretical/
+  mathematical domains keep plain BM25 excerpt order instead of the
+  empirical number-density boost.
+- PDF-ingestion smoke test (hand-rolled minimal PDF through MarkItDown).
+- Pipeline helpers extracted to `orchestration/support.py`
+  (pipeline.py 1790 → 1515 lines); imports re-exported for compatibility.
+
 ## [1.1.0] — 2026-08-19
 
 ### Changed — speed package (88-min deep run → target ≈ half)

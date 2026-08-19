@@ -33,6 +33,11 @@ class Profile:
     subfields: list[str] = field(default_factory=list)
     terminology: dict[str, str] = field(default_factory=dict)
     primary_sources: list[str] = field(default_factory=list)
+    # How the writer's evidence excerpts rank chunks. "number_density"
+    # (default) suits empirical fields — effect sizes live in results
+    # sections; "none" keeps plain BM25 order for theoretical/mathematical
+    # domains where numbers don't mark the load-bearing passages.
+    evidence_bias: str = "number_density"
 
     def venue_boost_set(self) -> set[str]:
         from citens.ranking import _norm
@@ -80,6 +85,7 @@ def load_profile(name: str) -> Profile | None:
                 str(k): str(v) for k, v in (data.get("terminology") or {}).items()
             },
             primary_sources=[str(s) for s in data.get("primary_sources", [])],
+            evidence_bias=str(data.get("evidence_bias", "number_density")),
         )
     return None
 

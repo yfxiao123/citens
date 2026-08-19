@@ -71,7 +71,13 @@ class SemanticScholarSearcher(SearchSource):
     async def _one(self, client: httpx.AsyncClient, query: str, limit: int) -> list[Paper]:
         params = {
             "query": query,
-            "fields": "title,authors,year,abstract,citationCount,externalIds,url,venue",
+            # openAccessPdf: free OA pdf link (preprints + green-OA deposits).
+            # Without it S2 records carry no pdf_url and fulltext grounding
+            # falls back to arXiv title lookup + Unpaywall.
+            "fields": (
+                "title,authors,year,abstract,citationCount,externalIds,url,"
+                "venue,openAccessPdf"
+            ),
         }
         resp = await _throttled_get(client, f"{self.BASE_URL}/paper/search/bulk", params=params)
         resp.raise_for_status()
@@ -82,6 +88,7 @@ class SemanticScholarSearcher(SearchSource):
     def _to_paper(item: dict) -> Paper:
         authors = [a.get("name", "") for a in item.get("authors", []) if a.get("name")]
         ext_ids = item.get("externalIds") or {}
+        oa_pdf = (item.get("openAccessPdf") or {}).get("url") or ""
         return Paper(
             title=item.get("title", ""),
             authors=authors,
@@ -92,4 +99,5 @@ class SemanticScholarSearcher(SearchSource):
             url=item.get("url") or "",
             doi=ext_ids.get("DOI"),
             venue=item.get("venue") or "",
+            pdf_url=oa_pdf or None,
         )

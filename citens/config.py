@@ -129,6 +129,13 @@ class Settings(BaseSettings):
     # --- Reliability ---------------------------------------------------------
     cache_enabled: bool = True
     cache_dir: str = ".cache"
+    # Max age of cache entries, in days (0 = never expire). Search/enrich
+    # results go stale as the indexes move; LLM responses keyed on fixed
+    # prompts never do, so namespaces expire at different rates in cache.py.
+    cache_ttl_days: int = 30
+    # Auto-delete entries older than ttl on put(), throttled to one sweep
+    # per N days (marker file). 0 disables sweeping.
+    cache_sweep_interval_days: int = 1
 
 
 settings = Settings()

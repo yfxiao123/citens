@@ -121,3 +121,59 @@ if __name__ == "__main__":
                 fn(Path(td), _MP())
             print(f"PASS {name}")
     print("all llm-perf tests passed")
+
+
+class _FakeResp:
+    def __init__(self, content="ok"):
+        self.usage = None
+        self.choices = [type("C", (), {"message": type("M", (), {"content": content})()})()]
+
+
+class _RateLimit(Exception):
+    status_code = 429
+
+
+def test_chat_with_retry_rides_out_transient_errors(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr(llm.time, "sleep", lambda s: sleeps.append(s))
+    calls = {"n": 0}
+
+    def create():
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise _RateLimit("slow down")
+        return _FakeResp("recovered")
+
+    assert llm._chat_with_retry(create, "m") == "recovered"
+    assert calls["n"] == 3
+    assert sleeps == [1.5, 4.5]
+
+
+def test_chat_with_retry_gives_up_after_max_attempts(monkeypatch):
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+
+    def create():
+        raise _RateLimit("still limited")
+
+    import pytest
+
+    with pytest.raises(_RateLimit):
+        llm._chat_with_retry(create, "m")
+
+
+def test_chat_with_retry_surfaces_non_transient_immediately(monkeypatch):
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    class AuthError(Exception):
+        status_code = 401
+
+    def create():
+        calls["n"] += 1
+        raise AuthError("bad key")
+
+    import pytest
+
+    with pytest.raises(AuthError):
+        llm._chat_with_retry(create, "m")
+    assert calls["n"] == 1

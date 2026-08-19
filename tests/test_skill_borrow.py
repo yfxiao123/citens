@@ -722,8 +722,8 @@ def test_writer_last_resort_attempt_disables_thinking(monkeypatch):
 
 
 def test_facet_coverage_report_and_note():
-    from citens.orchestration.pipeline import coverage_note_text, facet_coverage_report
     from citens.models import ThemeInfo
+    from citens.orchestration.pipeline import coverage_note_text, facet_coverage_report
 
     facets = [{"name": "Transformer", "queries": ["transformer attention forecasting"]},
               {"name": "GNN", "queries": ["graph neural network relational"]}]

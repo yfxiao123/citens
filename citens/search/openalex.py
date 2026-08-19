@@ -1,9 +1,10 @@
 """OpenAlex search source (open, free).
 
-Uses ``filter=title.search:...`` with ``relevance_score`` ordering — a tight
-title-term match that avoids the classic ``search=`` full-text pitfall where
-high-cited papers matching a single generic word (e.g. "machine learning",
-"simulation") swamp the results.
+Uses ``filter=default.search:...`` (title + abstract) with ``relevance_score``
+ordering. Title-only search starved recall on the largest metadata source:
+planner queries are 3-6 words, and most relevant papers carry some of those
+words in the abstract, not the title. ``relevance_score`` ordering (not the
+``search=`` parameter) keeps the generic-word-swamp problem away.
 """
 
 from __future__ import annotations
@@ -143,7 +144,7 @@ class OpenAlexSearcher(SearchSource):
 
     async def _one(self, client: httpx.AsyncClient, query: str, limit: int) -> list[Paper]:
         params: dict[str, str | int] = {
-            "filter": f"title.search:{query}",
+            "filter": f"default.search:{query}",
             "per_page": min(limit, 50),
             "sort": "relevance_score:desc",
             "select": (

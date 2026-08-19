@@ -118,9 +118,19 @@ CLI reference: `citens run | resume | reverify | eval | sources | sjr | version`
 
 Grounding claims on full text is the single biggest precision lever, so CiteLens goes after it automatically — no institutional access required:
 
-1. **Open-access auto-fetch (default, works everywhere)** — every paper runs through arXiv (by link, or by title match for paywalled papers with a preprint), the OA link harvested from OpenAlex, and Unpaywall. In an NLP/ML-heavy pool this lands 80%+ of full texts on its own; the writer's evidence excerpts (biased toward effect-size-dense passages) and the verifier both ground on them.
+1. **Open-access auto-fetch (default, works everywhere)** — every paper runs through arXiv (by link, or by title match for paywalled papers with a preprint), the OA links harvested from OpenAlex / Semantic Scholar (`openAccessPdf`), Unpaywall, and CORE (with a free `CORE_API_KEY`). In an NLP/ML-heavy pool this lands 80%+ of full texts on its own; the writer's evidence excerpts (biased toward effect-size-dense passages) and the verifier both ground on them.
 2. **Manual drop (always works)** — papers the agent can't fetch are listed in `fetch_list.md` with DOIs and suggested filenames. Download them wherever you have access, drop the PDFs into `papers/`, and the next run (or `citens reverify`) automatically grounds claims on their full text. No filename bookkeeping — DOI, arXiv id, or recognizable title words all match.
 3. **Proxy / EZproxy (optional, for those who have it)** — set `HTTP_PROXY`/`HTTPS_PROXY` (+ `ACCESSIBLE_DOMAINS` allowlist) and full-text fetches ride it; `EZPROXY_PREFIX` rewrites publisher URLs through a library proxy. Purely additive — everything works without them.
+
+**Keys worth configuring.** Everything above works with zero keys, but each of these measurably raises the full-text hit rate (the single biggest precision lever) — copy `.env.example` to `.env` and fill in what you can:
+
+| key | cost | what it buys |
+|---|---|---|
+| `CORE_API_KEY` | free registration | repository-aggregated OA PDFs by DOI — the biggest free full-text boost |
+| `SEMANTIC_SCHOLAR_API_KEY` | free registration | stable S2 access (no key: 1 rps shared, frequent 429s shrink the pool) + OA PDF links |
+| `OPENALEX_EMAIL` / `CROSSREF_EMAIL` | free, no registration | polite pools — faster, more stable metadata + OA links |
+
+Fetched PDFs are **kept**: every successfully fetched PDF lands in `papers/auto-<doi>.pdf`, so later runs (and `citens reverify`) re-ground offline even after the text cache is cleared — URLs rot and publisher versions drift, the file doesn't.
 
 The honesty rule: a paper grounded only on its abstract is labeled as such in `grounding.json`; nothing is silently upgraded to "verified".
 

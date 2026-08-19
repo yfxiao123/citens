@@ -48,6 +48,7 @@ S2_ITEM = {
     "externalIds": {"DOI": "10.1109/TSP.2019.2907260", "ArXiv": "1808.03668"},
     "url": "https://www.semanticscholar.org/paper/x",
     "venue": "IEEE Transactions on Signal Processing",
+    "openAccessPdf": {"url": "https://arxiv.org/pdf/1808.03668"},
 }
 
 CROSSREF_ITEM = {
@@ -66,10 +67,13 @@ CROSSREF_ITEM = {
 @pytest.mark.asyncio
 @respx.mock
 async def test_openalex_end_to_end_contract():
-    respx.get("https://api.openalex.org/works").mock(
+    route = respx.get("https://api.openalex.org/works").mock(
         return_value=httpx.Response(200, json={"results": [OPENALEX_WORK]})
     )
     papers = await OpenAlexSearcher().search(["order book stylized facts"], max_results=10)
+    # title+abstract search (default.search), not title-only — title-only
+    # starved recall on the largest metadata source
+    assert route.calls.last.request.url.params["filter"].startswith("default.search:")
     assert len(papers) == 1
     p = papers[0]
     assert isinstance(p, Paper)
@@ -108,6 +112,10 @@ async def test_semantic_scholar_bulk_contract():
     assert p.authors == ["Zihao Zhang", "Stefan Zohren", "Stephen J. Roberts"]
     assert p.doi == "10.1109/TSP.2019.2907260"
     assert p.venue == "IEEE Transactions on Signal Processing"
+    # openAccessPdf is requested and harvested — S2's free OA link feeds
+    # fulltext grounding directly
+    assert p.pdf_url == "https://arxiv.org/pdf/1808.03668"
+    assert "openAccessPdf" in route.calls.last.request.url.params["fields"]
     # bulk endpoint gets sliced client-side to the per-keyword limit
     assert route.calls.last.request.url.params["query"] == "deep learning limit order book"
 

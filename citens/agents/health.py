@@ -12,9 +12,30 @@ Inspired by Imbad0202/ARS's "Dialogue Health Indicator".
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from citens.config import settings
-from citens.llm import chat_json
+from citens.llm import chat_json, strong_model
 from citens.models import SynthesisResult, Verdict, VerificationResult
+
+# The human-audited calibration set that binds the judge's self-reported
+# precision to an audited grounded rate. Calibration is model-specific: swap
+# LLM_MODEL_STRONG and the golden numbers no longer apply until re-audited.
+_GOLDEN = Path(__file__).resolve().parents[2] / "tests" / "golden" / "verifier_calibration_201038.json"
+
+
+def calibration_status() -> dict:
+    """Which judge model/thinking the golden calibration was measured on."""
+    try:
+        d = json.loads(_GOLDEN.read_text(encoding="utf-8"))
+        return {
+            "calibrated_model": d.get("judge_model", ""),
+            "calibrated_thinking": d.get("judge_thinking", ""),
+            "calibrated_at": d.get("audited_at", ""),
+        }
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 SYSTEM_PROMPT = """You are a methodology critic reviewing a literature review pipeline for systematic \
 biases. Given the synthesis results and verification statistics, identify potential issues:
@@ -58,6 +79,7 @@ def check_health(
         'recommendation' (str), 'metrics' (dict)
     """
     # Compute metrics
+    judge_model = strong_model()
     verifiable = [r for r in ver_results if r.verdict != Verdict.UNVERIFIABLE]
     supported = sum(1 for r in verifiable if r.verdict == Verdict.SUPPORTED)
     partial = sum(1 for r in verifiable if r.verdict == Verdict.PARTIAL)
@@ -105,6 +127,21 @@ def check_health(
     if canary_far is not None and (canary or {}).get("injected", 0) >= 2 and canary_far > 0.34:
         issues.append("verifier_false_accept")
 
+    # calibration is model-specific: a different judge model (or thinking
+    # level) than the golden set's means the reported precision is no longer
+    # anchored to the audited grounded rate
+    cal = calibration_status()
+    calib_model = cal.get("calibrated_model", "")
+    calib_thinking = str(cal.get("calibrated_thinking", ""))
+    judge_model_uncalibrated = bool(
+        calib_model and judge_model and judge_model != calib_model
+    ) or bool(calib_thinking and str(settings.judge_thinking) != calib_thinking)
+    if judge_model_uncalibrated:
+        issues.append("judge_model_uncalibrated")
+    metrics["judge_model"] = judge_model
+    if cal:
+        metrics["calibrated_model"] = calib_model or None
+
     # Generate adversarial queries if issues detected
     adversarial_queries = []
     if issues:
@@ -132,6 +169,13 @@ def check_health(
         recommendation = (
             f"Judge passed {round((canary_far or 0) * 100)}% of synthetic unsupported "
             "claims — verifier calibration is broken, review verdicts manually."
+        )
+    elif "judge_model_uncalibrated" in issues:
+        recommendation = (
+            f"Judge model '{judge_model}' (thinking={settings.judge_thinking}) differs from "
+            f"the human-calibrated '{calib_model}' (thinking={calib_thinking}, {cal.get('calibrated_at', '')}) "
+            "— the reported precision is unanchored; re-run `citens audit` calibration "
+            "before trusting the number."
         )
     elif "verifier_too_lenient" in issues:
         recommendation = "Tighten verification criteria or manually review high-confidence claims."

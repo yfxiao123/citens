@@ -69,6 +69,27 @@ def _local_pdf(paper: Paper) -> Path | None:
     return None
 
 
+def _auto_pdf_path(paper: Paper) -> Path | None:
+    """Where a successfully fetched PDF is kept (PAPERS_DIR/auto-<slug>.pdf).
+
+    Persisting fetched PDFs makes runs re-groundable offline: the text cache
+    is disposable, URLs rot, and publisher versions drift. The auto- prefix
+    still matches :func:`_local_pdf`'s slug scan, so the next run (or
+    ``citens reverify``) treats an auto-fetched PDF exactly like a user drop.
+    """
+    if paper.doi:
+        name = f"{slugify(paper.doi)[:80]}.pdf"
+    else:
+        m = _ARXIV_ID_RE.search(paper.url or "")
+        if m:
+            name = f"arxiv-{slugify(m.group(1))[:60]}.pdf"
+        elif len(slugify(paper.title)) >= 20:
+            name = f"{slugify(paper.title)[:80]}.pdf"
+        else:
+            return None
+    return Path(settings.papers_dir) / f"auto-{name}"
+
+
 def _markitdown():
     global _md
     if _md is None:
@@ -143,6 +164,30 @@ def _arxiv_title_lookup(paper: Paper) -> str | None:
     return None
 
 
+def _s2_pdf_url(doi: str) -> list[str]:
+    """Semantic Scholar's OA link for this DOI (graph API, single paper).
+
+    S2 indexes author-homepage and repository copies that neither OpenAlex
+    nor Unpaywall lists (measured: the cornell.edu copy of a paywalled
+    T&F paper). No key needed at this call rate; the 1rps process-wide
+    throttle applies via the shared client budget of one small GET.
+    """
+    if not doi:
+        return []
+    try:
+        with sync_client(timeout=12, headers=_HEADERS) as client:
+            r = client.get(
+                f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
+                params={"fields": "openAccessPdf"},
+            )
+            if r.status_code != 200:
+                return []
+            u = ((r.json().get("openAccessPdf") or {}).get("url") or "").strip()
+            return [u] if u else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _core_pdf_url(doi: str) -> str | None:
     """Open-access PDF via CORE (aggregates repositories worldwide).
 
@@ -169,7 +214,16 @@ def _core_pdf_url(doi: str) -> str | None:
     return None
 
 
-def _unpaywall_pdf_url(doi: str) -> str | None:
+def _unpaywall_pdf_url(doi: str) -> list[str]:
+    """ALL OA pdf urls Unpaywall knows for this DOI (repository copies incl.).
+
+    Reading only ``best_oa_location`` missed real PDFs: when the "best"
+    location is a publisher landing page, the repository copy in
+    ``oa_locations`` never gets tried (measured on a 14-paper finance run:
+    4 of 9 missing full texts were sitting in non-best locations).
+    ``url_for_pdf`` only — the ``url`` field is usually a landing page the
+    download step's content-type check rejects anyway.
+    """
     email = settings.openalex_email or "citelens@example.com"
     try:
         with sync_client(timeout=12) as client:
@@ -178,10 +232,36 @@ def _unpaywall_pdf_url(doi: str) -> str | None:
                 params={"email": email},
             )
             r.raise_for_status()
-            loc = (r.json().get("best_oa_location") or {})
-            return (loc.get("url_for_pdf") or loc.get("url") or "").strip() or None
+            urls = [
+                (loc.get("url_for_pdf") or "").strip()
+                for loc in (r.json().get("oa_locations") or [])
+            ]
+            return [u for u in dict.fromkeys(urls) if u]
     except Exception:  # noqa: BLE001
-        return None
+        return []
+
+
+def _openalex_pdf_urls(doi: str) -> list[str]:
+    """ALL pdf urls from the OpenAlex work record's locations.
+
+    Same rationale as Unpaywall's full location list: institutional
+    repository copies (ut-capitole, ACM OA, author homepages indexed as
+    landing pages with pdf_url) live beyond the best_oa_location that the
+    search-time harvest reads.
+    """
+    if not doi:
+        return []
+    try:
+        with sync_client(timeout=12, headers=_HEADERS) as client:
+            r = client.get(f"https://api.openalex.org/works/doi:{doi}")
+            r.raise_for_status()
+            urls = [
+                (loc.get("pdf_url") or "").strip()
+                for loc in (r.json().get("locations") or [])
+            ]
+            return [u for u in dict.fromkeys(urls) if u]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _convert_pdf_file(path: str) -> str | None:
@@ -193,19 +273,42 @@ def _convert_pdf_file(path: str) -> str | None:
         return None
 
 
-def _pdf_bytes_to_text(content: bytes) -> str | None:
+def _pdf_bytes_to_text(content: bytes, paper: Paper | None = None) -> str | None:
+    """Convert PDF bytes to text. With ``paper``, KEEP the PDF in PAPERS_DIR.
+
+    A fetched-but-deleted PDF made every cache miss a re-download (URL rot,
+    publisher version drift, cleared .cache). Kept files carry the auto-
+    prefix so they ride the same local-match path as user drops.
+    """
     if not content or content[:5] != b"%PDF-":
         return None
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as fh:
-        fh.write(content)
-        tmp = fh.name
+    import contextlib
+
+    keep = _auto_pdf_path(paper) if paper is not None else None
+    if keep is not None:
+        keep.parent.mkdir(parents=True, exist_ok=True)
+        keep.write_bytes(content)
+        path = str(keep)
+    else:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as fh:
+            fh.write(content)
+            path = fh.name
+    text = None
     try:
-        return _convert_pdf_file(tmp)
+        text = _convert_pdf_file(path)
     finally:
-        os.unlink(tmp)
+        if keep is None:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+    if keep is not None and not text:
+        # unusable (scanned images, corrupt) — don't poison later runs'
+        # local-first scan with a file that can never convert
+        with contextlib.suppress(OSError):
+            keep.unlink()
+    return text
 
 
-def _download_and_convert(url: str) -> str | None:
+def _download_and_convert(url: str, paper: Paper | None = None) -> str | None:
     try:
         url = rewrite_url(url)  # ride the user's EZproxy/declared access
         with sync_client(url, timeout=30, headers=_HEADERS) as client:
@@ -213,7 +316,7 @@ def _download_and_convert(url: str) -> str | None:
         if r.status_code == 200 and len(r.content) >= 2000:
             ctype = r.headers.get("content-type", "").lower()
             if "pdf" in ctype or url.lower().endswith(".pdf") or r.content[:5] == b"%PDF-":
-                return _pdf_bytes_to_text(r.content)
+                return _pdf_bytes_to_text(r.content, paper)
         return None
     except Exception:  # noqa: BLE001
         return None
@@ -224,11 +327,20 @@ def fetch_fulltext(paper: Paper) -> str | None:
 
     Order: user-dropped PDF (PAPERS_DIR) -> cache -> open-access network fetch.
     The local check runs before the cache so a PDF dropped after a previous
-    miss is still picked up.
+    miss is still picked up. Local conversions are cached by file mtime —
+    re-parsing every dropped/auto PDF on every run was pure repeated work.
     """
     local = _local_pdf(paper)
     if local is not None:
-        text = _convert_pdf_file(str(local))
+        try:
+            mtime = local.stat().st_mtime_ns
+        except OSError:
+            mtime = 0
+        local_key = {"id": paper.id, "file": str(local), "mtime": mtime}
+        text = cache.get("fulltext_local", local_key)
+        if text is None:
+            text = _convert_pdf_file(str(local))
+            cache.put("fulltext_local", local_key, text or "")
         if text:
             return text
 
@@ -243,16 +355,17 @@ def fetch_fulltext(paper: Paper) -> str | None:
     if paper.pdf_url:
         candidates.append(paper.pdf_url)
     if paper.doi:
-        upw = _unpaywall_pdf_url(paper.doi)
-        if upw:
-            candidates.append(upw)
+        # full location lists first (repository copies), then CORE
+        candidates.extend(_s2_pdf_url(paper.doi))
+        candidates.extend(_openalex_pdf_urls(paper.doi))
+        candidates.extend(_unpaywall_pdf_url(paper.doi))
         core = _core_pdf_url(paper.doi)
         if core:
             candidates.append(core)
 
     text = None
     for url in candidates:
-        text = _download_and_convert(url)
+        text = _download_and_convert(url, paper)
         if text:
             break
 

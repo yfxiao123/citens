@@ -19,7 +19,7 @@ from citens.agents import review_unsupported_claims, verify_claims
 from citens.events import EventBus, StepCompleted, StepStarted
 from citens.grounding import ChunkStore, CitationTable, parse_claims_from_review
 from citens.models import ExtractedPaper, Verdict
-from citens.orchestration.pipeline import _emit
+from citens.orchestration.support import _emit
 
 
 def reverify(run_dir: str, bus: EventBus | None = None) -> dict:

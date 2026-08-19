@@ -1,6 +1,8 @@
 {
  "source_run": "机器学习股票收益预测-20260818_201038",
  "audited_at": "2026-08-18",
+ "judge_model": "deepseek-v4-flash",
+ "judge_thinking": "low",
  "auditor": "strict LLM judge (calibration pass), 7 mechanical no-abstract downgrades + 5 judgment framing downgrades",
  "summary": {
   "judged": 22,

@@ -19,6 +19,9 @@ class RunLog:
     """Append-only JSONL event log for one pipeline run."""
 
     def __init__(self, run_dir: str) -> None:
+        import uuid
+
+        self.run_id = uuid.uuid4().hex[:12]
         self.path = Path(run_dir) / "run.log"
         self._marks: list[tuple[str, float]] = [("run_start", time.time())]
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,17 +57,18 @@ class RunLog:
         ]
 
     def token_usage_by_stage(self) -> dict[str, dict[str, int]]:
-        """Attribute LLM token usage to stages by call timestamp.
+        """Attribute LLM token usage to stages.
 
-        Timestamp-based attribution: correct for the (typical) one-run-per-
-        process case; interleaved runs in one process may cross-attribute a
-        few calls — acceptable for cost telemetry, documented tradeoff.
+        Primary key: the run tag on each usage record (set via
+        ``llm.run_scope``) — concurrent runs in one process stay separate.
+        Timestamp windows remain as the fallback for untagged records and
+        ordering within the run.
         """
         from citens.llm import usage_records
 
         windows = self.stage_windows()
         out: dict[str, dict[str, int]] = {}
-        for rec in usage_records():
+        for rec in usage_records(self.run_id):
             ts = rec["ts"]
             # inclusive bounds: a call and the next stage mark can share one
             # clock tick; the earliest matching window wins (deterministic)

@@ -91,6 +91,51 @@ def _strip_fences(raw: str) -> str:
     return raw
 
 
+def _retryable(exc: BaseException) -> bool:
+    """Transient transport/server failures worth retrying with backoff."""
+    # openai.RateLimitStatusError etc. — match by name, not import, so this
+    # also works for backends that wrap errors differently (Ollama, vLLM, …)
+    name = type(exc).__name__
+    if name in {
+        "APITimeoutError", "APIConnectionError", "APIStatusError",
+        "RateLimitError", "RateLimitStatusError", "InternalServerError",
+        "InternalServerErrorResponse", "ServiceUnavailableError",
+        "ServiceUnavailableResponse", "ReadTimeout", "ConnectError",
+        "RemoteProtocolError",
+    }:
+        return True
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status == 429 or 500 <= status < 600
+    return isinstance(exc, (ConnectionError, TimeoutError))
+
+
+def _chat_with_retry(create: Callable[[], Any], model: str) -> str:
+    """Call ``create()`` with exponential backoff on transient failures.
+
+    Max 3 attempts (1.5s → 4.5s) — enough to ride out a 429 burst or a
+    dropped connection without stalling a stage for minutes. Non-transient
+    errors (auth, bad request) surface immediately.
+    """
+    delays = (1.5, 4.5)
+    for attempt in range(len(delays) + 1):
+        try:
+            resp = create()
+        except Exception as exc:  # noqa: BLE001 - classified below
+            if attempt < len(delays) and _retryable(exc):
+                time.sleep(delays[attempt])
+                continue
+            raise
+        if getattr(resp, "usage", None):
+            record_usage(
+                model,
+                resp.usage.prompt_tokens or 0,
+                resp.usage.completion_tokens or 0,
+            )
+        return resp.choices[0].message.content or ""
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
 class OpenAICompatBackend:
     """OpenAI-compatible Chat Completions backend (one instance per model)."""
 
@@ -122,14 +167,9 @@ class OpenAICompatBackend:
             response_json=response_json,
             thinking=thinking,
         )
-        resp = self._client.chat.completions.create(**kwargs)
-        if getattr(resp, "usage", None):
-            record_usage(
-                self._model,
-                resp.usage.prompt_tokens or 0,
-                resp.usage.completion_tokens or 0,
-            )
-        return resp.choices[0].message.content or ""
+        return _chat_with_retry(
+            lambda: self._client.chat.completions.create(**kwargs), self._model
+        )
 
 
 class LiteLLMBackend:
@@ -173,38 +213,71 @@ class LiteLLMBackend:
             kwargs["api_base"] = settings.llm_api_base
         if response_json:
             kwargs["response_format"] = {"type": "json_object"}
-        resp = litellm.completion(**kwargs)
-        if getattr(resp, "usage", None):
-            record_usage(
-                self._model,
-                getattr(resp.usage, "prompt_tokens", 0) or 0,
-                getattr(resp.usage, "completion_tokens", 0) or 0,
-            )
-        return resp.choices[0].message.content or ""
+        return _chat_with_retry(lambda: litellm.completion(**kwargs), self._model)
 
 
 _backends: dict[str, LLMBackend] = {}
 
 # --- usage telemetry ---------------------------------------------------------
-# Backends record every completion's token usage here; RunLog attributes
-# records to pipeline stages by timestamp (see runlog.token_usage_by_stage).
+# Backends record every completion's token usage here. Each record is tagged
+# with the current run scope (contextvar) so concurrent runs in one process
+# attribute cleanly; RunLog reads its own run's records. Records with no
+# scope fall back to timestamp-window attribution.
+import contextvars  # noqa: E402
 import threading  # noqa: E402
 
 _usage_lock = threading.Lock()
 _usage_records: list[dict] = []
+_current_run: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "citens_run_id", default=None
+)
+
+
+class run_scope:
+    """Tag LLM usage records with a run id for the duration of the block.
+
+    The contextvar propagates into worker threads spawned inside the scope
+    (they copy the context), so per-paper extract/verify calls land in the
+    right run even when several runs share the process.
+    """
+
+    def __init__(self, run_id: str) -> None:
+        self.run_id = run_id
+        self._token = None
+
+    def __enter__(self) -> run_scope:
+        self._token = _current_run.set(self.run_id)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        if self._token is not None:
+            _current_run.reset(self._token)
 
 
 def record_usage(model: str, prompt: int, completion: int) -> None:
     with _usage_lock:
         _usage_records.append(
-            {"ts": time.time(), "model": model, "prompt": prompt, "completion": completion}
+            {
+                "ts": time.time(),
+                "model": model,
+                "prompt": prompt,
+                "completion": completion,
+                "run": _current_run.get(),
+            }
         )
 
 
-def usage_records() -> list[dict]:
-    """Snapshot of recorded usage events (thread-safe copy)."""
+def usage_records(run_id: str | None = None) -> list[dict]:
+    """Snapshot of recorded usage events (thread-safe copy).
+
+    With ``run_id``: only records tagged to that run (plus untagged records,
+    for callers that still rely on timestamp fallback).
+    """
     with _usage_lock:
-        return list(_usage_records)
+        records = list(_usage_records)
+    if run_id is None:
+        return records
+    return [r for r in records if r.get("run") in (None, run_id)]
 
 
 def get_backend(model: str | None = None) -> LLMBackend:
@@ -342,8 +415,21 @@ def run_concurrent(
         return out
 
     results: list[Any] = [None] * n
+    # worker threads don't inherit the context; re-set the run tag in each
+    # worker's own context so run_scope attribution follows pool jobs
+    parent_run = _current_run.get()
+
+    def wrapped(i: int, item: Any) -> Any:
+        if parent_run is None:
+            return fn(i, item)
+        token = _current_run.set(parent_run)
+        try:
+            return fn(i, item)
+        finally:
+            _current_run.reset(token)
+
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = {ex.submit(fn, i, item): i for i, item in enumerate(items)}
+        futures = {ex.submit(wrapped, i, item): i for i, item in enumerate(items)}
         for fut in as_completed(futures):
             i = futures[fut]
             r = fut.result()
