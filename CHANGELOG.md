@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [1.1.1] — 2026-08-20
 
 ### Added — single-exe desktop app (Windows)
 - `CiteLens.exe` (PyInstaller onefile, ~67 MB): double-click → first-run

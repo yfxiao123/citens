@@ -69,7 +69,21 @@ References render as complete APA-style entries — full author list, `*venue*`,
 
 ## Quick start
 
-**One click** (recommended — auto-creates the venv, installs dependencies including the PDF toolchain, opens the web console in your browser):
+**Desktop app** (zero install — recommended if you just want to run it):
+
+```
+https://github.com/yfxiao123/citens/releases/latest/download/CiteLens.exe
+```
+
+Download, double-click: a first-run wizard asks for your LLM provider/key
+(DeepSeek / OpenAI / Ollama / any OpenAI-compatible base URL), then the web
+console opens in your browser. Everything (`.env`, caches, fetched PDFs,
+runs) lives **next to the exe** — portable: move the folder, keep your data;
+delete it, nothing remains. ~67 MB, unsigned (SmartScreen may ask "run
+anyway"); the first launch takes ~10-20 s (self-extraction).
+
+**From source** (one click — auto-creates the venv, installs dependencies
+including the PDF toolchain, opens the web console in your browser):
 
 ```
 双击 start.bat        # Windows
@@ -116,6 +130,13 @@ your browser. Everything (`.env`, caches, fetched PDFs, runs) lives **next to
 the exe** — portable: move the folder, keep your data; delete it, nothing
 remains. Note: ~67 MB, unsigned (SmartScreen may ask "run anyway"), and the
 first launch takes ~10-20 s (self-extraction). Build it yourself with
+`pip install -e ".[api,packaging]" && pyinstaller citens.spec`.
+
+### Desktop app (Windows, no Python needed)
+
+See [Quick start](#quick-start) above — the single-exe build is the fastest
+way in. Prefer a console/build from source? `start.bat` below opens the same
+web UI; build the exe yourself with
 `pip install -e ".[api,packaging]" && pyinstaller citens.spec`.
 
 Web UI (SSE streaming, live step progress, precision panel) — what `start.bat` opens:
@@ -238,6 +259,6 @@ MIT. The runtime-fetched SCImago dataset is CC BY-NC (attributed to SCImago Lab;
 2. **批判立场**：综合 agent 显式提取跨论文的共识、矛盾与研究空白；反思 agent 发现覆盖缺口后补检并重写——不是罗列，是论证。
 3. **全文优先、诚实标注**：开放获取 PDF 自动抓取并按"效应量密度"挑选证据段落；拿不到全文的论文明确标注"仅摘要核验"，绝不冒充"已核验"（有校园代理/VPN 的可选配，见 [The access layer](#the-access-layer)）。
 
-快速开始：双击 `start.bat`（Windows）或 `./start.sh`（macOS/Linux）——自动建环境、装依赖、打开网页控制台；手动方式 `uv sync` → 填 `.env` → `citens run 主题 -n 8`。
+快速开始：**免安装**——从 [Releases](https://github.com/yfxiao123/citens/releases/latest/download/CiteLens.exe) 下载 `CiteLens.exe`，双击后按向导填 API key 即可；或源码方式：双击 `start.bat`（Windows） / `./start.sh`（macOS/Linux）——自动建环境、装依赖、打开网页控制台；手动方式 `uv sync` → 填 `.env` → `citens run 主题 -n 8`。
 
 示例产物见 [`examples/llm-recommender-systems/`](examples/llm-recommender-systems/)（主题「基于大语言模型的推荐系统」，31 篇参考文献，107 条论断，审计后引用精度 99%，21/24 篇全文溯源，附自包含审计浏览器）。
