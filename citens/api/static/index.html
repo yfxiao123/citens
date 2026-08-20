@@ -523,11 +523,37 @@ $("topic").addEventListener("keydown", e => { if (e.key === "Enter") run(); });
   const GROUP_ORDER = ["llm", "sources", "access", "app"];
   let fields = [];
 
+  const PRESETS = {
+    deepseek:  { base: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+    openai:    { base: "https://api.openai.com/v1",   model: "gpt-4o-mini" },
+    ollama:    { base: "http://localhost:11434/v1",   model: "qwen2.5:7b" },
+    openrouter:{ base: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" },
+  };
+
+  function applyPreset(name) {
+    const p = PRESETS[name];
+    if (!p) return;
+    $("sf-LLM_API_BASE").value = p.base;
+    $("sf-LLM_MODEL").value = p.model;
+  }
+
   function render() {
     const byGroup = {};
     fields.forEach(f => (byGroup[f.group] = byGroup[f.group] || []).push(f));
+    const presetRow = `
+      <div class="settings-field">
+        <label>快速选择服务商 / provider preset <span class="hint">— 选中自动填好地址与模型，只需粘贴 Key</span></label>
+        <select id="sf-preset">
+          <option value="">— 选择 / choose —</option>
+          <option value="deepseek">DeepSeek（默认推荐）</option>
+          <option value="openai">OpenAI</option>
+          <option value="ollama">Ollama（本地，无需 Key）</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
+      </div>`;
     $("settings-fields").innerHTML = GROUP_ORDER.filter(g => byGroup[g]).map(g => `
       <div class="settings-group">${GROUP_NAMES[g]}</div>
+      ${g === "llm" ? presetRow : ""}
       ${byGroup[g].map(f => `
         <div class="settings-field" data-key="${f.key}">
           <label>${f.label} <span class="hint">— ${f.hint}</span></label>
@@ -554,6 +580,14 @@ $("topic").addEventListener("keydown", e => { if (e.key === "Enter") run(); });
       $("settings-note").textContent = "工作目录: " + (j.workdir || "");
       $("settings-test-result").textContent = "";
       render();
+      $("sf-preset").addEventListener("change", (ev) => applyPreset(ev.target.value));
+      // nothing configured yet -> prefill the recommended default (DeepSeek);
+      // the user only pastes a key and hits save
+      const llmSet = (fields.find(f => f.key === "LLM_API_KEY") || {}).set;
+      if (!llmSet) {
+        $("sf-preset").value = "deepseek";
+        applyPreset("deepseek");
+      }
       $("settings-overlay").classList.add("show");
     } catch (e) {
       alert("读取设置失败: " + e.message);

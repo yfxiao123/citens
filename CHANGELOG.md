@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [1.2.2] — 2026-08-20
+
+### Fixed — first-launch experience (the "Failed to fetch" reports)
+- Browser opens only when the server actually answers /health — v1.2.1
+  opened it 1.5s after launch while the frozen exe was still
+  self-extracting (30-180s under antivirus scan), so every request died
+  with ERR_CONNECTION_REFUSED / "Failed to fetch".
+- The console prints a loading banner IMMEDIATELY (previously blank
+  during the heavy import phase), progress dots while binding, and the
+  ready line with the URL when up.
+- __version__ now follows package metadata (was stuck on 1.1.0).
+
+### Added — provider presets in the settings page
+- Quick-select dropdown atop the LLM group: DeepSeek (default, base+
+  model prefilled), OpenAI, Ollama (local, no key), OpenRouter —
+  choosing one fills base URL + model; on first run DeepSeek is
+  preselected so the user only pastes a key, saves, and optionally hits
+  "测试连接".
+
 ## [1.2.1] — 2026-08-20
 
 ### Changed — no more terminal first-run wizard
