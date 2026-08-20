@@ -146,7 +146,7 @@ def test_canary_claims_are_never_in_the_real_results(monkeypatch):
 
     claims = [Claim(text="real claim [0]", citation_indices=[0])]
     results, _ = verifier_mod.verify_claims(claims, table, store)
-    canary = verifier_mod.canary_check(table, store)
+    verifier_mod.canary_check(table, store)
     assert len(results) == 1  # only the real claim
     assert any("patient mortality" in u for u in seen_user_prompts[1:])
 

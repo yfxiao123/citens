@@ -98,7 +98,7 @@ def check_health(
 
     absent_count = len(absence_audit.get("absent_canonical_papers", []))
 
-    metrics = {
+    metrics: dict[str, object] = {
         "precision": precision,
         "unverifiable_rate": round(unverifiable_rate, 3),
         "n_consensus": n_consensus,

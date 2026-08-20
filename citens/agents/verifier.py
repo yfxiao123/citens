@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import re
 
-from citens.grounding import ChunkStore, CitationTable
 from citens.config import settings
+from citens.grounding import ChunkStore, CitationTable
 from citens.llm import chat_json, run_concurrent
 from citens.models import Claim, Verdict, VerificationResult
 
@@ -351,8 +351,8 @@ def verify_claims(
     # feed the fuzzy store from EVERY verdict (fresh, cached, reused) keyed
     # by claim slot — claims[slot] is the text/citations pair that produced it
     if verdict_fuzzy is not None:
-        for slot, res in enumerate(placed):
-            if res is None:
+        for slot, placed_res in enumerate(placed):
+            if placed_res is None:
                 continue
             claim = claims[slot]
             verdict_fuzzy[
@@ -360,7 +360,7 @@ def verify_claims(
                     _norm_claim_text(claim.text),
                     tuple(sorted(set(claim.citation_indices))),
                 )
-            ] = (_grounding_sig(claim, table, chunk_store), res)
+            ] = (_grounding_sig(claim, table, chunk_store), placed_res)
 
     verifiable_results = [r for r in results if r.verdict != Verdict.UNVERIFIABLE]
     if verifiable_results:

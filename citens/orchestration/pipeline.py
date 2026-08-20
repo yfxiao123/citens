@@ -918,7 +918,7 @@ async def run_pipeline_async(
             _emit(bus, StepStarted(step="search", title="检索论文"))
             cache_key = {"keywords": keywords, "max_results": max_results, "sources": options.sources}
             cached = cache.get("search", cache_key) if options.use_cache else None
-            search_health: dict[str, str] = {"cache": "hit"} if cached is not None else {}
+            search_health = {"cache": "hit"} if cached is not None else {}
             if cached is None:
                 papers, search_health = await search_papers_with_health(
                     keywords, max_results, sources=options.sources

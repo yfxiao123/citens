@@ -88,7 +88,11 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.10"
+# Type-check against 3.12: numpy 2.x ships py.typed stubs using 3.12-only
+# syntax, and under an older target mypy aborts on THEIR file before ever
+# checking ours (there is no way to skip parsing a followed stub). Runtime
+# 3.10/3.11 compatibility is enforced by the CI pytest matrix instead.
+python_version = "3.12"
 strict = false
 ignore_missing_imports = true
 

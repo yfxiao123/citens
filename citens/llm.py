@@ -195,6 +195,7 @@ class LiteLLMBackend:
         temperature: float = 0.3,
         max_tokens: int | None = None,
         response_json: bool = False,
+        thinking: bool | str = True,  # accepted for protocol parity; unused
     ) -> str:  # pragma: no cover - requires optional dep
         import litellm
 
@@ -243,7 +244,7 @@ class run_scope:
 
     def __init__(self, run_id: str) -> None:
         self.run_id = run_id
-        self._token = None
+        self._token: contextvars.Token[str | None] | None = None
 
     def __enter__(self) -> run_scope:
         self._token = _current_run.set(self.run_id)

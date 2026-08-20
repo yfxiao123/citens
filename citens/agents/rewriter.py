@@ -15,8 +15,8 @@ precision stops being a report and becomes a pipeline behavior.
 
 from __future__ import annotations
 
-from citens.grounding import ChunkStore, CitationTable
 from citens.config import settings
+from citens.grounding import ChunkStore, CitationTable
 from citens.llm import chat_json
 from citens.models import Claim, VerificationResult
 

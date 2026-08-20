@@ -554,11 +554,11 @@ def serve(
     """启动 Web 控制台 (FastAPI + SSE) — http://host:port"""
     try:
         import uvicorn
-    except ImportError:  # pragma: no cover - env dependent
+    except ImportError as e:  # pragma: no cover - env dependent
         console.print(
             "[red]缺少 Web 依赖[/] — 先安装: [bold]pip install 'citens[api]'[/]"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     if not settings.llm_api_key:
         console.print(
