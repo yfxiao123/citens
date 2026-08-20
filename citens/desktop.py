@@ -62,7 +62,20 @@ def _import_selfcheck() -> str:
     return "\n".join(problems) or "all imports OK"
 
 
+def _console_safe() -> None:
+    """Never crash on print: keep each system's console encoding (GBK here,
+    cp1252 on Western Windows) but replace unencodable chars instead of
+    raising UnicodeEncodeError — the v1.2.2 Chinese banner killed startup
+    on every non-CJK-locale machine."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:  # noqa: BLE001 - non-TextIO streams (redirects)
+            pass
+
+
 def main() -> None:
+    _console_safe()
     # IMMEDIATELY: the frozen app spends 30-180s importing (self-extraction +
     # AV scan + heavy first import) — a blank window looks like a hang
     print("CiteLens 正在加载 / loading…", flush=True)
