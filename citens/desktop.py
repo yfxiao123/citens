@@ -115,9 +115,31 @@ def _import_selfcheck() -> str:
 
 
 def main() -> None:
-    # portable mode BEFORE any citens import (settings read .env from cwd)
+    # portable mode BEFORE any citens import (settings read .env from cwd).
+    # CITELENS_WORKDIR in .env redirects the data directory (runs/, papers/,
+    # .cache/, lit pools) — "one copy of the exe, data where I choose it".
     app_dir = _app_dir()
     os.chdir(app_dir)
+    from citens.api.envstore import read_env_value
+
+    workdir = read_env_value(app_dir / ".env", "CITELENS_WORKDIR")
+    if workdir:
+        wd = Path(workdir)
+        if not wd.is_absolute():
+            wd = app_dir / wd
+        wd.mkdir(parents=True, exist_ok=True)
+        os.chdir(wd)
+        # the config moves WITH the data: everything except the pointer line
+        # migrates into the workdir's .env on first use — settings UI, pydantic
+        # Settings, and this bootstrap all read/write cwd/.env afterwards
+        pointer = app_dir / ".env"
+        target = wd / ".env"
+        if pointer.is_file() and not target.is_file():
+            keep = [
+                line for line in pointer.read_text(encoding="utf-8").splitlines()
+                if not line.strip().startswith("CITELENS_WORKDIR")
+            ]
+            target.write_text("\n".join(keep) + "\n", encoding="utf-8")
 
     if "--import-check" in sys.argv:  # exe smoke test / support tooling
         print(_import_selfcheck())

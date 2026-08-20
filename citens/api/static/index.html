@@ -128,6 +128,32 @@
     .card:nth-child(2) { grid-column: 1; grid-row: 2; }
     .card:nth-child(3) { grid-column: 2; grid-row: 1 / span 2; }
   }
+
+  /* ---------- settings modal ---------- */
+  #settings-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(5,8,12,.72);
+    z-index: 50; align-items: center; justify-content: center;
+  }
+  #settings-overlay.show { display: flex; }
+  #settings-box {
+    width: min(680px, 92vw); max-height: 86vh; overflow: auto;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 22px 26px;
+  }
+  #settings-box h2 { margin: 0 0 4px; font-size: 16px; }
+  #settings-box .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .settings-group { margin: 16px 0 6px; font-size: 12px; color: var(--accent);
+    letter-spacing: .5px; text-transform: uppercase; }
+  .settings-field { margin: 10px 0; }
+  .settings-field label { display: block; font-size: 12px; margin-bottom: 3px; }
+  .settings-field .hint { color: var(--muted); font-weight: 400; }
+  .settings-field input {
+    width: 100%; padding: 7px 10px; font-size: 13px;
+  }
+  #settings-actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+  #settings-note { font-size: 12px; color: var(--muted); flex: 1; }
+  #settings-test-result { font-size: 12px; margin-top: 8px; min-height: 16px; }
+  .ok-text { color: var(--ok); } .err-text { color: var(--err); }
 </style>
 </head>
 <body>
@@ -137,6 +163,7 @@
   <span class="chip" id="chip-model">…</span>
   <span class="chip" id="chip-sjr">SJR</span>
   <span class="spacer"></span>
+  <a href="#" id="open-settings" title="模型 / 学术源 / 代理 / 工作目录">⚙ 设置</a>
   <a href="/docs" target="_blank">API</a>
 </header>
 <main>
@@ -468,6 +495,107 @@ document.querySelectorAll("#tabs button").forEach(btn => {
 
 $("go").addEventListener("click", run);
 $("topic").addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+</script>
+
+<div id="settings-overlay">
+  <div id="settings-box">
+    <h2>⚙ 设置 / Settings</h2>
+    <div class="sub">保存到 <span id="settings-envfile">…</span> · 密钥只显示掩码，留空 = 不修改</div>
+    <div id="settings-fields"></div>
+    <div id="settings-actions">
+      <button class="primary" id="settings-save">保存 / SAVE</button>
+      <button id="settings-test">测试连接 / TEST</button>
+      <span id="settings-note"></span>
+    </div>
+    <div id="settings-test-result"></div>
+  </div>
+</div>
+<script>
+(() => {
+  const GROUP_NAMES = { llm: "模型服务 / LLM", sources: "学术源 / Scholarly sources",
+                        access: "访问层 / Access", app: "应用 / App" };
+  const GROUP_ORDER = ["llm", "sources", "access", "app"];
+  let fields = [];
+
+  function render() {
+    const byGroup = {};
+    fields.forEach(f => (byGroup[f.group] = byGroup[f.group] || []).push(f));
+    $("settings-fields").innerHTML = GROUP_ORDER.filter(g => byGroup[g]).map(g => `
+      <div class="settings-group">${GROUP_NAMES[g]}</div>
+      ${byGroup[g].map(f => `
+        <div class="settings-field" data-key="${f.key}">
+          <label>${f.label} <span class="hint">— ${f.hint}</span></label>
+          <input type="${f.secret ? "password" : "text"}" id="sf-${f.key}"
+                 placeholder="${f.set ? "当前: " + f.current : "（未设置）"}" autocomplete="off">
+        </div>`).join("")}
+    `).join("");
+  }
+
+  function collect() {
+    const updates = {};
+    fields.forEach(f => {
+      const v = ($("sf-" + f.key) || {}).value;
+      if (v && v.trim()) updates[f.key] = v.trim();
+    });
+    return updates;
+  }
+
+  async function open() {
+    try {
+      const j = await (await fetch("/settings")).json();
+      fields = j.fields || [];
+      $("settings-envfile").textContent = j.env_file || "";
+      $("settings-note").textContent = "工作目录: " + (j.workdir || "");
+      $("settings-test-result").textContent = "";
+      render();
+      $("settings-overlay").classList.add("show");
+    } catch (e) {
+      alert("读取设置失败: " + e.message);
+    }
+  }
+
+  $("open-settings").addEventListener("click", (ev) => { ev.preventDefault(); open(); });
+  $("settings-overlay").addEventListener("click", (ev) => {
+    if (ev.target.id === "settings-overlay") ev.target.classList.remove("show");
+  });
+
+  $("settings-save").addEventListener("click", async () => {
+    const updates = collect();
+    if (!Object.keys(updates).length) { $("settings-test-result").className = "";
+      $("settings-test-result").textContent = "没有修改 / nothing to save"; return; }
+    try {
+      const j = await (await fetch("/settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates }),
+      })).json();
+      if (j.applied) {
+        fetch("/health").then(r => r.json()).then(h =>
+          $("chip-model").innerHTML = `model <b>${h.llm_model}</b>`).catch(() => {});
+      }
+      const r = $("settings-test-result"); r.className = "ok-text";
+      r.textContent = "已保存: " + j.applied.join(", ") +
+        (j.needs_restart ? " · 工作目录重启软件后生效" : "");
+      open();
+    } catch (e) {
+      const r = $("settings-test-result"); r.className = "err-text";
+      r.textContent = "保存失败: " + e.message;
+    }
+  });
+
+  $("settings-test").addEventListener("click", async () => {
+    const r = $("settings-test-result"); r.className = "";
+    r.textContent = "测试中…";
+    try {
+      const j = await (await fetch("/settings/test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates: collect() }),
+      })).json();
+      if (j.ok) { r.className = "ok-text";
+        r.textContent = `✓ 连接成功 · ${j.model} · ${j.latency_ms}ms · "${j.reply}"`; }
+      else { r.className = "err-text"; r.textContent = "✗ " + j.error; }
+    } catch (e) { r.className = "err-text"; r.textContent = "✗ " + e.message; }
+  });
+})();
 </script>
 </body>
 </html>

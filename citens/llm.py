@@ -302,6 +302,14 @@ def strong_model() -> str:
     return settings.llm_model_strong or settings.llm_model
 
 
+def reset_backends() -> None:
+    """Drop cached backend clients (each holds the key/base_url of its
+    creation time). The settings UI calls this after saving new LLM
+    credentials so the next call uses them without a restart."""
+    with _usage_lock:
+        _backends.clear()
+
+
 def chat(
     system_prompt: str,
     user_prompt: str,

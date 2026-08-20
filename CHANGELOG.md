@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [1.2.0] — 2026-08-20
+
+### Added — in-app settings UI (the desktop config manager)
+- Settings page in the web console (⚙ in the header): manage the LLM
+  backend (ANY OpenAI-compatible base URL + model, free text — not just
+  the wizard's presets), scholarly-source keys (Semantic Scholar,
+  OpenAlex/Crossref polite emails, CORE), and optional proxy/EZproxy —
+  all in one place, secrets masked on read-back.
+- `GET/POST /settings` + `POST /settings/test` (one tiny completion to
+  verify key/base/model, reports latency); saved values apply to the
+  live process immediately (backend cache reset) and persist to `.env`
+  with unknown lines preserved.
+- `CITELENS_WORKDIR`: point the data directory (runs/, papers/, pools,
+  cache) anywhere — one copy of the exe, data where you choose; the
+  config migrates with the data. Set it from the settings UI.
+
 ## [1.1.1] — 2026-08-20
 
 ### Added — single-exe desktop app (Windows)

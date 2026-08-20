@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from citens import __version__
+from citens.api.envstore import env_path, read_env_value, update_env_file
 from citens.config import settings
 from citens.events import Event, EventBus, RunCompleted, RunFailed
 from citens.orchestration import RunOptions, run_pipeline_async
@@ -95,6 +96,145 @@ def health() -> dict:
         "sjr_data": Path(settings.sjr_csv_path).is_file(),
         "papers_dir": Path(settings.papers_dir).is_dir(),
     }
+
+
+# --- settings UI (the desktop app's config manager) ---------------------------
+#
+# The .env next to the exe is the single source of truth; the API reads it,
+# masks secrets on the way out, applies saved values to the live settings
+# object, and resets the LLM backend cache so new keys take effect on the
+# next call without a restart.
+
+_SETTINGS_FIELDS: list[tuple[str, str, str, bool, str]] = [
+    # (env key, group, label, secret, hint)
+    ("LLM_API_BASE", "llm", "API Base URL", False,
+     "任何 OpenAI 兼容服务：DeepSeek / OpenRouter / vLLM / Groq / Ollama …"),
+    ("LLM_API_KEY", "llm", "API Key", True, "服务商控制台获取"),
+    ("LLM_MODEL", "llm", "模型（日常阶段）", False,
+     "planner / 筛选 / 抽取 用；如 deepseek-chat"),
+    ("LLM_MODEL_STRONG", "llm", "强模型（写作/核验，可选）", False,
+     "留空 = 与日常模型相同"),
+    ("SEMANTIC_SCHOLAR_API_KEY", "sources", "Semantic Scholar API Key", True,
+     "免费申请；避免 S2 限流掉源"),
+    ("OPENALEX_EMAIL", "sources", "OpenAlex 邮箱", False, "礼貌池，更快更稳"),
+    ("CROSSREF_EMAIL", "sources", "Crossref 邮箱", False, "礼貌池"),
+    ("CORE_API_KEY", "sources", "CORE API Key", True,
+     "免费申请；显著提高全文命中率"),
+    ("HTTP_PROXY", "access", "HTTP(S) 代理（可选）", False,
+     "有校园代理/VPN 时填，可取付费论文"),
+    ("EZPROXY_PREFIX", "access", "EZproxy 前缀（可选）", False,
+     "如 https://lib.univ.edu.cn/login?url="),
+    ("CITELENS_WORKDIR", "app", "工作目录（重启生效）", False,
+     "数据（runs/文献库/缓存）存放位置；留空 = exe 旁边"),
+]
+
+
+def _mask(v: str, secret: bool) -> str:
+    if not v:
+        return ""
+    if not secret or len(v) <= 8:
+        return v
+    return f"{v[:5]}…{v[-4:]}"
+
+
+def _field_value(env_key: str) -> str:
+    raw = read_env_value(env_path(), env_key)
+    if raw is not None:
+        return raw
+    # fall back to the live settings object (env vars set outside .env)
+    return str(getattr(settings, env_key.lower(), "") or "")
+
+
+@app.get("/settings", dependencies=[Depends(_require_token)])
+def get_settings() -> dict:
+    fields = []
+    for env_key, group, label, secret, hint in _SETTINGS_FIELDS:
+        v = _field_value(env_key)
+        fields.append({
+            "key": env_key, "group": group, "label": label,
+            "secret": secret, "hint": hint,
+            "current": _mask(v, secret), "set": bool(v),
+        })
+    return {
+        "fields": fields,
+        "workdir": str(Path.cwd()),
+        "env_file": str(env_path()),
+    }
+
+
+class SettingsUpdate(BaseModel):
+    updates: dict[str, str] = Field(default_factory=dict)
+    model_config = {"extra": "forbid"}
+
+
+@app.post("/settings", dependencies=[Depends(_require_token)])
+def save_settings(req: SettingsUpdate) -> dict:
+    known = {f[0] for f in _SETTINGS_FIELDS}
+    unknown = set(req.updates) - known
+    if unknown:
+        raise HTTPException(400, f"unknown settings keys: {sorted(unknown)}")
+
+    update_env_file(env_path(), req.updates)
+
+    # apply to the live settings object (same instance every module holds) so
+    # changes take effect immediately; the workdir needs a restart by nature
+    from citens import llm
+
+    llm_touched = False
+    for key, val in req.updates.items():
+        if key == "CITELENS_WORKDIR":
+            continue
+        setattr(settings, key.lower(), val.strip())
+        if key.startswith("LLM_"):
+            llm_touched = True
+    if llm_touched:
+        llm.reset_backends()  # cached clients hold the old key/base
+
+    applied = [k for k, v in req.updates.items() if v.strip()]
+    return {
+        "applied": applied,
+        "needs_restart": "CITELENS_WORKDIR" in req.updates,
+    }
+
+
+@app.post("/settings/test", dependencies=[Depends(_require_token)])
+def test_llm_connection(req: SettingsUpdate) -> dict:
+    """One tiny completion against the given (or current) LLM config."""
+    import time
+
+    from citens.llm import build_completion_kwargs
+
+    base = (req.updates.get("LLM_API_BASE") or settings.llm_api_base).strip()
+    key = req.updates.get("LLM_API_KEY") or settings.llm_api_key
+    model = (req.updates.get("LLM_MODEL") or settings.llm_model).strip()
+    if not key:
+        return {"ok": False, "error": "缺少 API Key / missing API key"}
+    try:
+        from openai import OpenAI
+
+        client = (
+            OpenAI(api_key=key, base_url=base) if base else OpenAI(api_key=key)
+        )
+        kwargs = build_completion_kwargs(
+            model,
+            system_prompt="You are a connectivity test.",
+            user_prompt="Reply with the single word: OK",
+            temperature=0.0,
+            max_tokens=512,
+            response_json=False,
+            thinking=False,
+        )
+        t0 = time.monotonic()
+        resp = client.chat.completions.create(**kwargs)
+        text = (resp.choices[0].message.content or "").strip()
+        return {
+            "ok": True,
+            "latency_ms": round((time.monotonic() - t0) * 1000),
+            "model": resp.model,
+            "reply": text[:40],
+        }
+    except Exception as e:  # noqa: BLE001 - surface the provider's message
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
 
 
 @app.post("/run", dependencies=[Depends(_require_token)])
