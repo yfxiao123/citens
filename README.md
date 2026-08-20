@@ -102,6 +102,22 @@ citens run "..." -l en              # English output — Chinese is the DEFAULT
                                     #   (asked interactively when -l is omitted)
 ```
 
+### Desktop app (Windows, no Python needed)
+
+Prefer not to install anything? Download the single-file desktop build:
+
+```
+https://github.com/yfxiao123/citens/releases/latest/download/CiteLens.exe
+```
+
+Double-click → a first-run wizard asks for your LLM provider/key (DeepSeek /
+OpenAI / Ollama / any OpenAI-compatible base URL) → the web console opens in
+your browser. Everything (`.env`, caches, fetched PDFs, runs) lives **next to
+the exe** — portable: move the folder, keep your data; delete it, nothing
+remains. Note: ~67 MB, unsigned (SmartScreen may ask "run anyway"), and the
+first launch takes ~10-20 s (self-extraction). Build it yourself with
+`pip install -e ".[api,packaging]" && pyinstaller citens.spec`.
+
 Web UI (SSE streaming, live step progress, precision panel) — what `start.bat` opens:
 
 ```bash

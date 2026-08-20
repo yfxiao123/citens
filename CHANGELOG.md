@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — single-exe desktop app (Windows)
+- `CiteLens.exe` (PyInstaller onefile, ~67 MB): double-click → first-run
+  wizard (DeepSeek / OpenAI / Ollama / any OpenAI-compatible key+base+model)
+  → local web console opens in the browser. Portable: `.env`, `.cache`,
+  `papers/`, `runs/`, `data/` all live next to the exe.
+- `citens/desktop.py` (also `citens-desktop` console script); free-port
+  fallback 8000-8009; `--import-check` smoke mode.
+- `citens.spec` + `packaging` extra; `.github/workflows/release.yml` builds
+  and attaches the exe to GitHub Releases on `v*` tags.
+- Tested end-to-end on Windows: health/console/runs endpoints from the
+  frozen bundle (first launch ~10-20 s — self-extraction + AV scan).
+
 ### Fixed — full-text harvest & arXiv resilience (round 2)
 - **Fetch-time OA lookup now harvests ALL locations, from three sources**:
   Semantic Scholar `openAccessPdf` by DOI, OpenAlex `locations[].pdf_url`

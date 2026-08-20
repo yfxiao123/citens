@@ -49,6 +49,8 @@ api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "sse-starlette>=2.0"]
 # The default OpenAI-compatible backend already covers OpenAI/DeepSeek/Ollama/
 # OpenRouter/vLLM/Groq without this extra.
 multi = ["litellm>=1.40"]
+# Building the single-exe desktop app (pyinstaller citens.spec --noconfirm).
+packaging = ["pyinstaller>=6.6"]
 dev = [
     "ruff>=0.4",
     "mypy>=1.10",
@@ -59,6 +61,7 @@ dev = [
 
 [project.scripts]
 citens = "citens.cli:app"
+citens-desktop = "citens.desktop:main"
 
 [project.urls]
 Homepage = "https://github.com/yfxiao123/citens"
