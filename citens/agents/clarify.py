@@ -37,17 +37,34 @@ Do NOT ask generic questions (e.g. "what is your goal?").
 4. Keep questions few and high-value — a user should answer them in under 20 seconds.
 5. If the topic is already specific enough that nothing would change the search, return an \
 empty list.
+6. Write the QUESTIONS and OPTIONS in {lang_name} — the user answers these in the UI \
+before any review exists; they must read like a native form, not a translation exercise. \
+Keep ids in English.
 
 Output JSON:
 {"questions": [
   {"id": "focus", "question": "Which sub-focus?", "options": ["opt a", "opt b", "opt c"], "default": "opt a"}
 ]}"""
 
+_LANG_NAMES = {"zh": "简体中文", "en": "English"}
+
 
 def generate_clarifying_questions(topic: str) -> list[dict]:
-    """Return 0-4 clarifying questions (each: id/question/options/default)."""
+    """Return 0-4 clarifying questions (each: id/question/options/default).
+
+    Question/option text follows REVIEW_LANGUAGE (Chinese by default) — the
+    pre-run form is the first thing a user reads; it should match the review
+    language they will get.
+    """
+    from citens.config import settings
+
+    lang = _LANG_NAMES.get(settings.review_language.strip().lower(), "English")
     try:
-        result = chat_json(SYSTEM_PROMPT, f"研究主题 / Topic: {topic}", max_tokens=1536)
+        result = chat_json(
+            SYSTEM_PROMPT.replace("{lang_name}", lang),
+            f"研究主题 / Topic: {topic}",
+            max_tokens=1536,
+        )
     except Exception:  # noqa: BLE001
         return []
     questions = result.get("questions", [])

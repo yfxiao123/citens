@@ -134,3 +134,26 @@ if __name__ == "__main__":
                     fn()
             print(f"PASS {name}")
     print("all feedback-loop tests passed")
+
+
+def test_clarify_questions_follow_review_language(monkeypatch):
+    """The pre-run form must speak the review language (zh default)."""
+    captured = {}
+
+    class FakeResult(dict):
+        pass
+
+    def fake_chat_json(system, user, **kw):
+        captured["system"] = system
+        return {"questions": []}
+
+    monkeypatch.setattr(clarify_mod, "chat_json", fake_chat_json)
+    from citens.config import settings
+
+    monkeypatch.setattr(settings, "review_language", "zh")
+    clarify_mod.generate_clarifying_questions("订单簿建模")
+    assert "简体中文" in captured["system"]
+
+    monkeypatch.setattr(settings, "review_language", "en")
+    clarify_mod.generate_clarifying_questions("order book")
+    assert "English" in captured["system"] and "简体中文" not in captured["system"]

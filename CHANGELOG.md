@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [1.2.3] — 2026-08-20
+
+### Changed — pre-run clarification questions follow the review language
+- The clarify form (sub-focus / timeframe / venue bar …) renders in
+  Chinese by default (REVIEW_LANGUAGE=zh), English with `-l en` — it is
+  the first thing a user reads; it was always English regardless of the
+  output language. Year-range freshness rewriting already handled 近N年.
+
 ## [1.2.2] — 2026-08-20
 
 ### Fixed — first-launch experience (the "Failed to fetch" reports)
