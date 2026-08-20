@@ -85,3 +85,11 @@ def test_env_store_roundtrip(tmp_path):
     update_env_file(f, {"A": ""})  # empty -> removed
     assert read_env_value(f, "A") is None
     assert read_env_value(f, "B") == "22"
+
+
+def test_health_reports_llm_configured(client, monkeypatch):
+    (Path.cwd() / ".env").write_text("LLM_API_KEY=sk-1234567890\n", encoding="utf-8")
+    monkeypatch.setattr(settings, "llm_api_key", "sk-1234567890")
+    assert client.get("/health").json()["llm_configured"] is True
+    monkeypatch.setattr(settings, "llm_api_key", "")
+    assert client.get("/health").json()["llm_configured"] is False

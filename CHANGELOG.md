@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [1.2.1] — 2026-08-20
+
+### Changed — no more terminal first-run wizard
+- Double-click now goes straight to the web console; on first run (no API
+  key) the browser opens with the settings page auto-opened and a hint —
+  configuring happens entirely in the UI, never in the terminal. The old
+  input() wizard blocked startup: while it waited, the console served
+  nothing and the browser showed ERR_CONNECTION_REFUSED.
+- Startup banner states explicitly that closing the console window quits
+  the app; /health reports `llm_configured` for the UI's first-run check.
+
 ## [1.2.0] — 2026-08-20
 
 ### Added — in-app settings UI (the desktop config manager)

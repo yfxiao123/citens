@@ -95,6 +95,8 @@ def health() -> dict:
         "search_sources": settings.search_sources,
         "sjr_data": Path(settings.sjr_csv_path).is_file(),
         "papers_dir": Path(settings.papers_dir).is_dir(),
+        # the console uses this to auto-open the settings page on first run
+        "llm_configured": bool(settings.llm_api_key),
     }
 
 

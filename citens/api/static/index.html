@@ -223,6 +223,12 @@ const state = { runId: null, running: false, t0: null, timerHandle: null };
 fetch("/health").then(r => r.json()).then(h => {
   $("chip-model").innerHTML = `model <b>${h.llm_model}</b>`;
   $("chip-sjr").innerHTML = h.sjr_data ? `SJR <b>loaded</b>` : `SJR <b>absent</b>`;
+  const setup = new URLSearchParams(location.search).get("setup");
+  if (setup === "1" || h.llm_configured === false) {
+    document.getElementById("open-settings").click();
+    const note = document.getElementById("settings-note");
+    if (note) note.textContent = "首次使用：填写「模型服务」的 API Key 后保存即可开始";
+  }
 }).catch(() => {});
 
 /* ---------- history ---------- */
