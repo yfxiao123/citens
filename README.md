@@ -124,12 +124,15 @@ Prefer not to install anything? Download the single-file desktop build:
 https://github.com/yfxiao123/citens/releases/latest/download/CiteLens.exe
 ```
 
-Double-click → a first-run wizard asks for your LLM provider/key (DeepSeek /
-OpenAI / Ollama / any OpenAI-compatible base URL) → the web console opens in
-your browser. Everything (`.env`, caches, fetched PDFs, runs) lives **next to
-the exe** — portable: move the folder, keep your data; delete it, nothing
-remains. Note: ~67 MB, unsigned (SmartScreen may ask "run anyway"), and the
-first launch takes ~10-20 s (self-extraction). Build it yourself with
+Double-click → the web console opens in your browser (first run: the settings
+page opens automatically — pick a provider preset and paste your API key).
+No terminal windows; the run's live transcript, results, and the ⏻ exit
+button all live in the web console. Everything (`.env`, caches, fetched
+PDFs, runs) lives **next to the exe** — portable: move the folder, keep
+your data; delete it, nothing remains. Launching again while it runs just
+opens the browser (single instance). Note: ~67 MB, unsigned (SmartScreen
+may ask "run anyway"), and the first launch takes ~10-20 s (self-extraction;
+nothing visible until the browser opens). Build it yourself with
 `pip install -e ".[api,packaging]" && pyinstaller citens.spec`.
 
 ### Desktop app (Windows, no Python needed)
@@ -139,7 +142,9 @@ way in. Prefer a console/build from source? `start.bat` below opens the same
 web UI; build the exe yourself with
 `pip install -e ".[api,packaging]" && pyinstaller citens.spec`.
 
-Web UI (SSE streaming, live step progress, precision panel) — what `start.bat` opens:
+Web UI (live agent transcript: every step, every model call, the retrieved
+queries/papers/verdicts as they happen; refresh-safe — reload mid-run and
+the transcript rebuilds) — what `start.bat` opens:
 
 ```bash
 # start.bat / start.sh already do this; manually:

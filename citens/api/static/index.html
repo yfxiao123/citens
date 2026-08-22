@@ -66,27 +66,49 @@
   #history .run .m { color: var(--muted); margin-top: 2px; display: flex; gap: 8px; }
   #history .run .prec { color: var(--ok); }
 
-  #timeline { flex: 1; overflow-y: auto; padding-right: 4px; }
-  #steps { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
-  #steps li {
-    padding: 6px 10px; border-left: 2px solid var(--border); margin: 5px 0;
-    color: var(--muted); position: relative;
+  /* ---------- live transcript feed (agent activity) ---------- */
+  #now {
+    flex: none; font-size: 11.5px; color: var(--accent); font-family: var(--mono);
+    padding: 0 2px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  #steps li b { color: var(--fg); font-size: 12.5px; font-weight: 600; }
-  #steps li .msg { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; line-height: 1.5; }
-  #steps li.running { border-left-color: var(--accent); }
-  #steps li.running b::after {
-    content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 7px;
-    border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%;
-    animation: spin 0.9s linear infinite; vertical-align: -1px;
+  #now::before { content: "▸ "; opacity: .6; }
+  #now.idle { color: var(--muted); }
+  #feed-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #feed-toolbar {
+    flex: none; display: flex; align-items: center; gap: 12px;
+    font-size: 11px; color: var(--muted); padding: 2px 0 6px; user-select: none;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  #steps li.done { border-left-color: var(--ok); }
-  #steps li.done b::after { content: " ✓"; color: var(--ok); }
-  #steps li.fail { border-left-color: var(--err); }
-  #steps li.fail, #steps li.fail .msg { color: var(--err); }
-  #steps li .elapsed { position: absolute; right: 8px; top: 6px; font-size: 10.5px; color: var(--muted); font-family: var(--mono); }
-  #steps li.warn .msg { color: var(--warn); }
+  #feed-toolbar label { display: flex; align-items: center; gap: 4px; cursor: pointer; margin: 0; letter-spacing: 0; }
+  #llm-count { font-family: var(--mono); color: var(--muted); }
+  #jump-latest {
+    margin-left: auto; background: var(--panel2); color: var(--accent);
+    border: 1px solid var(--border); border-radius: 999px; font-size: 11px;
+    padding: 2px 10px; cursor: pointer;
+  }
+  #feed { flex: 1; overflow-y: auto; font-size: 12px; line-height: 1.55; padding-right: 4px; }
+  @keyframes feedin { from { opacity: 0; } to { opacity: 1; } }
+  #feed > div { animation: feedin .22s ease; }
+  #feed .ln { position: relative; padding: 1px 0 1px 78px; color: var(--fg); }
+  #feed .tag {
+    position: absolute; left: 0; top: 2px; width: 70px; text-align: right;
+    font-family: var(--mono); font-size: 10px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  #feed .ln-step { position: relative; padding: 8px 0 2px 78px; font-weight: 600; color: var(--fg); font-size: 12.5px; }
+  #feed .ln-step .tag { top: 9px; font-weight: 600; }
+  #feed .ln-ok { position: relative; padding: 1px 0 1px 78px; color: var(--ok); }
+  #feed .ln-fail { position: relative; padding: 2px 0 2px 78px; color: var(--err); font-weight: 600; }
+  #feed .ln-detail { position: relative; padding: 0 0 0 92px; color: var(--muted); font-size: 11.5px; }
+  #feed .ln-llm { position: relative; padding: 0 0 0 78px; color: var(--muted); font-size: 11px; font-family: var(--mono); }
+  #feed.hide-llm .ln-llm { display: none; }
+  #feed .ln-llm details { margin: 2px 0 4px 14px; }
+  #feed .ln-llm summary { cursor: pointer; color: var(--warn); font-size: 10.5px; font-family: var(--mono); }
+  #feed .ln-llm pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-size: 11px; white-space: pre-wrap; max-height: 260px;
+    overflow-y: auto; font-family: var(--mono); color: var(--muted); margin: 4px 0 6px;
+    line-height: 1.5;
+  }
 
   #metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; flex: none; }
   .metric {
@@ -163,6 +185,7 @@
   <span class="chip" id="chip-model">…</span>
   <span class="chip" id="chip-sjr">SJR</span>
   <span class="spacer"></span>
+  <a href="#" id="shutdown" title="停止本地服务并退出 CiteLens">⏻ 退出</a>
   <a href="#" id="open-settings" title="模型 / 学术源 / 代理 / 工作目录">⚙ 设置</a>
   <a href="/docs" target="_blank">API</a>
 </header>
@@ -189,16 +212,24 @@
     <div id="history"></div>
   </section>
 
-  <!-- middle: live pipeline -->
+  <!-- middle: live agent transcript -->
   <section class="card">
     <div id="timer">idle</div>
+    <div id="now" class="idle">等待运行 / idle</div>
     <div id="metrics">
       <div class="metric" id="m-prec"><div class="v">–</div><div class="k">引用精度</div></div>
       <div class="metric" id="m-canary"><div class="v">–</div><div class="k">蜜罐漏判</div></div>
       <div class="metric" id="m-lenient"><div class="v">–</div><div class="k">宽严纠偏</div></div>
       <div class="metric" id="m-unver"><div class="v">–</div><div class="k">不可验证率</div></div>
     </div>
-    <div id="timeline"><ul id="steps"></ul></div>
+    <div id="feed-wrap">
+      <div id="feed-toolbar">
+        <label><input type="checkbox" id="show-llm" checked> 模型调用明细</label>
+        <span id="llm-count">0 次调用</span>
+        <button id="jump-latest" hidden>↓ 最新</button>
+      </div>
+      <div id="feed"></div>
+    </div>
   </section>
 
   <!-- right: artifacts -->
@@ -216,8 +247,9 @@
 <script src="/vendor/marked.min.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
-const stepEls = {};
 const state = { runId: null, running: false, t0: null, timerHandle: null };
+let feedStick = true;   // auto-scroll while the user stays at the bottom
+let llmCount = 0;
 
 /* ---------- header chips ---------- */
 fetch("/health").then(r => r.json()).then(h => {
@@ -248,6 +280,7 @@ async function loadHistory() {
   } catch {}
 }
 loadHistory();
+resumeActiveRun();
 
 async function openRun(runId, el) {
   document.querySelectorAll("#history .run").forEach(x => x.classList.remove("active"));
@@ -282,23 +315,31 @@ $("topic").addEventListener("input", () => {
   clarifyTimer = setTimeout(loadClarify, 600);  // debounce: /clarify costs an LLM call
 });
 
-/* ---------- SSE run ---------- */
+/* ---------- run (start + poll; survives proxies that buffer SSE) ---------- */
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const ACTIVE_RUN_KEY = "citens-active-run";
+
+function collectFilters() {
+  const filters = {};
+  document.querySelectorAll("#clarify select[data-qid]").forEach(s => filters[s.dataset.qid] = s.value);
+  return filters;
+}
+
 async function run() {
   const topic = $("topic").value.trim();
   if (!topic) { alert("请输入研究主题"); return; }
   state.running = true; state.t0 = Date.now();
   $("go").disabled = true;
-  $("steps").innerHTML = ""; Object.keys(stepEls).forEach(k => delete stepEls[k]);
+  $("feed").innerHTML = ""; llmCount = 0; feedStick = true;
+  $("llm-count").textContent = "0 次调用";
+  setNow("启动管线…", false);
   ["m-prec", "m-canary", "m-lenient", "m-unver"].forEach(id => setMetric(id, "–", ""));
   document.querySelectorAll("#tabs button").forEach(b => b.disabled = true);
-  $("viewer").innerHTML = '<div class="placeholder">运行中 · streaming…</div>';
+  $("viewer").innerHTML = '<div class="placeholder">运行中 · running…</div>';
   startTimer();
 
-  const filters = {};
-  document.querySelectorAll("#clarify select[data-qid]").forEach(s => filters[s.dataset.qid] = s.value);
-
   try {
-    const resp = await fetch("/run", {
+    const resp = await fetch("/run/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -306,71 +347,184 @@ async function run() {
         max_papers: parseInt($("maxp").value, 10) || 20,
         mode: $("mode").value || null,
         fetch_fulltext: $("fulltext").value === "1",
-        filters,
+        filters: collectFilters(),
       }),
     });
-    if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "", done = false;
-    while (!done) {
-      const { value, done: d } = await reader.read();
-      if (d) break;
-      buf += dec.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) >= 0) {
-        const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
-        const ev = parseSSE(frame);
-        if (ev) done = handleEvent(ev) || done;
-      }
-    }
+    if (!resp.ok) throw new Error((await resp.text()).slice(0, 200) || `HTTP ${resp.status}`);
+    const { run_id: id } = await resp.json();
+    state.runKey = id;
+    // resume anchors: URL hash survives reloads/guestview recycles even where
+    // localStorage doesn't; localStorage keeps the poll cursor as a bonus
+    history.replaceState(null, "", `#run=${id}&t0=${state.t0}`);
+    localStorage.setItem(ACTIVE_RUN_KEY, JSON.stringify({ id, t0: state.t0, seq: 0 }));
+    await pollEvents(id, 0);
   } catch (e) {
-    upsertStep("pipeline", "失败").classList.add("fail");
-    addMsg("pipeline", e.message, true);
-  } finally {
-    state.running = false; $("go").disabled = false; stopTimer();
-    loadHistory();
+    addLine({ cls: "ln-fail", step: "pipeline", text: `✗ ${e.message}` });
+    setNow("失败 / failed", true);
+    finishRunUI();
   }
 }
 
-function parseSSE(frame) {
-  let event = "message", data = "";
-  for (const line of frame.split("\n")) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) data += line.slice(5).trim();
+/* poll the run's event log; seq is the cursor (0 = replay from the start) */
+async function pollEvents(id, after) {
+  let cursor = after;
+  let finished = false;
+  while (!finished) {
+    let j;
+    try {
+      const r = await fetch(`/run/events/${encodeURIComponent(id)}?after=${cursor}`);
+      if (r.status === 404) {
+        addLine({ cls: "ln-fail", step: "pipeline", text: "✗ 事件日志已过期（运行结束超过 30 分钟）" });
+        break;
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      j = await r.json();
+    } catch (e) {
+      await sleep(2500);   // transient network blip — retry, don't kill the view
+      continue;
+    }
+    for (const rec of j.events || []) {
+      cursor = rec.seq + 1;
+      finished = handleEvent(rec.event) || finished;
+    }
+    if (j.done && !finished) {
+      // server finished but no terminal event survived (shouldn't happen);
+      // stop polling anyway so the UI never hangs
+      finished = true;
+    }
+    if (!finished) {
+      localStorage.setItem(ACTIVE_RUN_KEY, JSON.stringify({ id, t0: state.t0, seq: cursor }));
+      await sleep(1000);
+    }
   }
-  if (!data || event === "ping") return null;
-  try { return JSON.parse(data); } catch { return null; }
+  finishRunUI();
 }
 
-/* ---------- timeline ---------- */
-function upsertStep(step, title) {
-  if (!stepEls[step]) {
-    const li = document.createElement("li");
-    li.dataset.step = step;
-    li.innerHTML = `<b></b><span class="msg"></span><span class="elapsed"></span>`;
-    $("steps").appendChild(li);
-    stepEls[step] = li;
-    li._t0 = Date.now();
+function finishRunUI() {
+  state.running = false; state.runKey = null;
+  $("go").disabled = false; stopTimer();
+  history.replaceState(null, "", location.pathname + location.search);
+  localStorage.removeItem(ACTIVE_RUN_KEY);
+  loadHistory();
+}
+
+/* refresh recovery: the run continues server-side — rebuild the transcript
+   from the event log and keep polling. The run id rides in the URL hash
+   (survives reloads regardless of storage partition behavior). */
+async function resumeActiveRun() {
+  let id = null, t0 = null;
+  const m = location.hash.match(/run=([a-f0-9]+)/);
+  if (m) {
+    id = m[1];
+    const t = location.hash.match(/t0=(\d+)/);
+    t0 = t ? +t[1] : null;
   }
-  const li = stepEls[step];
-  if (title && !li.dataset.title) { li.dataset.title = title; li.querySelector("b").textContent = title; }
-  li.classList.add("running");
-  $("timeline").scrollTop = $("timeline").scrollHeight;
-  return li;
+  if (!id) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(ACTIVE_RUN_KEY) || "null"); } catch {}
+    if (!saved || !saved.id) return;
+    id = saved.id; t0 = saved.t0 || null;
+  }
+  let j;
+  try {
+    const r = await fetch(`/run/events/${encodeURIComponent(id)}?after=0`);
+    if (r.status === 404) { history.replaceState(null, "", location.pathname); return; }
+    if (!r.ok) return;
+    j = await r.json();
+  } catch { return; }
+  if (j.done) {  // finished while away; the result is already in history
+    history.replaceState(null, "", location.pathname);
+    localStorage.removeItem(ACTIVE_RUN_KEY);
+    return;
+  }
+  state.running = true; state.t0 = t0 || Date.now(); state.runKey = id;
+  $("go").disabled = true;
+  $("viewer").innerHTML = '<div class="placeholder">运行中 · running…</div>';
+  startTimer();
+  let finished = false, cursor = 0;
+  for (const rec of j.events || []) {
+    cursor = rec.seq + 1;
+    finished = handleEvent(rec.event) || finished;
+  }
+  addLine({ cls: "ln", step: "resume", text: "页面刷新后恢复事件流 / transcript resumed" });
+  if (!finished) await pollEvents(id, cursor);
+  else finishRunUI();
 }
-function addMsg(step, msg, isErr) {
-  const li = stepEls[step]; if (!li) return;
-  const m = li.querySelector(".msg");
-  m.textContent = msg;
-  if (isErr) li.classList.add("warn");
+
+/* ---------- transcript feed ---------- */
+const STEP_HUES = [208, 152, 276, 28, 336, 116, 48, 244];
+const stepColors = {};
+function stepColor(step) {
+  if (!(step in stepColors)) {
+    stepColors[step] = `hsl(${STEP_HUES[Object.keys(stepColors).length % STEP_HUES.length]},62%,66%)`;
+  }
+  return stepColors[step];
 }
-function finishStep(step, ok) {
-  const li = stepEls[step]; if (!li) return;
-  li.classList.remove("running");
-  li.classList.add(ok ? "done" : "fail");
-  const dt = Math.round((Date.now() - (li._t0 || Date.now())) / 1000);
-  li.querySelector(".elapsed").textContent = dt >= 60 ? `${Math.floor(dt / 60)}m${dt % 60}s` : `${dt}s`;
+
+function setNow(text, idle) {
+  const el = $("now");
+  el.textContent = text;
+  el.classList.toggle("idle", !!idle);
+}
+
+/* append one line; all external text goes through textContent (no HTML injection) */
+function addLine(opts) {
+  const div = document.createElement("div");
+  div.className = opts.cls;
+  if (opts.step) {
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = opts.step;
+    tag.style.color = stepColor(opts.step);
+    div.appendChild(tag);
+  }
+  if (opts.text) {
+    const s = document.createElement("span");
+    s.textContent = opts.text;
+    div.appendChild(s);
+  }
+  if (opts.node) div.appendChild(opts.node);
+  const f = $("feed");
+  f.appendChild(div);
+  while (f.childElementCount > 900) f.removeChild(f.firstChild);  // bound the DOM
+  if (feedStick) f.scrollTop = f.scrollHeight;
+  return div;
+}
+
+/* stick-to-bottom unless the user scrolled up to read */
+$("feed").addEventListener("scroll", () => {
+  const f = $("feed");
+  const near = f.scrollHeight - f.scrollTop - f.clientHeight < 48;
+  if (near !== feedStick) {
+    feedStick = near;
+    $("jump-latest").hidden = near;
+  }
+});
+$("jump-latest").addEventListener("click", () => {
+  feedStick = true;
+  const f = $("feed");
+  f.scrollTop = f.scrollHeight;
+  $("jump-latest").hidden = true;
+});
+$("show-llm").addEventListener("change", (ev) => {
+  $("feed").classList.toggle("hide-llm", !ev.target.checked);
+});
+
+function llmLine(ev) {
+  const dur = ev.phase === "cached" ? "缓存命中" : `${(ev.ms / 1000).toFixed(1)}s`;
+  const text = `⌁ ${ev.model} · ${ev.purpose} · ${dur}` +
+    (ev.chars_out ? ` · ${(ev.chars_out / 1000).toFixed(1)}k字符` : "");
+  let node = null;
+  if (ev.reasoning && ev.reasoning.trim()) {
+    node = document.createElement("details");
+    const s = document.createElement("summary");
+    s.textContent = `💭 思考 · ${ev.reasoning.length} 字符`;
+    const pre = document.createElement("pre");
+    pre.textContent = ev.reasoning;
+    node.appendChild(s);
+    node.appendChild(pre);
+  }
+  addLine({ cls: "ln-llm", step: ev.stage || "llm", text, node });
 }
 
 function setMetric(id, text, cls) {
@@ -391,25 +545,40 @@ function sniffMetrics(msg) {
 function handleEvent(ev) {
   if (ev.type === "RunStarted") {
     document.title = `CiteLens — ${ev.topic}`;
+    addLine({ cls: "ln-step", step: "run", text: ev.topic });
+    setNow(ev.topic);
   } else if (ev.type === "StepStarted") {
-    upsertStep(ev.step, ev.title || ev.step);
+    addLine({ cls: "ln-step", step: ev.step, text: ev.title || ev.step });
+    setNow(`${ev.title || ev.step}…`);
   } else if (ev.type === "StepProgress") {
-    upsertStep(ev.step, ev.step);
-    addMsg(ev.step, ev.message + (ev.total ? ` (${ev.current}/${ev.total})` : ""));
+    if (ev.detail) {
+      addLine({ cls: "ln-detail", text: ev.message });
+    } else {
+      const cur = ev.total ? ` (${ev.current}/${ev.total})` : "";
+      addLine({ cls: "ln", step: ev.step, text: ev.message + cur });
+      setNow(`${ev.step} · ${ev.message}${cur}`);
+    }
     sniffMetrics(ev.message || "");
   } else if (ev.type === "StepCompleted") {
-    upsertStep(ev.step, ev.step);
-    addMsg(ev.step, ev.message);
-    finishStep(ev.step, true);
+    addLine({ cls: "ln-ok", step: ev.step, text: `✓ ${ev.message}` });
     sniffMetrics(ev.message || "");
+  } else if (ev.type === "LLMTrace") {
+    if (ev.phase === "start") {
+      setNow(`⌁ ${ev.purpose} · ${ev.model}`);
+    } else {
+      llmCount++;
+      $("llm-count").textContent = `${llmCount} 次调用`;
+      llmLine(ev);
+    }
   } else if (ev.type === "RunFailed") {
-    const li = upsertStep(ev.step || "pipeline", "失败");
-    li.classList.remove("running"); li.classList.add("fail");
-    addMsg(ev.step || "pipeline", ev.message, true);
+    addLine({ cls: "ln-fail", step: ev.step || "pipeline", text: `✗ ${ev.message}` });
+    setNow("失败 / failed", true);
     return true;
   } else if (ev.type === "RunCompleted") {
     const s = ev.summary || {};
     const runId = (ev.run_dir || "").split(/[\\/]/).pop();
+    addLine({ cls: "ln-ok", step: "done", text: `✓ 完成 · ${s.claims ?? "?"} 条论断 · ${s.references ?? "?"} 篇参考文献 · ${s.seconds ?? "?"}s` });
+    setNow("完成 / done", true);
     if (runId) openRun(runId);
     return true;
   }
@@ -447,9 +616,7 @@ function paintResult(j, runId) {
 }
 
 function addStepNote(text) {
-  const li = document.createElement("li");
-  li.innerHTML = `<b>lint</b><span class="msg">${text}</span>`;
-  $("steps").appendChild(li);
+  addLine({ cls: "ln", step: "lint", text });
 }
 
 function esc(s) { return (s || "").replace(/[<>&]/g, c => ({"<": "&lt;", ">": "&gt;", "&": "&amp;"}[c])); }
@@ -501,6 +668,16 @@ document.querySelectorAll("#tabs button").forEach(btn => {
 
 $("go").addEventListener("click", run);
 $("topic").addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+
+/* ---------- app exit (the windowed exe has no console to close) ---------- */
+$("shutdown").addEventListener("click", async (ev) => {
+  ev.preventDefault();
+  if (state.running && !confirm("综述仍在运行，退出将中止。确定退出？")) return;
+  document.body.innerHTML =
+    '<div class="placeholder" style="height:100vh;display:flex;align-items:center;justify-content:center">'
+    + 'CiteLens 已退出 · bye</div>';
+  try { await fetch("/shutdown", { method: "POST" }); } catch {}
+});
 </script>
 
 <div id="settings-overlay">

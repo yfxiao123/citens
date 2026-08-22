@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [1.3.0] — 2026-08-23
+
+### Fixed — the web console showed NO progress at all during runs
+- Root cause: `_event_to_dict` spread `model_dump()` over the event dict,
+  and the pydantic `type` field's lowercase Literal ("run_started") clobbered
+  the PascalCase class name ("RunStarted") the UI dispatches on — every
+  arriving event was silently dropped by the renderer in all 1.2.x releases.
+  The wire type is now set after the spread and pinned by tests.
+- The SSE stream was never broken (curl always received events); the
+  renderer was. 1.3.0 ships that fix plus the transcript below.
+
+### Added — live agent transcript (the code-agent-style activity feed)
+- The console's middle column is now an append-only feed: step headers,
+  progress lines, and one dim line per LLM call (model · purpose · latency
+  · output size), with the model's own thinking (reasoning_content) behind
+  a collapsible 💭 toggle on hybrid reasoning models.
+- Retrieved content is visible inline: the generated queries, per-source
+  hit counts, every selected paper with relevance/citations/quartile,
+  fulltext-vs-abstract outcome per paper, and the verify verdict breakdown.
+- Transport: `POST /run/start` + `GET /run/events/{id}?after=seq` polling
+  (borrowed from deepseek-harness's seq-replay design) replaces fetch-
+  streaming for the UI — plain request/response survives proxies/AV that
+  buffer text/event-stream, and `after=0` replays the whole transcript.
+- Refresh recovery: the run id rides in the URL hash; a reload mid-run
+  rebuilds the transcript and keeps polling (the pipeline keeps running
+  server-side either way). The SSE `POST /run` endpoint remains for API
+  consumers.
+- CLI gets the same visibility: per-call dim transcript lines (`⌁`).
+
+### Changed — the exe no longer opens terminal windows
+- A onefile console build spawns bootloader-parent + app-child processes,
+  and Windows 11's default terminal gives each its own window — every
+  launch showed TWO consoles. The build is now windowed (console=False):
+  the web console is the entire UI.
+- Single instance: launching the exe while a console is already running
+  just opens the browser to it (no duplicate invisible servers).
+- Exit via the console's new ⏻ 退出 button (POST /shutdown); startup
+  crashes land in `error.log` next to the exe for diagnosis.
+
 ## [1.2.3] — 2026-08-20
 
 ### Changed — pre-run clarification questions follow the review language

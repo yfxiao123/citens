@@ -7,11 +7,20 @@ exe is meant to feel like a desktop app:
       -> the local web console starts and the browser opens
       -> first run (no API key yet): the console AUTO-OPENS the settings
          page — fill in your LLM provider there; no terminal prompts
+      -> second launch while running: just opens the browser again
+         (single instance — no duplicate servers)
+
+The build is WINDOWED (console=False): the onefile bootloader's parent +
+child process pair each spawn a terminal window on Windows 11's default
+terminal, which users read as "the app opened twice". The web console IS
+the UI — there is nothing to read in a terminal. Consequences handled
+here: no console streams (NullIO + error.log next to the exe), exit via
+the console's ⏻ button (POST /shutdown), and a single-instance probe so
+a running app is reused instead of duplicated.
 
 Portability rule: EVERYTHING lives next to the exe — .env, .cache, papers/,
 runs/, data/. Copy the folder to another machine and it just works; delete
-it and nothing is left behind. The console window IS the server: closing it
-stops the app.
+it and nothing is left behind.
 
 No ``citens`` import may happen at module top: settings load ``.env`` from
 the working directory at import time, and the working directory is only
@@ -25,6 +34,7 @@ import socket
 import sys
 import threading
 import time
+import traceback
 import webbrowser
 from pathlib import Path
 
@@ -38,6 +48,50 @@ def _app_dir() -> Path:
     if _is_frozen():
         return Path(sys.executable).resolve().parent
     return Path.cwd()
+
+
+class _NullIO:
+    """Stand-in for stdout/stderr in windowed builds (no console exists)."""
+
+    def write(self, *_a) -> None: ...
+    def flush(self) -> None: ...
+    def reconfigure(self, **_kw) -> None: ...
+
+
+def _console_safe() -> None:
+    """Windowed builds have no console: sys.stdout/stderr may be None and
+    any print() would raise. Install a null sink; console builds keep their
+    real streams with replace-on-encode (GBK/cp1252) safety."""
+    import contextlib
+
+    if sys.stdout is None:
+        sys.stdout = _NullIO()  # type: ignore[assignment]
+    if sys.stderr is None:
+        sys.stderr = _NullIO()  # type: ignore[assignment]
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):  # non-reconfigurable streams
+            stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+
+
+def _probe_existing(timeout_s: float = 0.6) -> str | None:
+    """Base URL of an already-running CiteLens console, if any.
+
+    Validated against /health's payload (not just an open port) so an
+    unrelated app on 8000 doesn't hijack the browser tab.
+    """
+    import json as _json
+    import urllib.request
+
+    for port in range(8000, 8010):
+        base = f"http://127.0.0.1:{port}"
+        try:
+            with urllib.request.urlopen(base + "/health", timeout=timeout_s) as r:
+                info = _json.loads(r.read().decode("utf-8", "replace"))
+            if info.get("status") == "ok" and "llm_model" in info:
+                return base
+        except Exception:  # noqa: BLE001 - not ours / not there
+            continue
+    return None
 
 
 def _free_port(preferred: int = 8000) -> int:
@@ -62,24 +116,8 @@ def _import_selfcheck() -> str:
     return "\n".join(problems) or "all imports OK"
 
 
-def _console_safe() -> None:
-    """Never crash on print: keep each system's console encoding (GBK here,
-    cp1252 on Western Windows) but replace unencodable chars instead of
-    raising UnicodeEncodeError — the v1.2.2 Chinese banner killed startup
-    on every non-CJK-locale machine."""
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(errors="replace")
-        except Exception:  # noqa: BLE001 - non-TextIO streams (redirects)
-            pass
-
-
 def main() -> None:
     _console_safe()
-    # IMMEDIATELY: the frozen app spends 30-180s importing (self-extraction +
-    # AV scan + heavy first import) — a blank window looks like a hang
-    print("CiteLens 正在加载 / loading…", flush=True)
-    print("首次运行约 1-3 分钟（自解压 + 杀毒扫描），请勿关闭窗口", flush=True)
     # portable mode BEFORE any citens import (settings read .env from cwd).
     # CITELENS_WORKDIR in .env redirects the data directory (runs/, papers/,
     # .cache/, lit pools) — "one copy of the exe, data where I choose it".
@@ -110,6 +148,13 @@ def main() -> None:
         print(_import_selfcheck())
         return
 
+    # single instance: double-clicking again must reuse the running console,
+    # not spawn a second (terminal-less) server nobody can see or close
+    existing = _probe_existing()
+    if existing is not None:
+        webbrowser.open(existing)
+        return
+
     import uvicorn
 
     from citens.api.app import app
@@ -118,12 +163,7 @@ def main() -> None:
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
     url = base + ("/?setup=1" if first_run else "")
-    print()
-    print(f"  CiteLens 控制台 / console: {url}")
-    print(f"  工作目录 / workdir: {Path.cwd()}")
-    if first_run:
-        print("  首次运行：就绪后自动打开设置页，填写模型服务商与 API Key 即可")
-    print("  保持本窗口开启（关闭窗口 = 退出软件）· Ctrl+C 退出")
+    print(f"  CiteLens console: {url}  (workdir: {Path.cwd()})")
 
     def _open_when_ready(timeout_s: int = 300) -> None:
         # a frozen exe's first launch spends 30-90s in self-extraction +
@@ -132,29 +172,29 @@ def main() -> None:
         import urllib.request
 
         t0 = time.monotonic()
-        print("  正在启动 / starting", end="", flush=True)
         while time.monotonic() - t0 < timeout_s:
             try:
                 with urllib.request.urlopen(base + "/health", timeout=2) as r:
                     if r.status == 200:
-                        print(
-                            f"\n  就绪 / ready ({time.monotonic() - t0:.0f}s)"
-                            f" — 打开 / opening {url}",
-                            flush=True,
-                        )
+                        print(f"  ready ({time.monotonic() - t0:.0f}s), opening {url}")
                         webbrowser.open(url)
                         return
             except Exception:  # noqa: BLE001 - not ready yet
                 pass
-            print(".", end="", flush=True)
             time.sleep(1.0)
-        print(f"\n  ⚠ {timeout_s}s 内未就绪；服务仍在启动，请稍后手动访问 {url}")
 
     threading.Thread(target=_open_when_ready, daemon=True).start()
     try:
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
     except KeyboardInterrupt:
-        print("\n  bye")
+        pass
+    except BaseException:  # noqa: BLE001 - windowed builds show nothing; log it
+        import contextlib
+
+        err = app_dir / "error.log"
+        with contextlib.suppress(Exception):
+            err.write_text(traceback.format_exc(), encoding="utf-8")
+        raise
 
 
 if __name__ == "__main__":

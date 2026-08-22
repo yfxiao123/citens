@@ -48,7 +48,9 @@ from citens.agents.writer import localized_heading
 from citens.artifacts import write_review_browser
 from citens.config import settings
 from citens.events import (
+    Event,
     EventBus,
+    LLMTrace,
     RunCompleted,
     RunFailed,
     RunStarted,
@@ -267,6 +269,24 @@ def _compose(
         if not any(c.kind.value == "fulltext" for c in chunk_store.chunks_for(p.id))
     ]
     fetch_list_path = write_fetch_list(run_dir, missing)
+    # transcript: what grounding actually got per paper (fulltext vs abstract-
+    # only, and how much text) — the single most interesting "retrieved
+    # content" line of the run
+    for gi, p in enumerate(extracted[:30]):
+        chunks = chunk_store.chunks_for(p.id)
+        full_chars = sum(len(c.text) for c in chunks if c.kind.value == "fulltext")
+        if full_chars:
+            note = f"全文 ✓ {full_chars // 1000}k 字符"
+        elif any(c.kind.value == "fulltext" for c in chunks):
+            note = "全文 ✓"
+        else:
+            note = "仅摘要"
+        _emit(
+            bus,
+            StepProgress(step="ground", message=f"[{gi + 1}] {p.title[:72]} — {note}", detail=True),
+        )
+    if len(extracted) > 30:
+        _emit(bus, StepProgress(step="ground", message=f"…+{len(extracted) - 30} 篇", detail=True))
     ground_msg = f"{n_full}/{len(extracted)} 篇获取到全文"
     if fetch_list_path:
         ground_msg += f" · {len(missing)} 篇待手动获取（见 fetch_list.md）"
@@ -426,6 +446,18 @@ def _compose(
             return payload
 
         persistence.save_json(run_dir, "verification.json", _verification_payload())
+        # transcript: the verdict distribution behind the headline precision
+        vcounts: dict[str, int] = {}
+        for r in ver_results:
+            vcounts[r.verdict.value] = vcounts.get(r.verdict.value, 0) + 1
+        vparts = [
+            f"{v} {vcounts[v]}"
+            for v in ("supported", "partial", "background", "contradictory",
+                      "unsupported", "unverifiable")
+            if vcounts.get(v)
+        ]
+        if vparts:
+            _emit(bus, StepProgress(step="verify", message=" · ".join(vparts), detail=True))
         _emit(bus, StepCompleted(step="verify", message=f"引用精度 {precision * 100:.0f}%"))
 
         # canary honeypot: synthetic unsupported claims through the same judge —
@@ -754,10 +786,38 @@ async def run_pipeline_async(
     clock = StepClock(runlog=runlog)
     # tag every LLM usage record of this run (incl. thread-pool jobs) so
     # concurrent runs in one process attribute cleanly
+    from citens import llm as _llm
     from citens.llm import run_scope
 
     scope = run_scope(runlog.run_id)
     scope.__enter__()
+
+    # agent transcript: every LLM call (with its reasoning excerpt) joins the
+    # same event stream as the steps, tagged with the step it happens in.
+    # The hook filters by run id — concurrent runs in one process must not
+    # cross-stream each other's calls.
+    class _TracingBus(EventBus):
+        def __init__(self, inner: EventBus | None) -> None:
+            super().__init__()
+            self.inner = inner
+
+        def emit(self, event: Event) -> None:
+            if isinstance(event, StepStarted):
+                _llm.set_trace_stage(event.step)
+            if self.inner is not None:
+                self.inner.emit(event)
+
+    def _llm_trace(record: dict) -> None:
+        if _llm.current_run_id() != runlog.run_id:
+            return
+        import contextlib
+
+        with contextlib.suppress(Exception):  # tracing must never break a run
+            trace_bus.emit(LLMTrace(**record))
+
+    trace_bus = _TracingBus(bus)
+    bus = trace_bus
+    _llm.set_trace(_llm_trace)
     runlog.append(
         "run_start",
         topic=topic,
@@ -857,6 +917,14 @@ async def run_pipeline_async(
                     bus,
                     StepProgress(step="planner", message=f"已应用 {len(options.filters)} 条澄清约束"),
                 )
+            _emit(
+                bus,
+                StepProgress(
+                    step="planner",
+                    message=" · ".join(keywords[:12]),
+                    detail=True,
+                ),
+            )
             _emit(bus, StepCompleted(step="planner", message=f"{len(keywords)} 条关键词"))
 
             # Step 1b: seed papers — landmark works the keywords may miss.
@@ -1069,6 +1137,22 @@ async def run_pipeline_async(
             meta.total_papers = len(papers)
             runlog.snapshot("search", papers=len(papers), queries=keywords)
             persistence.save_step(run_dir, "02_papers", papers)
+            # per-source yield (what each corpus actually contributed) — the
+            # transcript's "retrieved content" line for this step
+            by_source: dict[str, int] = {}
+            for p in papers:
+                src = p.source.split(" (")[0]
+                by_source[src] = by_source.get(src, 0) + 1
+            if by_source:
+                src_line = " · ".join(
+                    f"{s} {n}" for s, n in sorted(
+                        by_source.items(), key=lambda kv: -kv[1]
+                    )
+                )
+                failed = [k for k, v in search_health.items() if v.startswith("failed")]
+                if failed:
+                    src_line += f" · 失败: {', '.join(failed)}"
+                _emit(bus, StepProgress(step="search", message=src_line, detail=True))
             _emit(bus, StepCompleted(step="search", message=f"{len(papers)} 篇候选"))
 
             # Step 3: filter
@@ -1140,6 +1224,29 @@ async def run_pipeline_async(
                 )
             hist = quartile_histogram(scored)
             hist_msg = " · ".join(f"{k}:{v}" for k, v in sorted(hist.items()))
+            # transcript: the actual selection — every core paper with the
+            # numbers behind its rank (relevance / citations / year / quartile)
+            for j, p in enumerate(scored[:25]):
+                bits = [f"相关{p.relevance_score}"]
+                if p.citation_count:
+                    bits.append(f"引{p.citation_count}")
+                if p.year:
+                    bits.append(str(p.year))
+                if p.venue_quartile:
+                    bits.append(p.venue_quartile)
+                _emit(
+                    bus,
+                    StepProgress(
+                        step="filter",
+                        message=f"[{j + 1}] {p.title[:72]} — {'/'.join(bits)}",
+                        detail=True,
+                    ),
+                )
+            if len(scored) > 25:
+                _emit(
+                    bus,
+                    StepProgress(step="filter", message=f"…+{len(scored) - 25} 篇", detail=True),
+                )
             _emit(bus, StepCompleted(step="filter", message=f"{len(scored)} 篇通过（{hist_msg}）"))
             # constraint-strictness warning: a tiny pass set under a strict
             # clarification (顶刊/近5年/实证) starves BOTH the core and the
@@ -1510,6 +1617,7 @@ async def run_pipeline_async(
         raise
     finally:
         scope.__exit__(None, None, None)
+        _llm.set_trace(None)
 
 
 def run_pipeline(

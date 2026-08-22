@@ -132,7 +132,15 @@ def _chat_with_retry(create: Callable[[], Any], model: str) -> str:
                 resp.usage.prompt_tokens or 0,
                 resp.usage.completion_tokens or 0,
             )
-        return resp.choices[0].message.content or ""
+        msg = resp.choices[0].message
+        # reasoning models (deepseek-reasoner, GLM hybrid, ...) return their
+        # thinking separately from the body; stash it for the trace hook
+        _tls.last_reasoning = (
+            getattr(msg, "reasoning_content", None)
+            or getattr(msg, "reasoning", None)
+            or ""
+        )
+        return msg.content or ""
     raise RuntimeError("unreachable")  # pragma: no cover
 
 
@@ -233,6 +241,47 @@ _current_run: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "citens_run_id", default=None
 )
 
+# --- agent transcript hook ----------------------------------------------------
+# When set, every chat() call reports itself here (start / end / cached) so the
+# run's event bus can stream a live "what is the agent doing" transcript. The
+# hook must be cheap and never raise — tracing must not affect the run.
+_tls = threading.local()  # last_reasoning, written by _chat_with_retry
+_trace_hook: Callable[[dict], None] | None = None
+_current_stage: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "citens_stage", default=""
+)
+
+
+def set_trace(hook: Callable[[dict], None] | None) -> None:
+    """Install/clear the transcript hook (records: phase, call_id, model,
+    purpose, thinking, chars_in/out, ms, reasoning excerpt, stage)."""
+    global _trace_hook
+    _trace_hook = hook
+
+
+def set_trace_stage(stage: str) -> None:
+    """Tag subsequent trace records with the pipeline step they belong to."""
+    _current_stage.set(stage)
+
+
+def _trace_purpose(system_prompt: str) -> str:
+    """Short label for the transcript: the system prompt's first line."""
+    first = system_prompt.strip().splitlines()[0] if system_prompt.strip() else ""
+    return first[:90]
+
+
+def _fire_trace(record: dict) -> None:
+    if _trace_hook is not None:
+        import contextlib
+
+        with contextlib.suppress(Exception):  # tracing must never break a run
+            _trace_hook(record)
+
+
+def current_run_id() -> str | None:
+    """The run scope active on this thread (trace hooks filter by it)."""
+    return _current_run.get()
+
 
 class run_scope:
     """Tag LLM usage records with a run id for the duration of the block.
@@ -331,8 +380,24 @@ def chat(
         "json": response_json,
         "thinking": thinking,
     }
+    import uuid
+
+    call_id = uuid.uuid4().hex[:8]
+    purpose = _trace_purpose(system_prompt)
+    stage = _current_stage.get()
+    _fire_trace({
+        "phase": "start", "call_id": call_id, "model": model, "purpose": purpose,
+        "thinking": thinking is not False, "chars_in": len(user_prompt),
+        "stage": stage,
+    })
+    t0 = time.monotonic()
     cached = cache.get("llm", cache_key)
     if cached is not None:
+        _fire_trace({
+            "phase": "cached", "call_id": call_id, "model": model,
+            "purpose": purpose, "chars_out": len(cached), "ms": 0,
+            "stage": stage,
+        })
         return cached
     text = get_backend(model).chat(
         system_prompt,
@@ -342,6 +407,12 @@ def chat(
         response_json=response_json,
         thinking=thinking,
     )
+    reasoning = getattr(_tls, "last_reasoning", "") or ""
+    _fire_trace({
+        "phase": "end", "call_id": call_id, "model": model, "purpose": purpose,
+        "chars_out": len(text), "ms": round((time.monotonic() - t0) * 1000),
+        "reasoning": reasoning[:800], "stage": stage,
+    })
     if text:  # never cache empty outputs (reasoning-model failure mode)
         cache.put("llm", cache_key, text)
     return text
@@ -424,18 +495,24 @@ def run_concurrent(
         return out
 
     results: list[Any] = [None] * n
-    # worker threads don't inherit the context; re-set the run tag in each
-    # worker's own context so run_scope attribution follows pool jobs
+    # worker threads don't inherit the context; re-set the run tag and the
+    # transcript stage in each worker's own context so attribution follows
+    # pool jobs (usage records AND trace records)
     parent_run = _current_run.get()
+    parent_stage = _current_stage.get()
 
     def wrapped(i: int, item: Any) -> Any:
-        if parent_run is None:
+        if parent_run is None and not parent_stage:
             return fn(i, item)
-        token = _current_run.set(parent_run)
+        run_token = _current_run.set(parent_run) if parent_run is not None else None
+        stage_token = _current_stage.set(parent_stage) if parent_stage else None
         try:
             return fn(i, item)
         finally:
-            _current_run.reset(token)
+            if run_token is not None:
+                _current_run.reset(run_token)
+            if stage_token is not None:
+                _current_stage.reset(stage_token)
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {ex.submit(wrapped, i, item): i for i, item in enumerate(items)}

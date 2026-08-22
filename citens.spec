@@ -58,6 +58,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,   # AV false positives outweigh the size win
-    console=True,  # the first-run wizard + run logs live in the console
+    console=False,  # windowed: a onefile console build opens TWO terminals on
+                    # Win11's default terminal (bootloader parent + app child);
+                    # the web console is the entire UI, exit via its ⏻ button
     disable_windowed_traceback=False,
 )

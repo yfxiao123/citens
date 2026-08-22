@@ -17,6 +17,7 @@ from citens import __version__
 from citens.config import settings
 from citens.events import (
     EventBus,
+    LLMTrace,
     RunCompleted,
     RunFailed,
     RunStarted,
@@ -44,6 +45,19 @@ def _make_rich_handler(console: Console):
         elif isinstance(event, StepProgress):
             cur = f" ({event.current}/{event.total})" if event.total else ""
             console.print(f"   • {event.message}{cur}", highlight=False)
+        elif isinstance(event, LLMTrace):
+            # per-model-call transcript lines — dim, one per completed call
+            if event.phase == "cached":
+                console.print(
+                    f"   [dim]⌁ {event.model} · {event.purpose[:60]} · 缓存命中[/]",
+                    highlight=False,
+                )
+            elif event.phase == "end":
+                console.print(
+                    f"   [dim]⌁ {event.model} · {event.purpose[:60]}"
+                    f" · {event.ms / 1000:.1f}s[/]",
+                    highlight=False,
+                )
         elif isinstance(event, StepCompleted):
             console.print(f"   [green]✓[/] {event.message}", highlight=False)
         elif isinstance(event, RunCompleted):

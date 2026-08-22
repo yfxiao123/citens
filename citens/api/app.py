@@ -1,9 +1,18 @@
-"""FastAPI app: SSE-streamed runs + result retrieval + a minimal web UI.
+"""FastAPI app: runs + result retrieval + a minimal web UI.
 
 Endpoints:
     POST /run    {topic, max_papers?, ...}  -> text/event-stream of pipeline
                 events (RunStarted/StepStarted/StepProgress/StepCompleted/
-                RunCompleted/RunFailed), then a final `result` event.
+                LLMTrace/RunCompleted/RunFailed), then a final `result` event.
+                For API consumers that can hold a streaming connection.
+    POST /run/start  -> {run_id} immediately; the pipeline runs in a thread
+                and every event lands in an in-memory log.
+    GET  /run/events/{run_id}?after=seq -> incremental events for polling.
+                The web UI uses this pair instead of SSE: plain request/
+                response survives proxies/AV that buffer text/event-stream
+                (observed: fetch-streaming delivered 0 frames for minutes
+                while the run progressed server-side), and `after=0` replays
+                the whole transcript after a page refresh.
     GET  /runs                           -> recent run directories
     GET  /result/{run_id}                -> review.md + artifacts of a run
     GET  /health                         -> liveness + config sanity
@@ -16,6 +25,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
+import uuid
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Security
@@ -81,8 +93,13 @@ def clarify(topic: str) -> dict:
 
 
 def _event_to_dict(event: Event) -> dict:
+    # the class name AFTER the spread: model_dump() carries a lowercase
+    # Literal `type` field ("run_started") that would otherwise clobber the
+    # PascalCase tag the UI's handleEvent dispatches on — the exact bug that
+    # made every arriving event invisible to the console for releases 1.2.x
     d = event.model_dump()
-    return {"type": event.__class__.__name__, **d}
+    d["type"] = event.__class__.__name__
+    return d
 
 
 @app.get("/health")
@@ -321,6 +338,131 @@ class _QueueBus(EventBus):
 
     def emit(self, event: Event) -> None:
         self._publish(event)
+
+
+# --- polling event log (the UI's transport; survives stream-buffering) --------
+
+
+class _RunBuffer:
+    """In-memory append-only event log for one UI-started run.
+
+    Each event gets a monotonically increasing seq; ``after=0`` replays the
+    whole transcript (page-refresh recovery), ``after=last`` is the live
+    polling cursor. Bounded by TTL + count GC, not by run length.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._events: list[dict] = []
+        self.done = False
+        self.error: str | None = None
+        self.created = time.time()
+
+    def append(self, event: Event) -> None:
+        with self._lock:
+            self._events.append({"seq": len(self._events), "event": _event_to_dict(event)})
+            if isinstance(event, RunCompleted | RunFailed):
+                self.done = True
+                if isinstance(event, RunFailed):
+                    self.error = event.message
+
+    def tail(self, after: int) -> dict:
+        with self._lock:
+            return {
+                "events": self._events[max(after, 0):],
+                "done": self.done,
+                "error": self.error,
+                "server_time": time.time(),
+            }
+
+
+_RUN_BUFFERS: dict[str, _RunBuffer] = {}
+_RUN_BUFFERS_LOCK = threading.Lock()
+_RUN_BUFFER_TTL_S = 30 * 60
+_RUN_BUFFER_MAX = 8
+
+
+def _gc_run_buffers_locked() -> None:
+    """Drop finished-and-stale logs; keep at most the newest _RUN_BUFFER_MAX."""
+    now = time.time()
+    stale = [
+        k
+        for k, b in _RUN_BUFFERS.items()
+        if b.done and now - b.created > _RUN_BUFFER_TTL_S
+    ]
+    for k in stale:
+        del _RUN_BUFFERS[k]
+    while len(_RUN_BUFFERS) > _RUN_BUFFER_MAX:
+        oldest = min(_RUN_BUFFERS, key=lambda k: _RUN_BUFFERS[k].created)
+        del _RUN_BUFFERS[oldest]
+
+
+def _resolve_mode(mode: str | None):
+    """Parse the request's mode string; None means auto-detect."""
+    from citens.models import RunMode
+
+    if not mode:
+        return None
+    try:
+        return RunMode(mode)
+    except ValueError:
+        raise HTTPException(
+            400, f"无效的 mode: {mode}，可选值: quick_scan/deep_review/interactive"
+        ) from None
+
+
+@app.post("/run/start", dependencies=[Depends(_require_token)])
+async def run_start(req: RunRequest) -> dict:
+    """Start a run in the background; return its event-log id immediately."""
+    options = RunOptions(
+        max_papers=req.max_papers,
+        max_results=req.max_results,
+        sources=req.sources,
+        mode=_resolve_mode(req.mode),
+        fetch_fulltext=req.fetch_fulltext,
+        enrich_abstracts=req.enrich_abstracts,
+        allow_supplement=req.allow_supplement,
+        use_cache=req.use_cache,
+        filters=req.filters,
+    )
+    key = uuid.uuid4().hex[:12]
+    buf = _RunBuffer()
+    with _RUN_BUFFERS_LOCK:
+        _gc_run_buffers_locked()
+        _RUN_BUFFERS[key] = buf
+        while len(_RUN_BUFFERS) > _RUN_BUFFER_MAX:
+            oldest = min(_RUN_BUFFERS, key=lambda k: _RUN_BUFFERS[k].created)
+            del _RUN_BUFFERS[oldest]
+
+    def run_in_thread() -> None:
+        try:
+            asyncio.run(run_pipeline_async(req.topic, options, _QueueBus(buf.append)))
+        except Exception as e:  # noqa: BLE001 - the log must always close
+            buf.append(RunFailed(message=str(e), step="pipeline"))
+
+    threading.Thread(target=run_in_thread, daemon=True, name=f"run-{key}").start()
+    return {"run_id": key}
+
+
+@app.get("/run/events/{key}", dependencies=[Depends(_require_token)])
+def run_events(key: str, after: int = 0) -> dict:
+    """Events with seq >= after for a /run/start id (the UI's polling feed)."""
+    with _RUN_BUFFERS_LOCK:
+        buf = _RUN_BUFFERS.get(key)
+    if buf is None:
+        raise HTTPException(404, "unknown or expired run id")
+    return buf.tail(after)
+
+
+@app.post("/shutdown", dependencies=[Depends(_require_token)])
+def shutdown() -> dict:
+    """Stop the app (the windowed exe's ⏻ button — there is no console
+    window to close anymore). The response is flushed before the exit."""
+    import os
+    import threading
+
+    threading.Timer(0.4, lambda: os._exit(0)).start()
+    return {"ok": True, "bye": True}
 
 
 @app.get("/runs", dependencies=[Depends(_require_token)])

@@ -17,6 +17,7 @@ EventType = Literal[
     "step_started",
     "step_progress",
     "step_completed",
+    "llm_trace",
     "run_completed",
     "run_failed",
 ]
@@ -44,6 +45,30 @@ class StepProgress(_Base):
     message: str = ""
     current: int | None = None
     total: int | None = None
+    # render as an indented detail line under the step (retrieved content:
+    # queries, per-source counts, filter verdicts, ...) instead of a status line
+    detail: bool = False
+
+
+class LLMTrace(_Base):
+    """One model call in the agent transcript.
+
+    phase "start" fires before the request (the UI shows it as the current
+    activity); "end"/"cached" fire with the result. ``reasoning`` carries the
+    reasoning-model's own thinking excerpt when the backend returns one.
+    """
+
+    type: Literal["llm_trace"] = "llm_trace"
+    phase: Literal["start", "end", "cached"] = "start"
+    call_id: str = ""
+    model: str = ""
+    purpose: str = ""
+    thinking: bool = True
+    reasoning: str = ""
+    chars_in: int = 0
+    chars_out: int = 0
+    ms: int = 0
+    stage: str = ""
 
 
 class StepCompleted(_Base):
@@ -66,7 +91,13 @@ class RunFailed(_Base):
 
 
 Event = (
-    RunStarted | StepStarted | StepProgress | StepCompleted | RunCompleted | RunFailed
+    RunStarted
+    | StepStarted
+    | StepProgress
+    | StepCompleted
+    | LLMTrace
+    | RunCompleted
+    | RunFailed
 )
 
 
