@@ -29,6 +29,7 @@ switched to the exe's folder inside :func:`main`.
 
 from __future__ import annotations
 
+import io
 import os
 import socket
 import sys
@@ -50,12 +51,23 @@ def _app_dir() -> Path:
     return Path.cwd()
 
 
-class _NullIO:
-    """Stand-in for stdout/stderr in windowed builds (no console exists)."""
+class _NullIO(io.TextIOBase):
+    """Stand-in for stdout/stderr in windowed builds (no console exists).
 
-    def write(self, *_a) -> None: ...
-    def flush(self) -> None: ...
-    def reconfigure(self, **_kw) -> None: ...
+    Must be a REAL stream protocol (io.TextIOBase), not a bare write/flush
+    stub: uvicorn's ColourizedFormatter calls ``isatty()`` when logging
+    boots, and any library may call fileno()/encoding — a minimal stub
+    crashed the app on every double-click launch (v1.3.0).
+    """
+
+    encoding = "utf-8"
+    errors = "replace"
+
+    def write(self, s: str) -> int:  # noqa: ARG002
+        return len(s)
+
+    def writable(self) -> bool:
+        return True
 
 
 def _console_safe() -> None:

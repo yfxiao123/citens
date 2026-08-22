@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [1.3.1] — 2026-08-23
+
+### Fixed — v1.3.0 exe crashed on double-click launch
+- The windowed build replaces the absent console streams with a null sink,
+  but that sink was a bare write/flush stub; uvicorn's logging formatter
+  calls `isatty()` while booting and the AttributeError killed startup
+  (`ValueError: Unable to configure formatter 'default'`). The sink is now
+  a real `io.TextIOBase` stream (isatty/fileno/encoding/writable), and a
+  regression test drives uvicorn's LOGGING_CONFIG through dictConfig with
+  the null streams installed — the exact crash path. (Local launch tests
+  from a terminal never hit it: GUI-subsystem processes launched FROM a
+  console inherit its handles, so stdout wasn't None.)
+
 ## [1.3.0] — 2026-08-23
 
 ### Fixed — the web console showed NO progress at all during runs
