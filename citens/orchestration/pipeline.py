@@ -271,16 +271,18 @@ def _compose(
     fetch_list_path = write_fetch_list(run_dir, missing)
     # transcript: what grounding actually got per paper (fulltext vs abstract-
     # only, and how much text) — the single most interesting "retrieved
-    # content" line of the run
+    # content" line of the run; abstract-only lines carry the harvest's
+    # per-leg audit trail so "why did this fail" is answerable in the UI
+    from citens.grounding.fulltext import fetch_report
+
     for gi, p in enumerate(extracted[:30]):
         chunks = chunk_store.chunks_for(p.id)
         full_chars = sum(len(c.text) for c in chunks if c.kind.value == "fulltext")
         if full_chars:
             note = f"全文 ✓ {full_chars // 1000}k 字符"
-        elif any(c.kind.value == "fulltext" for c in chunks):
-            note = "全文 ✓"
         else:
-            note = "仅摘要"
+            why = fetch_report(p.id)
+            note = f"仅摘要（{why}）" if why else "仅摘要"
         _emit(
             bus,
             StepProgress(step="ground", message=f"[{gi + 1}] {p.title[:72]} — {note}", detail=True),

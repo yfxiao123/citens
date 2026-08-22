@@ -28,6 +28,14 @@ from citens.models import Paper
 from citens.net import rewrite_url, sync_client
 
 _ARXIV_ID_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5}|[a-z\-]+/\.[0-9]+)", re.IGNORECASE)
+# arXiv's own DOI namespace: 10.48550/arXiv.<id> — the ONLY place some
+# preprints expose their arXiv-ness (S2's openAccessPdf is empty for them),
+# so parsing it into a direct pdf URL skips the throttled title lookup.
+# New-style ids: 2501.12345; old-style: cs/0301012, math.GT/0309136
+_ARXIV_DOI_RE = re.compile(
+    r"10\.48550/arxiv\.([0-9]{4}\.[0-9]{4,5}|[a-z\-]+(?:\.[a-z\-]+)*/[0-9]{7})",
+    re.IGNORECASE,
+)
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")  # keep CJK (zh topics)
 _CHUNK_SIZE = 1200
 _HEADERS = {"User-Agent": "CiteLens/0.1 (open literature-review agent)"}
@@ -114,6 +122,10 @@ def _markitdown():
 
 def _arxiv_pdf_url(paper: Paper) -> str | None:
     m = _ARXIV_ID_RE.search(paper.url or "")
+    if not m:
+        # the arXiv DOI (10.48550/arXiv.<id>) appears in EITHER field
+        # depending on which source reported the record
+        m = _ARXIV_DOI_RE.search(paper.doi or "") or _ARXIV_DOI_RE.search(paper.url or "")
     if m:
         return f"https://arxiv.org/pdf/{m.group(1)}.pdf"
     return _arxiv_title_lookup(paper)
@@ -169,13 +181,17 @@ def _s2_pdf_url(doi: str) -> list[str]:
 
     S2 indexes author-homepage and repository copies that neither OpenAlex
     nor Unpaywall lists (measured: the cornell.edu copy of a paywalled
-    T&F paper). No key needed at this call rate; the 1rps process-wide
-    throttle applies via the shared client budget of one small GET.
+    T&F paper). Sends the configured SEMANTIC_SCHOLAR_API_KEY when present —
+    the anonymous pool 429s exactly when a run harvests many papers in a
+    row, silently emptying this leg (measured: a GOLD-OA ACM link missed).
     """
     if not doi:
         return []
+    headers = dict(_HEADERS)
+    if settings.semantic_scholar_api_key:
+        headers["x-api-key"] = settings.semantic_scholar_api_key
     try:
-        with sync_client(timeout=12, headers=_HEADERS) as client:
+        with sync_client(timeout=12, headers=headers) as client:
             r = client.get(
                 f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
                 params={"fields": "openAccessPdf"},
@@ -308,18 +324,45 @@ def _pdf_bytes_to_text(content: bytes, paper: Paper | None = None) -> str | None
     return text
 
 
-def _download_and_convert(url: str, paper: Paper | None = None) -> str | None:
+def _download_and_convert(
+    url: str, paper: Paper | None = None
+) -> tuple[str | None, str]:
+    """Fetch one candidate URL -> (text, outcome).
+
+    The outcome string is the audit trail the transcript shows when a paper
+    ends up abstract-only ("arxiv.org HTTP 429", "dl.acm.org HTTP 403",
+    "PDF解析失败"...) — "0/16 fulltext" runs need a visible why.
+    """
+    from urllib.parse import urlparse
+
+    host = urlparse(url).hostname or url[:30]
     try:
         url = rewrite_url(url)  # ride the user's EZproxy/declared access
         with sync_client(url, timeout=30, headers=_HEADERS) as client:
             r = client.get(url)
-        if r.status_code == 200 and len(r.content) >= 2000:
-            ctype = r.headers.get("content-type", "").lower()
-            if "pdf" in ctype or url.lower().endswith(".pdf") or r.content[:5] == b"%PDF-":
-                return _pdf_bytes_to_text(r.content, paper)
-        return None
-    except Exception:  # noqa: BLE001
-        return None
+        if r.status_code != 200:
+            return None, f"{host} HTTP {r.status_code}"
+        if len(r.content) < 2000:
+            return None, f"{host} 内容过短"
+        ctype = r.headers.get("content-type", "").lower()
+        if "pdf" in ctype or url.lower().endswith(".pdf") or r.content[:5] == b"%PDF-":
+            text = _pdf_bytes_to_text(r.content, paper)
+            if text:
+                return text, f"{host} ok"
+            return None, f"{host} PDF解析失败"
+        return None, f"{host} 非PDF"
+    except Exception as e:  # noqa: BLE001 - timeout / conn refused / TLS ...
+        return None, f"{host} {type(e).__name__}"
+
+
+# per-paper harvest audit trail (paper.id -> compact outcome string); read by
+# the pipeline's transcript lines so "why abstract-only" is visible in the UI
+_FETCH_REPORTS: dict[str, str] = {}
+
+
+def fetch_report(paper_id: str) -> str:
+    """Why fetch_fulltext got (or didn't get) this paper's text, last run."""
+    return _FETCH_REPORTS.get(paper_id, "")
 
 
 def fetch_fulltext(paper: Paper) -> str | None:
@@ -342,32 +385,44 @@ def fetch_fulltext(paper: Paper) -> str | None:
             text = _convert_pdf_file(str(local))
             cache.put("fulltext_local", local_key, text or "")
         if text:
+            _FETCH_REPORTS[paper.id] = f"本地PDF {len(text) // 1000}k字"
             return text
 
     cached = cache.get("fulltext", paper.id)
     if cached is not None:
+        _FETCH_REPORTS[paper.id] = (
+            f"缓存 {len(cached) // 1000}k字" if cached else "缓存未命中"
+        )
         return cached or None
 
-    candidates: list[str] = []
+    candidates: list[tuple[str, str]] = []  # (leg label, url)
     arxiv = _arxiv_pdf_url(paper)
     if arxiv:
-        candidates.append(arxiv)
+        candidates.append(("arxiv", arxiv))
     if paper.pdf_url:
-        candidates.append(paper.pdf_url)
+        candidates.append(("pdf_url", paper.pdf_url))
     if paper.doi:
         # full location lists first (repository copies), then CORE
-        candidates.extend(_s2_pdf_url(paper.doi))
-        candidates.extend(_openalex_pdf_urls(paper.doi))
-        candidates.extend(_unpaywall_pdf_url(paper.doi))
+        candidates.extend(("s2", u) for u in _s2_pdf_url(paper.doi))
+        candidates.extend(("openalex", u) for u in _openalex_pdf_urls(paper.doi))
+        candidates.extend(("unpaywall", u) for u in _unpaywall_pdf_url(paper.doi))
         core = _core_pdf_url(paper.doi)
         if core:
-            candidates.append(core)
+            candidates.append(("core", core))
 
     text = None
-    for url in candidates:
-        text = _download_and_convert(url, paper)
+    outcomes: list[str] = []
+    for leg, url in candidates:
+        text, outcome = _download_and_convert(url, paper)
+        outcomes.append(f"{leg}:{outcome}")
         if text:
             break
+    if text:
+        _FETCH_REPORTS[paper.id] = f"{leg} ✓ {len(text) // 1000}k字"
+    else:
+        # cap at the first 3 tried legs — enough to answer "why" without
+        # turning the transcript line into a wall
+        _FETCH_REPORTS[paper.id] = " · ".join(outcomes[:3]) or "无OA候选"
 
     cache.put("fulltext", paper.id, text or "")
     return text

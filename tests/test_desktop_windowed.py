@@ -41,5 +41,13 @@ def test_console_safe_installs_null_and_survives_uvicorn_logging(monkeypatch):
     dictConfig(LOGGING_CONFIG)
 
 
-def test_probe_existing_returns_none_when_no_server():
+def test_probe_existing_returns_none_when_no_server(monkeypatch):
+    # deterministic: nothing answers any port (a real console may legitimately
+    # be running on the dev machine — the probe finding it is correct there)
+    import urllib.request
+
+    def _fail(url, timeout=None):
+        raise OSError("no server")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fail)
     assert desktop._probe_existing() is None

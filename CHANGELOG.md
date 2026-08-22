@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [1.3.2] — 2026-08-23
+
+### Fixed — full-text harvest landed 0/16 on a real run (generative recs)
+- arXiv papers whose ONLY arXiv marker is the DOI (10.48550/arXiv.<id>)
+  never entered the direct-pdf fast path — the URL regex expects
+  arxiv.org/abs links, S2's openAccessPdf is empty for exactly these
+  records, so every one degraded to the title-lookup API (the leg arXiv
+  throttles hardest). The DOI (in either field) now parses straight to
+  arxiv.org/pdf/<id>.pdf; old-style ids (cs/0301012) included.
+- The S2 harvest leg didn't send the configured SEMANTIC_SCHOLAR_API_KEY —
+  it rode the anonymous 1-rps pool and 429'd exactly when a run harvests
+  many papers in a row (measured miss: a GOLD-OA ACM pdf link).
+- Measured on the 0/16 run's actual paper set: **9/16 now fetch
+  automatically** (was 0/16); the remaining 7 are bot-walled repositories
+  (TechRxiv/SSRN/preprints.org — 403 even with a browser UA) or paywalled
+  without an arXiv version — the honest fetch_list.md path.
+- The transcript's ground lines now show WHY each paper is abstract-only
+  ("arxiv:dl.acm.org HTTP 403", "unpaywall:www.techrxiv.org HTTP 403",
+  "无OA候选") — per-leg audit trail from the harvest, visible in the UI.
+
 ## [1.3.1] — 2026-08-23
 
 ### Fixed — v1.3.0 exe crashed on double-click launch
