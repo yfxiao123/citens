@@ -127,10 +127,12 @@ https://github.com/yfxiao123/citens/releases/latest/download/CiteLens.exe
 Double-click → the web console opens in your browser (first run: the settings
 page opens automatically — pick a provider preset and paste your API key).
 No terminal windows; the run's live transcript, results, and the ⏻ exit
-button all live in the web console. Everything (`.env`, caches, fetched
-PDFs, runs) lives **next to the exe** — portable: move the folder, keep
-your data; delete it, nothing remains. Launching again while it runs just
-opens the browser (single instance). Note: ~67 MB, unsigned (SmartScreen
+button all live in the web console. Data (`.env`, caches, fetched PDFs,
+runs) stays put across downloads: it follows the workdir you chose (⚙
+settings), or an exe-folder `.env` (portable-folder mode), or reattaches
+to the last-used data home — a freshly downloaded exe never starts blank.
+The header chip shows the active data directory. Launching again while it
+runs just opens the browser (single instance). Note: ~67 MB, unsigned (SmartScreen
 may ask "run anyway"), and the first launch takes ~10-20 s (self-extraction;
 nothing visible until the browser opens). Build it yourself with
 `pip install -e ".[api,packaging]" && pyinstaller citens.spec`.

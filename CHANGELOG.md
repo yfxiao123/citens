@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [1.3.3] — 2026-08-23
+
+### Fixed — "records vanished" + history not time-sorted
+- A freshly downloaded exe opened an empty workspace: data defaulted to
+  "next to the exe", so running a new download from a different folder
+  silently started a second, blank data home. Workdir resolution now:
+  CITELENS_WORKDIR redirect > exe-folder .env (portable-folder mode,
+  existing setups unchanged) > the LAST used workdir (pointer under
+  %LOCALAPPDATA%/CiteLens — downloads reattach to their data) > machine
+  home on first launch.
+- The header now shows the active data directory (📁 chip with tooltip),
+  answering "where did my records go" at a glance.
+- /runs sorts by the runs' actual timestamps — dir-NAME reverse sort put
+  中文 topics in Unicode order (订单簿 chronologically newer runs always
+  buried below), and the history entries now show a formatted time
+  (MM-DD HH:MM) instead of the raw dir-name tail.
+
 ## [1.3.2] — 2026-08-23
 
 ### Fixed — full-text harvest landed 0/16 on a real run (generative recs)

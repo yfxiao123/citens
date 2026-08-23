@@ -18,13 +18,17 @@ here: no console streams (NullIO + error.log next to the exe), exit via
 the console's ⏻ button (POST /shutdown), and a single-instance probe so
 a running app is reused instead of duplicated.
 
-Portability rule: EVERYTHING lives next to the exe — .env, .cache, papers/,
-runs/, data/. Copy the folder to another machine and it just works; delete
-it and nothing is left behind.
+Data location (``_resolve_workdir``): CITELENS_WORKDIR in the exe-folder
+.env redirects; otherwise an exe-folder .env means portable-folder mode
+(data lives with this copy); otherwise the launch reattaches to the LAST
+used workdir (pointer under %LOCALAPPDATA%/CiteLens) so a freshly
+downloaded exe never presents an empty workspace; first launch ever uses
+the machine home. The header chip in the web console shows the active
+workdir.
 
 No ``citens`` import may happen at module top: settings load ``.env`` from
 the working directory at import time, and the working directory is only
-switched to the exe's folder inside :func:`main`.
+switched inside :func:`main`.
 """
 
 from __future__ import annotations
@@ -128,25 +132,33 @@ def _import_selfcheck() -> str:
     return "\n".join(problems) or "all imports OK"
 
 
-def main() -> None:
-    _console_safe()
-    # portable mode BEFORE any citens import (settings read .env from cwd).
-    # CITELENS_WORKDIR in .env redirects the data directory (runs/, papers/,
-    # .cache/, lit pools) — "one copy of the exe, data where I choose it".
-    app_dir = _app_dir()
-    os.chdir(app_dir)
+def _machine_home() -> Path:
+    """The machine-wide CiteLens data home (last-resort default)."""
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    return Path(base) / "CiteLens"
+
+
+def _resolve_workdir(app_dir: Path) -> Path:
+    """Where this launch keeps its data — the anti-"records vanished" rules.
+
+    1. CITELENS_WORKDIR in the exe-folder .env explicitly redirects (the
+       settings UI writes it); the .env migrates into the workdir as before.
+    2. An exe-folder .env without a redirect = portable-folder mode: data
+       and config live with THIS copy (existing setups keep working).
+    3. Otherwise: a freshly downloaded exe must NOT present an empty
+       workspace — reattach to the last workdir any launch used (pointer
+       under the machine home), so the history follows the app, not the
+       folder the exe happened to be downloaded into.
+    4. First ever launch on the machine: the machine home itself.
+    """
     from citens.api.envstore import read_env_value
 
-    workdir = read_env_value(app_dir / ".env", "CITELENS_WORKDIR")
-    if workdir:
-        wd = Path(workdir)
+    redirect = read_env_value(app_dir / ".env", "CITELENS_WORKDIR")
+    if redirect:
+        wd = Path(redirect)
         if not wd.is_absolute():
             wd = app_dir / wd
         wd.mkdir(parents=True, exist_ok=True)
-        os.chdir(wd)
-        # the config moves WITH the data: everything except the pointer line
-        # migrates into the workdir's .env on first use — settings UI, pydantic
-        # Settings, and this bootstrap all read/write cwd/.env afterwards
         pointer = app_dir / ".env"
         target = wd / ".env"
         if pointer.is_file() and not target.is_file():
@@ -155,6 +167,39 @@ def main() -> None:
                 if not line.strip().startswith("CITELENS_WORKDIR")
             ]
             target.write_text("\n".join(keep) + "\n", encoding="utf-8")
+        _remember_workdir(wd)
+        return wd
+
+    if (app_dir / ".env").is_file():  # portable-folder mode
+        _remember_workdir(app_dir)
+        return app_dir
+
+    home = _machine_home()
+    last = home / "workdir.txt"
+    if last.is_file():
+        prev = Path(last.read_text(encoding="utf-8").strip())
+        if prev.is_dir():
+            return prev
+    home.mkdir(parents=True, exist_ok=True)
+    _remember_workdir(home)
+    return home
+
+
+def _remember_workdir(wd: Path) -> None:
+    """Leave the pointer bare exe copies will reattach to next launch."""
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        home = _machine_home()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "workdir.txt").write_text(str(wd.resolve()), encoding="utf-8")
+
+
+def main() -> None:
+    _console_safe()
+    # portable mode BEFORE any citens import (settings read .env from cwd).
+    app_dir = _app_dir()
+    os.chdir(_resolve_workdir(app_dir))
 
     if "--import-check" in sys.argv:  # exe smoke test / support tooling
         print(_import_selfcheck())
@@ -170,6 +215,7 @@ def main() -> None:
     import uvicorn
 
     from citens.api.app import app
+    from citens.api.envstore import read_env_value
 
     first_run = not read_env_value(Path.cwd() / ".env", "LLM_API_KEY")
     port = _free_port()

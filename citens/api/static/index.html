@@ -184,6 +184,7 @@
   <span class="sub">可信引用 · 批判性综述</span>
   <span class="chip" id="chip-model">…</span>
   <span class="chip" id="chip-sjr">SJR</span>
+  <span class="chip" id="chip-workdir" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help">…</span>
   <span class="spacer"></span>
   <a href="#" id="shutdown" title="停止本地服务并退出 CiteLens">⏻ 退出</a>
   <a href="#" id="open-settings" title="模型 / 学术源 / 代理 / 工作目录">⚙ 设置</a>
@@ -255,6 +256,9 @@ let llmCount = 0;
 fetch("/health").then(r => r.json()).then(h => {
   $("chip-model").innerHTML = `model <b>${h.llm_model}</b>`;
   $("chip-sjr").innerHTML = h.sjr_data ? `SJR <b>loaded</b>` : `SJR <b>absent</b>`;
+  const wd = $("chip-workdir");
+  wd.textContent = "📁 " + (h.workdir || "");
+  wd.title = "数据目录 / data directory: " + (h.workdir || "") + "\n（历史记录/文献库/缓存都在这里；在 ⚙ 设置 里可更改）";
   const setup = new URLSearchParams(location.search).get("setup");
   if (setup === "1" || h.llm_configured === false) {
     document.getElementById("open-settings").click();
@@ -269,9 +273,9 @@ async function loadHistory() {
     const j = await (await fetch("/runs")).json();
     $("history").innerHTML = (j.runs || []).map(r => `
       <div class="run" data-id="${encodeURIComponent(r.run_id)}">
-        <div class="t">${r.topic || r.run_id}</div>
+        <div class="t">${esc(r.topic || r.run_id)}</div>
         <div class="m">
-          <span>${(r.run_id || "").split("-").slice(-1)[0]}</span>
+          <span>${r.time || ""}</span>
           ${r.citation_precision != null ? `<span class="prec">${Math.round(r.citation_precision * 100)}%</span>` : ""}
         </div>
       </div>`).join("");

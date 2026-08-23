@@ -114,6 +114,9 @@ def health() -> dict:
         "papers_dir": Path(settings.papers_dir).is_dir(),
         # the console uses this to auto-open the settings page on first run
         "llm_configured": bool(settings.llm_api_key),
+        # where this launch's data (runs/.env/cache) lives — the header chip
+        # answers "where did my records go" at a glance
+        "workdir": str(Path.cwd()),
     }
 
 
@@ -467,22 +470,49 @@ def shutdown() -> dict:
 
 @app.get("/runs", dependencies=[Depends(_require_token)])
 def list_runs() -> dict:
+    """Completed runs, NEWEST FIRST (the history panel's contract).
+
+    Sorted by the run's actual time: the -YYYYMMDD_HHMMSS suffix of the run
+    dir, falling back to mtime. Reverse-sorting the dir NAMES puts 中文-topic
+    runs in Unicode order, not time order (订单簿 always beat 生成式).
+    """
+    import datetime as _dt
+    import re as _re
+
+    ts_re = _re.compile(r"-(\d{8}_\d{6})$")
     root = Path(settings.output_dir)
-    runs = []
+    entries: list[tuple[_dt.datetime, dict]] = []
     if root.is_dir():
-        for d in sorted(root.iterdir(), reverse=True)[:50]:
-            if d.is_dir() and (d / "review.md").exists():
-                meta_file = d / "meta.json"
-                meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
-                runs.append(
+        for d in root.iterdir():
+            if not (d.is_dir() and (d / "review.md").exists()):
+                continue
+            meta_file = d / "meta.json"
+            meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+            ts: _dt.datetime | None = None
+            m = ts_re.search(d.name)
+            if m:
+                try:
+                    ts = _dt.datetime.strptime(m.group(1), "%Y%m%d_%H%M%S")
+                except ValueError:
+                    ts = None
+            if ts is None:
+                try:
+                    ts = _dt.datetime.fromtimestamp(d.stat().st_mtime)
+                except OSError:
+                    ts = _dt.datetime.min
+            entries.append(
+                (
+                    ts,
                     {
                         "run_id": d.name,
                         "topic": meta.get("topic", ""),
                         "citation_precision": meta.get("citation_precision"),
-                        "time": d.name,
-                    }
+                        "time": ts.strftime("%m-%d %H:%M"),
+                    },
                 )
-    return {"runs": runs}
+            )
+    entries.sort(key=lambda e: e[0], reverse=True)
+    return {"runs": [e[1] for e in entries[:50]]}
 
 
 @app.get("/result/{run_id}", dependencies=[Depends(_require_token)])
