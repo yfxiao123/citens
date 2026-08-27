@@ -11,6 +11,7 @@ from citens.search.base import (
     register,
     search_papers,
     search_papers_with_health,
+    search_round,
 )
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "register",
     "search_papers",
     "search_papers_with_health",
+    "search_round",
 ]

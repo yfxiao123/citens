@@ -127,14 +127,23 @@ class OpenAlexSearcher(SearchSource):
     BASE_URL = "https://api.openalex.org/works"
 
     def __init__(self) -> None:
+        super().__init__()
         self.headers = {"User-Agent": "CiteLens/0.1"}
         if settings.openalex_email:
             self.headers["User-Agent"] = f"mailto:{settings.openalex_email}"
 
     async def search(self, keywords: list[str], max_results: int) -> list[Paper]:
         per_keyword = max(max_results // max(len(keywords), 1), 5)
+        from citens.search.base import SEARCH_CONCURRENCY
+
+        sem = asyncio.Semaphore(SEARCH_CONCURRENCY)
+
+        async def _guarded(q: str) -> list[Paper]:
+            async with sem:
+                return await self._one(client, q, per_keyword)
+
         async with httpx.AsyncClient(timeout=30, headers=self.headers) as client:
-            tasks = [self._one(client, kw, per_keyword) for kw in keywords]
+            tasks = [_guarded(kw) for kw in keywords]
             results = await asyncio.gather(*tasks, return_exceptions=True)
         out: list[Paper] = []
         for res in results:
@@ -143,8 +152,16 @@ class OpenAlexSearcher(SearchSource):
         return out
 
     async def _one(self, client: httpx.AsyncClient, query: str, limit: int) -> list[Paper]:
+        # year window from the clarification answers rides OpenAlex's NATIVE
+        # filters (text hacks like "2023..2026" inside the query only work by
+        # accident on some backends and pollute relevance ranking)
+        flt = f"default.search:{query}"
+        if self.constraints and self.constraints.year_from:
+            flt += f",from_publication_date:{self.constraints.year_from}-01-01"
+        if self.constraints and self.constraints.year_to:
+            flt += f",to_publication_date:{self.constraints.year_to}-12-31"
         params: dict[str, str | int] = {
-            "filter": f"default.search:{query}",
+            "filter": flt,
             "per_page": min(limit, 50),
             "sort": "relevance_score:desc",
             "select": (
@@ -155,7 +172,11 @@ class OpenAlexSearcher(SearchSource):
         }
         resp = await client.get(self.BASE_URL, params=params)
         resp.raise_for_status()
-        return [self.to_paper(w) for w in resp.json().get("results", [])]
+        papers = [self.to_paper(w) for w in resp.json().get("results", [])]
+        for p in papers:
+            p.matched_queries.append(query)  # retrieval provenance
+        self.query_stats[query] = len(papers)
+        return papers
 
     @staticmethod
     def to_paper(work: dict) -> Paper:

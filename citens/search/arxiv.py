@@ -50,8 +50,17 @@ class ArxivSearcher(SearchSource):
                     max_results=per_kw,
                     sort_by=arxiv.SortCriterion.Relevance,
                 )
-                for result in client.results(search):
-                    out.append(self._to_paper(result))
+                hits = [self._to_paper(result) for result in client.results(search)]
+                # arXiv has no client-friendly date filter in this wrapper —
+                # the clarification year window is applied post-hoc (arXiv
+                # records always carry a published date, so None-year never
+                # silently drops here)
+                if self.constraints:
+                    hits = [p for p in hits if self.constraints.matches_paper(p)]
+                for p in hits:
+                    p.matched_queries.append(kw)  # retrieval provenance
+                self.query_stats[kw] = len(hits)
+                out.extend(hits)
             except Exception:
                 continue
         return out

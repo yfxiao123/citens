@@ -3,12 +3,35 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
 from citens.models import Paper
 
 REGISTRY: dict[str, type[SearchSource]] = {}
+
+# arXiv id from either form a Paper carries it in: the abs/pdf URL the arXiv
+# source fills, or the 10.48550/arxiv.* DataCite DOI. Shared by the citation
+# enrichment join and the bench's gold matching — they must extract the SAME
+# id or enrichment and evaluation drift apart silently.
+_ARXIV_URL_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5})", re.I)
+_ARXIV_DOI_RE = re.compile(r"10\.48550/arxiv\.([0-9]{4}\.[0-9]{4,5})", re.I)
+
+
+def paper_arxiv_id(p: Paper) -> str | None:
+    """The paper's arXiv id, or None when the record carries none."""
+    for text in (p.url or "", p.doi or ""):
+        m = _ARXIV_URL_RE.search(text) or _ARXIV_DOI_RE.search(text)
+        if m:
+            return m.group(1)
+    return None
+
+# per-source cap on concurrently in-flight queries. The fan-out used to be
+# unbounded (12-16 queries fired at once per source); with concept-block
+# planning plus the calibration waves query counts grew, and a burst of
+# concurrent connections is exactly how polite APIs decide to throttle you.
+SEARCH_CONCURRENCY = 6
 
 
 def register(name: str):
@@ -26,6 +49,20 @@ class SearchSource(ABC):
 
     name: str = "base"
 
+    def __init__(self) -> None:
+        # RetrievalConstraints from the user's clarification answers (year
+        # window, ...). Sources that support native filters apply them in
+        # their queries; others may post-filter. None = unconstrained.
+        self.constraints = None
+        # per-query hit counts of the last search() — filled by each source,
+        # read by search_round for the zero-hit calibration loop. Optional
+        # for third-party sources (getattr-guarded).
+        self.query_stats: dict[str, int] = {}
+
+    def set_constraints(self, constraints) -> None:
+        self.constraints = constraints
+        self.query_stats = {}
+
     @abstractmethod
     async def search(self, keywords: list[str], max_results: int) -> list[Paper]:
         """Return up to ``max_results`` papers across all keywords."""
@@ -42,22 +79,32 @@ def _enabled_sources(sources: list[str] | None) -> list[str]:
     return configured
 
 
-async def search_papers_with_health(
+async def search_round(
     keywords: list[str],
     max_results: int = 60,
     sources: list[str] | None = None,
-) -> tuple[list[Paper], dict[str, str]]:
-    """Query all enabled sources concurrently with retries; deduplicate.
+    constraints=None,
+) -> tuple[list[Paper], dict[str, str], dict[str, int]]:
+    """One search wave: all enabled sources concurrently, with retries.
 
-    Returns (papers, health) where health maps each source name to
-    "ok" | "empty" | "failed: <reason>". Callers that only need papers should
-    use :func:`search_papers`.
+    Returns (papers, health, query_stats) where query_stats maps each query
+    to its total hit count across sources that responded — the zero-hit
+    queries feed the synonym-swap calibration loop. Constraints (year
+    window from clarification answers) are compiled into each source's
+    native filter syntax.
     """
     names = _enabled_sources(sources)
     instances = [REGISTRY[n]() for n in names if n in REGISTRY]
     health: dict[str, str] = {}
     if not instances:
-        return [], health
+        return [], health, {}
+
+    for src in instances:
+        # duck-typed: REGISTRY accepts plain classes too (see the health
+        # tests) — constraints are opt-in for sources that understand them
+        set_c = getattr(src, "set_constraints", None)
+        if callable(set_c):
+            set_c(constraints)
 
     per_source = max(max_results // max(len(instances), 1), 5)
 
@@ -81,6 +128,7 @@ async def search_papers_with_health(
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_papers: list[Paper] = []
+    stats: dict[str, int] = {}
     for src, res in zip(instances, results, strict=False):
         if isinstance(res, BaseException):
             health[src.name] = f"failed: {res}"[:200]
@@ -88,17 +136,40 @@ async def search_papers_with_health(
             continue
         health[src.name] = "ok" if res else "empty"
         all_papers.extend(res)
+        # a failed source must not fake zero-hits: only responding sources
+        # contribute counts
+        for q, n in getattr(src, "query_stats", {}).items():
+            stats[q] = stats.get(q, 0) + n
 
-    return deduplicate(all_papers), health
+    return deduplicate(all_papers), health, stats
+
+
+async def search_papers_with_health(
+    keywords: list[str],
+    max_results: int = 60,
+    sources: list[str] | None = None,
+    constraints=None,
+) -> tuple[list[Paper], dict[str, str]]:
+    """Query all enabled sources concurrently with retries; deduplicate.
+
+    Returns (papers, health) where health maps each source name to
+    "ok" | "empty" | "failed: <reason>". Callers that need per-query hit
+    counts too should use :func:`search_round`.
+    """
+    papers, health, _stats = await search_round(keywords, max_results, sources, constraints)
+    return papers, health
 
 
 async def search_papers(
     keywords: list[str],
     max_results: int = 60,
     sources: list[str] | None = None,
+    constraints=None,
 ) -> list[Paper]:
     """Query all enabled sources concurrently, then deduplicate."""
-    papers, _health = await search_papers_with_health(keywords, max_results, sources)
+    papers, _health = await search_papers_with_health(
+        keywords, max_results, sources, constraints
+    )
     return papers
 
 
@@ -111,8 +182,6 @@ def _fuzzy_title(title: str) -> str:
     alphanumerics only, sorted token set — resilient to punctuation, casing,
     and small word-order/stopword differences between preprint and published
     versions of the same paper."""
-    import re
-
     toks = sorted(t for t in re.split(r"[^a-z0-9]+", title.lower()) if len(t) > 2)
     return " ".join(toks)
 
@@ -144,6 +213,11 @@ def _merge_variants(keep: Paper, drop: Paper) -> Paper:
     if other.abstract and len(other.abstract) > len(preferred.abstract):
         preferred.abstract = other.abstract
     preferred.citation_count = max(preferred.citation_count, other.citation_count)
+    # retrieval provenance is cumulative — a paper found by BOTH the
+    # preprint's query and the published version's query credits both
+    preferred.matched_queries = list(
+        dict.fromkeys((preferred.matched_queries or []) + (other.matched_queries or []))
+    )
     return preferred
 
 
@@ -160,8 +234,18 @@ def deduplicate(papers: list[Paper]) -> list[Paper]:
     seen: dict[str, Paper] = {}
     for p in papers:
         key = p.doi or _norm_title(p.title)
-        if key not in seen or p.citation_count > seen[key].citation_count:
+        if key not in seen:
             seen[key] = p
+            continue
+        prev = seen[key]
+        merged_queries = list(
+            dict.fromkeys((prev.matched_queries or []) + (p.matched_queries or []))
+        )
+        if p.citation_count > prev.citation_count:
+            p.matched_queries = merged_queries
+            seen[key] = p
+        else:
+            prev.matched_queries = merged_queries
     out = list(seen.values())
 
     # fuzzy pass: compare across different exact keys only
@@ -182,18 +266,29 @@ def deduplicate(papers: list[Paper]) -> list[Paper]:
 
 
 def blend_pool(papers: list[Paper], cap: int) -> list[Paper]:
-    """Cap the candidate pool while preserving source diversity.
+    """Cap the candidate pool while preserving source diversity AND the
+    field's spine.
 
     A naive global sort by citation starves sources whose citations are 0
-    (notably arXiv). We cap per source first, then trim to ``cap``.
+    (notably arXiv). But a pure per-source cap proved coverage-blind the
+    other way (measured on the RAG bench run): a field-defining work
+    captured via the arXiv leg carries citation_count=0, sorts arbitrarily
+    within its source group, and gets cut. Half the cap is reserved for
+    the globally most-cited papers (the spine every review must see); the
+    rest is per-source diversity fill.
     """
     if len(papers) <= cap:
         return papers
+    spine_n = max(cap // 2, 1)
+    spine = sorted(papers, key=lambda p: p.citation_count, reverse=True)[:spine_n]
+    spine_ids = {id(p) for p in spine}
+    rest_cap = cap - len(spine)
     by_src: dict[str, list[Paper]] = defaultdict(list)
     for p in papers:
-        by_src[p.source.split(" (")[0]].append(p)
-    per_src = max(cap // max(len(by_src), 1), 1)
-    selected: list[Paper] = []
+        if id(p) not in spine_ids:
+            by_src[p.source.split(" (")[0]].append(p)
+    per_src = max(rest_cap // max(len(by_src), 1), 1)
+    selected: list[Paper] = list(spine)
     for group in by_src.values():
         selected += sorted(group, key=lambda p: p.citation_count, reverse=True)[:per_src]
     return selected[:cap]
