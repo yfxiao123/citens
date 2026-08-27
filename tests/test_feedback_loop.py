@@ -157,3 +157,65 @@ def test_clarify_questions_follow_review_language(monkeypatch):
     monkeypatch.setattr(settings, "review_language", "en")
     clarify_mod.generate_clarifying_questions("order book")
     assert "English" in captured["system"] and "简体中文" not in captured["system"]
+
+
+# --- provenance-driven reflect feedback -------------------------------------
+
+
+def test_low_yield_directions_thresholds():
+    from citens.orchestration.support import low_yield_directions
+
+    rows = [
+        {"concept": "good direction", "hits": 10, "kept": 6},
+        {"concept": "junk direction", "hits": 12, "kept": 0},   # over-fetching
+        {"concept": "thin direction", "hits": 2, "kept": 0},    # too small to judge
+        {"concept": "weak direction", "hits": 5, "kept": 1},    # some survivors
+    ]
+    out = low_yield_directions(rows)
+    assert [r["concept"] for r in out] == ["junk direction"]
+
+
+def test_low_yield_synonym_swaps_untried_only():
+    from citens.agents.planner import QueryPlan, low_yield_synonym_swaps
+
+    plan = QueryPlan(
+        queries=["market microstructure"],
+        concepts=[{"term": "market microstructure", "synonyms": ["market micro-strategy", "dealer markets"]}],
+    )
+    out = low_yield_synonym_swaps(
+        plan,
+        [{"concept": "market microstructure", "hits": 9, "kept": 0}],
+        already_searched=["market microstructure", "dealer markets"],
+    )
+    assert out == ["market micro-strategy"]
+    # nothing left to swap -> empty
+    assert low_yield_synonym_swaps(
+        plan,
+        [{"concept": "market microstructure", "hits": 9, "kept": 0}],
+        ["market microstructure", "dealer markets", "market micro-strategy"],
+    ) == []
+
+
+def test_reflect_receives_yield_note(monkeypatch):
+    import citens.agents.reflector as reflector_mod
+    from citens.models import SynthesisResult
+
+    captured = {}
+
+    def fake_chat_json(system, user, **k):
+        captured["system"] = system
+        captured["user"] = user
+        return {"needs_supplement": True, "rationale": "r",
+                "supplementary_keywords": ["replacement query"]}
+
+    monkeypatch.setattr(reflector_mod, "chat_json", fake_chat_json)
+    out = reflector_mod.reflect(
+        SynthesisResult(gaps=["gap one"]), "topic", 8,
+        yield_note="junk direction 12->0",
+    )
+    assert out["supplementary_keywords"] == ["replacement query"]
+    assert "junk direction 12->0" in captured["user"]
+    assert "QUERY YIELD" in captured["system"]
+    # without a yield note the block is absent (backward-compatible prompt)
+    reflector_mod.reflect(SynthesisResult(gaps=[]), "topic", 8)
+    assert "Query yield" not in captured["user"]

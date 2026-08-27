@@ -34,7 +34,7 @@ Output JSON:
 }
 
 When a COVERAGE REPORT is provided, use it: classify each gap as one of
-(foundational classic / systematic survey / recent advance / method family) and target the thinnest facets first. When a CHANNEL STATUS notes a source that returned nothing this run, prefer queries that other sources can answer."""
+(foundational classic / systematic survey / recent advance / method family) and target the thinnest facets first. When a CHANNEL STATUS notes a source that returned nothing this run, prefer queries that other sources can answer. When a QUERY YIELD report is provided, treat its LOW-YIELD directions (many pool hits, zero filter survivors) as mis-phrased: include REPLACEMENT queries that rephrase those directions in terminology the field actually uses."""
 
 
 def reflect(
@@ -42,17 +42,26 @@ def reflect(
     topic: str,
     current_paper_count: int,
     coverage: str = "",
+    yield_note: str = "",
 ) -> dict:
     """Decide whether to supplement and produce gap-targeted queries."""
     gaps_text = "\n".join(f"- {g}" for g in synthesis.gaps) or "(none identified)"
     coverage_block = (
         f"\n检索面覆盖报告 / Facet coverage report:\n{coverage}\n" if coverage else ""
     )
+    yield_block = (
+        "\n查询产出报告 / Query yield (pool hits -> filter survivors, per direction):\n"
+        f"{yield_note}\n"
+        "The directions above retrieved material the filter rejected outright — "
+        "they are mis-phrased; include replacement queries for them.\n"
+        if yield_note else ""
+    )
     user_prompt = (
         f"研究主题 / Topic: {topic}\n"
         f"当前论文数 / Current papers: {current_paper_count}\n\n"
         f"已识别的覆盖空白 / Coverage gaps:\n{gaps_text}\n"
-        f"{coverage_block}\n"
+        f"{coverage_block}"
+        f"{yield_block}"
         "Decide whether a supplementary retrieval round is warranted."
     )
     try:

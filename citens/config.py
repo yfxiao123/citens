@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Empty = use the same LLM_MODEL everywhere (cheap stages — planner/filter/
     # extract — always use LLM_MODEL).
     llm_model_strong: str = ""
+    # Cheapest tier for mechanical, high-volume stages (planner family /
+    # filter / extract / clarify / intent). Empty = use LLM_MODEL. Typical:
+    # cheap=flash-tier, LLM_MODEL=mid-tier, strong=frontier/reasoner.
+    llm_model_cheap: str = ""
     # Thread-pool size for parallel LLM calls (extract / verify / write
     # sections). 1 = sequential.
     llm_concurrency: int = 6

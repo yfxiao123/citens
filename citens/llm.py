@@ -110,12 +110,16 @@ def _retryable(exc: BaseException) -> bool:
     return isinstance(exc, (ConnectionError, TimeoutError))
 
 
-def _chat_with_retry(create: Callable[[], Any], model: str) -> str:
+def _chat_with_retry(
+    create: Callable[[], Any], model: str, *, return_message: bool = False
+) -> Any:
     """Call ``create()`` with exponential backoff on transient failures.
 
     Max 3 attempts (1.5s → 4.5s) — enough to ride out a 429 burst or a
     dropped connection without stalling a stage for minutes. Non-transient
-    errors (auth, bad request) surface immediately.
+    errors (auth, bad request) surface immediately. ``return_message``
+    yields the raw assistant message instead of its text — the
+    function-calling loop needs ``tool_calls`` too.
     """
     delays = (1.5, 4.5)
     for attempt in range(len(delays) + 1):
@@ -140,6 +144,8 @@ def _chat_with_retry(create: Callable[[], Any], model: str) -> str:
             or getattr(msg, "reasoning", None)
             or ""
         )
+        if return_message:
+            return msg
         return msg.content or ""
     raise RuntimeError("unreachable")  # pragma: no cover
 
@@ -351,6 +357,16 @@ def strong_model() -> str:
     return settings.llm_model_strong or settings.llm_model
 
 
+def cheap_model() -> str:
+    """The cheapest tier, for mechanical high-volume stages.
+
+    planner family / filter / extract emit structured JSON where the model's
+    judgment barely matters — a flash-tier model cuts the dominant cost line
+    without moving quality. Empty LLM_MODEL_CHEAP = the default model.
+    """
+    return settings.llm_model_cheap or settings.llm_model
+
+
 def reset_backends() -> None:
     """Drop cached backend clients (each holds the key/base_url of its
     creation time). The settings UI calls this after saving new LLM
@@ -367,9 +383,13 @@ def chat(
     max_tokens: int | None = None,
     response_json: bool = False,
     strong: bool = False,
+    cheap: bool = False,
     thinking: bool | str = True,
 ) -> str:
-    model = strong_model() if strong else settings.llm_model
+    model = (
+        cheap_model() if cheap
+        else (strong_model() if strong else settings.llm_model)
+    )
     budget = max_tokens or settings.llm_max_tokens_default
     cache_key = {
         "model": model,
@@ -425,6 +445,7 @@ def chat_json(
     temperature: float = 0.3,
     max_tokens: int | None = None,
     strong: bool = False,
+    cheap: bool = False,
     thinking: bool | str = True,
 ) -> dict:
     """Call the LLM and parse a JSON response.
@@ -447,6 +468,7 @@ def chat_json(
             max_tokens=budget,
             response_json=True,
             strong=strong,
+            cheap=cheap,
             thinking=thinking,
         )
 
@@ -465,6 +487,71 @@ def chat_json(
     # output to empty/truncated JSON)
     bigger = max(max_tokens * 2, 8192)
     return json.loads(_strip_fences(_call(bigger)))
+
+
+def chat_tool_call(
+    messages: list[dict],
+    tools: list[dict],
+    *,
+    temperature: float = 0.2,
+    max_tokens: int | None = None,
+    strong: bool = False,
+) -> Any:
+    """One function-calling turn: return the raw assistant message.
+
+    The agentic-retrieval loop's transport: multi-turn ``messages`` plus
+    OpenAI-style ``tools`` schemas; the response carries either
+    ``tool_calls`` or plain ``content``. Not disk-cached (loop transcripts
+    are unique per run) but fully traced, so every orchestrator decision
+    lands in the web transcript like every other LLM call.
+    """
+    import uuid
+
+    model = strong_model() if strong else settings.llm_model
+    backend = get_backend(model)
+    client = getattr(backend, "_client", None)
+    if client is None:  # pragma: no cover - litellm backend
+        raise RuntimeError(
+            "function calling requires the OpenAI-compatible backend "
+            "(LLM_PROVIDER=openai; covers DeepSeek/OpenAI/Ollama/vLLM/...)"
+        )
+    call_id = uuid.uuid4().hex[:8]
+    purpose = _trace_purpose(str(messages[0].get("content", ""))) if messages else ""
+    stage = _current_stage.get()
+    chars_in = sum(len(str(m.get("content") or "")) for m in messages)
+    _fire_trace({
+        "phase": "start", "call_id": call_id, "model": model, "purpose": purpose,
+        "thinking": True, "chars_in": chars_in, "stage": stage,
+    })
+    t0 = time.monotonic()
+    try:
+        msg = _chat_with_retry(
+            lambda: client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=temperature,
+                max_tokens=max_tokens or settings.llm_max_tokens_default,
+            ),
+            model,
+            return_message=True,
+        )
+    except Exception:
+        _fire_trace({
+            "phase": "end", "call_id": call_id, "model": model, "purpose": purpose,
+            "chars_out": 0, "ms": round((time.monotonic() - t0) * 1000),
+            "reasoning": "tool call failed", "stage": stage,
+        })
+        raise
+    reasoning = getattr(_tls, "last_reasoning", "") or ""
+    _fire_trace({
+        "phase": "end", "call_id": call_id, "model": model, "purpose": purpose,
+        "chars_out": len(getattr(msg, "content", None) or ""),
+        "ms": round((time.monotonic() - t0) * 1000),
+        "reasoning": reasoning[:800], "stage": stage,
+    })
+    return msg
 
 
 def run_concurrent(

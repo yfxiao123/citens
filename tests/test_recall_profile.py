@@ -99,7 +99,7 @@ def test_build_queries_merges_profile_terms(monkeypatch):
 
     monkeypatch.setattr(
         planner, "chat_json",
-        lambda s, u, **k: {"queries": ["limit order book"]},
+        lambda s, u, **k: {"concepts": [{"term": "limit order book", "synonyms": []}]},
     )
     queries, broad = collect_mod.build_queries("订单簿建模", profile_name="finance")
     assert "market microstructure" in queries        # profile term added

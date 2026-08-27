@@ -52,7 +52,7 @@ def detect_intent(topic: str, user_hints: dict | None = None) -> str:
     )
 
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=1024, thinking=False)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=1024, thinking=False, cheap=True)
         mode = result.get("mode", "deep_review")
         if mode not in {"quick_scan", "deep_review", "interactive"}:
             mode = "deep_review"

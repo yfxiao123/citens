@@ -111,7 +111,7 @@ def test_build_queries_includes_survey_hunting(monkeypatch):
         # keywords prompt vs seed prompt are distinguishable by content
         if "LANDMARK" in s:
             return {"papers": [], "domain_terms": ["adverse selection"]}
-        return {"queries": ["order book model"]}
+        return {"concepts": [{"term": "order book model", "synonyms": []}]}
 
     monkeypatch.setattr(planner, "chat_json", fake_chat)
     queries, broad = collect_mod.build_queries("订单簿建模")
