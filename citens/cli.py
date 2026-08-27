@@ -106,6 +106,11 @@ def run(
     no_clarify: bool = typer.Option(
         False, "--no-clarify", help="跳过跑前澄清问题（直接运行）"
     ),
+    agentic: bool = typer.Option(
+        False, "--agentic",
+        help="智能体检索: 预算内的工具调用循环自适应决定补检/滚雪球"
+             "（默认关闭，走确定性波次）",
+    ),
     language: str | None = typer.Option(
         None, "--language", "-l", help="综述输出语言: zh/en (缺省时询问, 默认中文)"
     ),
@@ -158,6 +163,7 @@ def run(
         fetch_fulltext=not no_fulltext,
         support_papers=support_papers,
         mode=run_mode,
+        agentic_retrieval=agentic,
     )
     # pre-run clarification (interactive) — shape the search before it starts
     if not no_clarify:
@@ -275,6 +281,124 @@ def eval(  # noqa: A001
     (out / "report.md").write_text(report, encoding="utf-8")
     console.print(Panel(table, title=f"eval: {len(rows)} runs"))
     console.print(f"[green]✓[/] 写入 {out / 'report.md'}")
+
+
+@app.command()
+def bench(
+    n: int = typer.Option(50, "-n", "--queries", help="抽样的 LitSearch 问题数"),
+    seed: int = typer.Option(13, "--seed", help="分层抽样种子（可复现）"),
+    llm_rerank: bool = typer.Option(
+        False, "--llm-rerank", help="加测 cheap 模型 listwise 重排腿"
+    ),
+    planned: bool = typer.Option(
+        False, "--planned", help="加测 planner 关键词化检索腿（cheap LLM）"
+    ),
+    adaptive: bool = typer.Option(
+        False, "--adaptive",
+        help="加测自适应检索腿：假想标题(HyDE)+PRF挖词 并池，LLM top-100 语义排序（需 --planned）",
+    ),
+    snowball: bool = typer.Option(
+        False, "--snowball",
+        help="加测图搭桥观察腿：锚=planned 融合 top-5，测可达天花板/词法排序/语义重排",
+    ),
+    agentic: int = typer.Option(
+        0, "--agentic", help="对前 N 个问题跑混合 agent（plan→search→harness，真实 LLM 花费）"
+    ),
+    data_dir: str = typer.Option(
+        "bench_data/litsearch", "--data-dir", help="LitSearch 快照目录"
+    ),
+    sources: str = typer.Option(
+        "", "--sources",
+        help="逗号分隔检索源（默认全部；被限流时可如 'semantic_scholar,openalex,crossref'）",
+    ),
+    out_dir: str = typer.Option("bench_results", "--out-dir", help="结果输出目录"),
+):
+    """LitSearch live-retrieval bench: 金标论文 recall@5/@20，多变体对照。
+
+    维护者工具（真实 API + 可选真实 LLM）。数据准备见
+    bench_data/litsearch/（query.parquet + gold_papers.json）。
+    """
+    import asyncio
+    import json as _json
+    from datetime import datetime
+
+    from citens.eval.litsearch import run_bench
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = Path(out_dir) / f"litsearch-{stamp}"
+    out.mkdir(parents=True, exist_ok=True)
+
+    res = asyncio.run(
+        run_bench(
+            data_dir=data_dir,
+            n=n,
+            seed=seed,
+            sources=[s.strip() for s in sources.split(",") if s.strip()] or None,
+            with_planned=planned,
+            with_adaptive=adaptive,
+            with_llm_rerank=llm_rerank,
+            with_snowball=snowball,
+            agentic_n=agentic,
+            detail_path=out / "details.jsonl",
+        )
+    )
+    if not res.details:
+        console.print("[yellow]没有完成的 query[/]")
+        raise typer.Exit()
+    tbl = Table(title=f"LitSearch live bench — {len(res.details)} queries")
+    tbl.add_column("variant", style="cyan")
+    tbl.add_column("recall@5", justify="right")
+    tbl.add_column("recall@20", justify="right")
+    for name, m in sorted(res.summary.items()):
+        if name == "agentic":
+            # pool-hit, not ranked recall — the harness returns a pool
+            tbl.add_row("agentic · pool命中", "—", f"{m['recall@20']:.1%}")
+        else:
+            tbl.add_row(name, f"{m['recall@5']:.1%}", f"{m['recall@20']:.1%}")
+    console.print(Panel(tbl))
+    (out / "summary.json").write_text(
+        _json.dumps(res.summary, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    console.print(f"[green]✓[/] 写入 {out}")
+
+
+@app.command()
+def coverage(
+    run_dir: str = typer.Argument(..., help="要评测的 run 目录"),
+    gold: str = typer.Option(
+        "bench_data/coverage/rag_survey_gao2023.json", "--gold",
+        help="人工综述参考文献金标（bench_data/coverage/*.json）",
+    ),
+    no_judge: bool = typer.Option(False, "--no-judge", help="跳过 LLM 裁判（离线模式）"),
+):
+    """覆盖评测：我们的综述 vs 人工综述参考文献（AutoSurvey 协议改编）。
+
+    补上内部指标测不到的 recall 轴：survey_recall / core50_recall /
+    overlap_precision + cheap 裁判 coverage-coherence-relevance 三维。
+    """
+    from citens.eval.coverage import evaluate_run
+
+    res = evaluate_run(run_dir, gold, with_judge=not no_judge)
+    console.print(Panel(
+        f"topic: {res['topic']}\n"
+        f"我们的引用: {res['our_citations']} | 人工综述金标: {res['survey_refs']} | 重叠: {res['overlap']}\n"
+        f"survey_recall = {res['survey_recall']:.1%} | core50_recall = {res['core50_recall']:.1%} "
+        f"({res['core50_hit']}/50) | overlap_precision = {res['overlap_precision']:.1%}"
+        + (f"\nverifier precision = {res.get('verifier_precision')}" if res.get("verifier_precision") is not None else "")
+    ))
+    if "judge" in res:
+        j = res["judge"]
+        console.print(
+            f"裁判: coverage {j['coverage']}/10 · coherence {j['coherence']}/10 · "
+            f"relevance {j['relevance']}/10"
+        )
+        for t in j.get("missing", [])[:8]:
+            console.print(f"  [yellow]missing:[/] {t}")
+    import json as _json
+
+    out = Path(run_dir) / "coverage_eval.json"
+    out.write_text(_json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    console.print(f"[green]✓[/] 写入 {out}")
 
 
 @app.command()
