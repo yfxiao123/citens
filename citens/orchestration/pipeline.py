@@ -26,7 +26,6 @@ from citens.agents import (
     detect_intent,
     extract_papers,
     filter_papers,
-    generate_keywords,
     missing_to_queries,
     organize_themes,
     reflect,
@@ -37,10 +36,14 @@ from citens.agents import (
     write_review_body,
 )
 from citens.agents.planner import (
+    QueryPlan,
     discover_terms,
     generate_facets,
     generate_seed_papers,
+    low_yield_synonym_swaps,
+    plan_queries,
     refine_queries,
+    synonym_fallback_queries,
 )
 from citens.agents.quality import build_comparison_matrix, render_comparison_md
 from citens.agents.verifier import claim_stack_stats
@@ -85,9 +88,12 @@ from citens.orchestration.support import (  # noqa: F401 - re-exported
     coverage_note_text,
     demote_blind_papers,
     facet_coverage_report,
+    low_yield_directions,
     number_dense_excerpts,
     prune_citation_stacking,
+    query_yield_report,
     search_summary_text,
+    thin_facet_queries,
 )
 from citens.ranking import quartile_histogram, rank_papers
 from citens.runlog import RunLog
@@ -95,7 +101,7 @@ from citens.search import (
     blend_pool,
     deduplicate,
     search_papers,
-    search_papers_with_health,
+    search_round,
 )
 from citens.search.seeds import resolve_seeds
 from citens.search.snowball import snowball
@@ -114,6 +120,11 @@ class RunOptions:
     # Seed the candidate pool from `citens collect`'s persistent literature
     # pool when one exists (record-first workflow), and write new finds back.
     use_pool: bool = True
+    # Agentic retrieval (Phase-1 harness): the adaptive waves (facet gap /
+    # zero-hit synonyms / thin-pool refine) are replaced by a budgeted
+    # tool-calling loop that perceives the pool and drives search/snowball
+    # itself. Default off — the deterministic waves stay the predictable path.
+    agentic_retrieval: bool = False
     # Domain profile name (overrides settings.profile); "" = generic.
     profile: str = ""
     allow_supplement: bool = True
@@ -758,7 +769,12 @@ async def _supplement_search(
     cache_key = {"keywords": keywords, "max_results": 20, "sources": options.sources, "supplement": True}
     papers = cache.get("search", cache_key) if options.use_cache else None
     if papers is None:
-        papers = await search_papers(keywords, max_results=20, sources=options.sources)
+        from citens.search.filters import parse_constraints
+
+        papers = await search_papers(
+            keywords, max_results=20, sources=options.sources,
+            constraints=parse_constraints(options.filters),
+        )
         if options.use_cache:
             cache.put("search", cache_key, [p.model_dump() for p in papers])
     else:
@@ -850,6 +866,12 @@ async def run_pipeline_async(
     # facet plan + cross-round verdict cache: bound for both paths (the
     # resume path skips the planner that fills facets — empty is correct)
     facets: list = []
+    # query plan likewise: the resume path never plans, and the calibration
+    # waves reference it only inside the retrieval path
+    plan = QueryPlan()
+    # per-direction retrieval yield (filter-time snapshot): the resume path
+    # skips the filter that fills it — empty is correct
+    yield_rows: list[dict] = []
     verdict_cache: dict = {}
     # (normalized text, citations) -> (grounding sig, verdict): lets the
     # post-supplement recompose reuse verdicts for reworded-but-same claims
@@ -894,7 +916,11 @@ async def run_pipeline_async(
             _emit(bus, StepStarted(step="planner", title="生成检索关键词"))
             if options.filters:
                 persistence.save_step(run_dir, "00_filters", options.filters)
-            keywords = generate_keywords(topic, filters=options.filters)
+            # concept blocks (LLM) -> assembled queries (code): coverage query
+            # per concept + precision combos; synonyms held in reserve for the
+            # zero-hit calibration wave below
+            plan = plan_queries(topic, filters=options.filters)
+            keywords = plan.queries
             # domain profile: curated terminology joins the keyword batches
             from citens.profiles import merge_profile_terms
 
@@ -913,6 +939,11 @@ async def run_pipeline_async(
                         ),
                     )
             meta.keywords = keywords
+            persistence.save_step(
+                run_dir,
+                "01a_query_plan",
+                {"concepts": plan.concepts, "queries": plan.queries},
+            )
             persistence.save_step(run_dir, "01_keywords", keywords)
             if options.filters:
                 _emit(
@@ -983,15 +1014,21 @@ async def run_pipeline_async(
                     ),
                 )
 
-# Step 2: search (iterative — refine if first round is thin)
+# Step 2: search (iterative — facet gap wave, zero-hit calibration,
+            # then refine if the pool is still thin)
             clock.mark("search")
             _emit(bus, StepStarted(step="search", title="检索论文"))
+            from citens.search.filters import parse_constraints
+
+            constraints = parse_constraints(options.filters)
             cache_key = {"keywords": keywords, "max_results": max_results, "sources": options.sources}
             cached = cache.get("search", cache_key) if options.use_cache else None
             search_health = {"cache": "hit"} if cached is not None else {}
+            query_stats: dict[str, int] = {}
             if cached is None:
-                papers, search_health = await search_papers_with_health(
-                    keywords, max_results, sources=options.sources
+                papers, search_health, query_stats = await search_round(
+                    keywords, max_results, sources=options.sources,
+                    constraints=constraints,
                 )
                 payload = [p.model_dump() for p in papers]
                 if options.use_cache:
@@ -1011,36 +1048,171 @@ async def run_pipeline_async(
                 else:
                     _emit(bus, StepProgress(step="search", message=msg))
 
-            # Iterative refinement: if pool is thin, refine queries and search again
-            min_pool = max_papers * 2 if max_papers else 15
-            if len(papers) < min_pool and options.mode != RunMode.QUICK_SCAN:
+            if options.agentic_retrieval and options.mode != RunMode.QUICK_SCAN:
+                # Phase-1 harness: the adaptive waves below become model
+                # decisions — a budgeted tool loop perceives the pool and
+                # drives search/snowball itself (see citens.harness)
+                from citens.harness import HarnessBudget, run_retrieval_harness
+                from citens.harness.tools import HarnessState
+
                 _emit(
                     bus,
-                    StepProgress(step="search", message=f"首轮 {len(papers)} 篇不足，迭代扩展检索…"),
+                    StepProgress(
+                        step="search",
+                        message="智能体检索循环接管适应性检索（预算见 transcript）",
+                        detail=True,
+                    ),
                 )
-                found_titles = [p.title for p in papers[:10]]
-                mined = discover_terms(papers)
-                refined = refine_queries(
-                    topic, keywords, found_titles, known_gaps=[], discovered_terms=mined
+                hstate = HarnessState(
+                    topic=topic,
+                    plan=plan,
+                    pool=list(papers),
+                    keywords=list(keywords),
+                    query_stats=dict(query_stats),
+                    constraints=constraints,
+                    sources=options.sources,
+                    max_results=max_results,
+                    facets=facets,
                 )
-                if mined:
+                hres = await run_retrieval_harness(hstate, bus=bus, budget=HarnessBudget())
+                papers = hres.papers
+                keywords = hres.keywords
+                meta.keywords = keywords
+                query_stats = hres.query_stats
+                persistence.save_step(
+                    run_dir,
+                    "02h_harness",
+                    {
+                        "summary": hres.summary,
+                        "skipped": hres.skipped,
+                        "finish_reason": hres.finish_reason,
+                        "steps": hres.steps,
+                        "llm_calls": hres.llm_calls,
+                        "search_calls": hres.search_calls,
+                        "pool": len(papers),
+                    },
+                )
+            else:
+                # facet gap wave: coverage-by-design becomes coverage-by-search —
+                # facets the first round left thin (<3 papers) get their planned
+                # queries actually run. Previously facets only *measured* coverage
+                # after the fact; their queries never reached a search engine.
+                if facets and options.mode != RunMode.QUICK_SCAN:
+                    facet_qs = thin_facet_queries(
+                        facets, facet_coverage_report(facets, papers), keywords
+                    )
+                    if facet_qs:
+                        _emit(
+                            bus,
+                            StepProgress(
+                                step="search",
+                                message="薄检索面补检: "
+                                + ", ".join(facet_qs[:3])
+                                + ("…" if len(facet_qs) > 3 else ""),
+                                detail=True,
+                            ),
+                        )
+                        more, _h, more_stats = await search_round(
+                            facet_qs, min(max_results, 30),
+                            sources=options.sources, constraints=constraints,
+                        )
+                        papers = deduplicate(papers + more)
+                        keywords = keywords + facet_qs  # track all queries used
+                        meta.keywords = keywords
+                        query_stats.update(more_stats)
+                        if more:
+                            _emit(
+                                bus,
+                                StepProgress(
+                                    step="search",
+                                    message=f"检索面补检新增 {len(more)} 篇",
+                                    detail=True,
+                                ),
+                            )
+
+                # zero-hit calibration (the PRESS test-search loop): a query that
+                # returned nothing means the field doesn't use that phrasing —
+                # swap in its concept's untried synonyms instead of guessing anew
+                if plan.concepts and options.mode != RunMode.QUICK_SCAN:
+                    zero_hits = [q for q, n in query_stats.items() if n == 0]
+                    fallback_qs = synonym_fallback_queries(plan, zero_hits, keywords)
+                    if zero_hits and not fallback_qs:
+                        _emit(
+                            bus,
+                            StepProgress(
+                                step="search",
+                                message=f"{len(zero_hits)} 条查询零命中（无备用同义词可换）",
+                                detail=True,
+                            ),
+                        )
+                    if fallback_qs:
+                        _emit(
+                            bus,
+                            StepProgress(
+                                step="search",
+                                message="零命中查询换用同义词: " + ", ".join(fallback_qs[:3]),
+                                detail=True,
+                            ),
+                        )
+                        more, _h, more_stats = await search_round(
+                            fallback_qs, min(max_results, 20),
+                            sources=options.sources, constraints=constraints,
+                        )
+                        papers = deduplicate(papers + more)
+                        keywords = keywords + fallback_qs
+                        meta.keywords = keywords
+                        query_stats.update(more_stats)
+                        if more:
+                            _emit(
+                                bus,
+                                StepProgress(
+                                    step="search",
+                                    message=f"同义词补检新增 {len(more)} 篇",
+                                    detail=True,
+                                ),
+                            )
+
+                # Iterative refinement: if pool is thin, refine queries and search again
+                min_pool = max_papers * 2 if max_papers else 15
+                if len(papers) < min_pool and options.mode != RunMode.QUICK_SCAN:
                     _emit(
                         bus,
-                        StepProgress(
-                            step="search",
-                            message=f"从结果中挖掘到领域术语: {', '.join(mined[:5])}",
-                        ),
+                        StepProgress(step="search", message=f"首轮 {len(papers)} 篇不足，迭代扩展检索…"),
                     )
-                if refined:
-                    _emit(
-                        bus,
-                        StepProgress(step="search", message=f"补充查询: {', '.join(refined[:3])}"),
+                    found_titles = [p.title for p in papers[:10]]
+                    mined = discover_terms(papers)
+                    zero_hits = [q for q, n in query_stats.items() if n == 0]
+                    refined = refine_queries(
+                        topic,
+                        keywords,
+                        found_titles,
+                        known_gaps=[],
+                        discovered_terms=mined,
+                        zero_hit_queries=zero_hits,
                     )
-                    more = await search_papers(refined, max_results=min(max_results, 30), sources=options.sources)
-                    # Merge and deduplicate
-                    papers = deduplicate(papers + more)
-                    keywords = keywords + refined  # track all queries used
-                    meta.keywords = keywords
+                    if mined:
+                        _emit(
+                            bus,
+                            StepProgress(
+                                step="search",
+                                message=f"从结果中挖掘到领域术语: {', '.join(mined[:5])}",
+                            ),
+                        )
+                    if refined:
+                        _emit(
+                            bus,
+                            StepProgress(step="search", message=f"补充查询: {', '.join(refined[:3])}"),
+                        )
+                        more = await search_papers(
+                            refined,
+                            max_results=min(max_results, 30),
+                            sources=options.sources,
+                            constraints=constraints,
+                        )
+                        # Merge and deduplicate
+                        papers = deduplicate(papers + more)
+                        keywords = keywords + refined  # track all queries used
+                        meta.keywords = keywords
 
             # Merge resolved landmark seeds into the pool (they still go through
             # filter like everything else — no free pass, just guaranteed
@@ -1053,9 +1225,8 @@ async def run_pipeline_async(
             # write this run's finds back so the pool grows with every run.
             if options.use_pool:
                 from citens.collect import append_pool, pool_path, recall_from_pool
-                from citens.search.filters import parse_constraints
 
-                constraints = parse_constraints(options.filters)
+                # constraints were parsed at the top of the search step
                 if pool_path(topic).is_file():
                     # pre-recall keeps LLM screening cost flat as the pool
                     # grows: BM25 picks the top slice (reviews always pass),
@@ -1133,9 +1304,27 @@ async def run_pipeline_async(
                 # trim cut arXiv's zero-cited records hardest — the OA-richest
                 # source). 8×n bounded by the retrieval target keeps screening
                 # cost flat while giving the filter a real choice.
-                papers = blend_pool(
-                    papers, cap=min(max(max_papers * 8, 40), max_results)
-                )
+                cap = min(max(max_papers * 8, 40), max_results)
+                if len(papers) > cap:
+                    # blend's citation trim is blind to arXiv-only captures
+                    # (citation_count=0 by construction) — join the real
+                    # counts first or classics die as if uncited
+                    from citens.search.semantic_scholar import enrich_citations
+
+                    updated = await enrich_citations(papers)
+                    if updated:
+                        _emit(
+                            bus,
+                            StepProgress(
+                                step="search",
+                                message=(
+                                    f"引用数富化 {updated} 条 arXiv 记录"
+                                    "（S2 批量联查，保住高被引经典进入筛选）"
+                                ),
+                                detail=True,
+                            ),
+                        )
+                papers = blend_pool(papers, cap=cap)
             meta.total_papers = len(papers)
             runlog.snapshot("search", papers=len(papers), queries=keywords)
             persistence.save_step(run_dir, "02_papers", papers)
@@ -1187,6 +1376,27 @@ async def run_pipeline_async(
             )
             # Save filter log with exclusion reasons
             persistence.save_step(run_dir, "03_filter_log", filter_log)
+            # direction-coverage measurement: per-concept hits vs filter
+            # survivors, from real retrieval provenance (matched_queries) —
+            # the non-neural version of query clustering + coverage scoring
+            yield_rows = query_yield_report(
+                plan.concepts, papers,
+                [p for p in scored if p.relevance_score >= 3],
+            )
+            if yield_rows:
+                persistence.save_step(run_dir, "03e_query_yield", yield_rows)
+                _emit(
+                    bus,
+                    StepProgress(
+                        step="filter",
+                        message="方向产出: "
+                        + " · ".join(
+                            f"{r['concept']} {r['hits']}→{r['kept']}"
+                            for r in yield_rows[:6]
+                        ),
+                        detail=True,
+                    ),
+                )
             # supporting-reference layer: relevant papers beyond the core cap
             # become abstract-only citations instead of being discarded —
             # the bibliography no longer equals the deep-dive set
@@ -1286,7 +1496,10 @@ async def run_pipeline_async(
                         deduped_seeds.append(p)
                 top_seeds = deduped_seeds[:5]
                 existing = {p.id for p in scored}
-                snowballed = await snowball(top_seeds, existing, limit_per_paper=6)
+                snowballed = await snowball(
+                    top_seeds, existing, limit_per_paper=6,
+                    relevance_terms=keywords,
+                )
                 if snowballed:
                     _emit(
                         bus,
@@ -1433,10 +1646,28 @@ async def run_pipeline_async(
                     " | 渠道状态: " + ", ".join(f"{k}={search_health[k]}" for k in dead)
                     if dead else ""
                 )
+                # provenance-driven: directions that over-fetched off-topic
+                # material (hits but zero filter survivors) get reported to
+                # the reflector AND deterministically swapped to synonyms
+                low_rows = low_yield_directions(yield_rows)
+                yield_note = "; ".join(
+                    f"{r['concept']} {r['hits']}->{r['kept']}" for r in low_rows
+                )
                 decision = reflect(
                     result.synthesis, topic, len(extracted),
                     coverage=(cov_lines + channel),
+                    yield_note=yield_note,
                 )
+                swap_qs = low_yield_synonym_swaps(plan, low_rows, keywords)
+                if swap_qs:
+                    _emit(
+                        bus,
+                        StepProgress(
+                            step="reflect",
+                            message="低产方向换用同义词: " + ", ".join(swap_qs),
+                            detail=True,
+                        ),
+                    )
 
                 # 6a: absence audit — canonical works the set is missing
                 audit = audit_coverage(topic, [p.title for p in extracted])
@@ -1452,12 +1683,14 @@ async def run_pipeline_async(
                         ),
                     )
 
-                # merge the three query sources: reflect gaps + absence
+                # merge the four query sources: reflect gaps + absence
                 # audit + verifier-triggered (unsupported-claim evidence)
+                # + provenance-driven synonym swaps for low-yield directions
                 supplement_queries = list(dict.fromkeys(
                     decision.get("supplementary_keywords", [])
                     + audit_queries
                     + verify_trigger_queries
+                    + swap_qs
                 ))[:8]
 
                 if not (decision["needs_supplement"] and supplement_queries):
@@ -1570,6 +1803,75 @@ async def run_pipeline_async(
                 "09_saturation",
                 {"rounds_run": rounds_run, "max_rounds": max_rounds, "saturated": saturated},
             )
+
+        # red team: attack the FINAL document once (deep mode only). The
+        # verifier and defense work per-claim/per-citation; this pass hunts
+        # document-level failures — overclaims, internal contradictions,
+        # cherry-picking, missing limitations. Bounded: 1 attack + 1 revision.
+        if options.mode == RunMode.DEEP_REVIEW and not resumed:
+            from pathlib import Path as _Path
+
+            from citens.agents.redteam import apply_red_team_fixes, red_team_review
+
+            clock.mark("redteam")
+            _emit(bus, StepStarted(step="redteam", title="红队对抗审查"))
+            try:
+                review_text = _Path(result.review_path).read_text(encoding="utf-8")
+            except OSError:
+                review_text = ""
+            findings = red_team_review(
+                review_text,
+                context_note=(
+                    f"citation precision {result.precision:.0%}; "
+                    f"{len(result.claims)} claims"
+                ),
+            )
+            high_n = sum(1 for f in findings if f["severity"] == "high")
+            if not findings:
+                _emit(bus, StepCompleted(step="redteam", message="红队未找到可攻击点"))
+                persistence.save_step(run_dir, "09_redteam", {"findings": []})
+            else:
+                _emit(
+                    bus,
+                    StepProgress(
+                        step="redteam",
+                        message=f"红队攻击: {len(findings)} 项发现"
+                        + (f"（{high_n} 项高危）" if high_n else ""),
+                    ),
+                )
+                for f in findings[:4]:
+                    _emit(
+                        bus,
+                        StepProgress(
+                            step="redteam",
+                            message=f"[{f['severity']}] {f['type']}: {f['attack'][:100]}",
+                            detail=True,
+                        ),
+                    )
+                revised = apply_red_team_fixes(review_text, findings)
+                applied = revised is not None
+                if revised is not None:
+                    persistence.save_text(run_dir, "review.md", revised)
+                    _emit(
+                        bus,
+                        StepCompleted(
+                            step="redteam",
+                            message=f"红队修订完成（{len(findings)} 项发现已处置）",
+                        ),
+                    )
+                else:
+                    _emit(
+                        bus,
+                        StepCompleted(
+                            step="redteam",
+                            message="红队修订未产出（发现保留在 09_redteam，人工处置）",
+                        ),
+                    )
+                persistence.save_step(
+                    run_dir,
+                    "09_redteam",
+                    {"findings": findings, "revision_applied": applied},
+                )
 
         # finalize
         clock.mark("finalize")
