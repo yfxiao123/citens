@@ -751,6 +751,35 @@ async def run_bench(
                     if k not in seen_keys:
                         seen_keys.add(k)
                         pool.append(rec)
+            # eighth family: the web bridge (Google SERP via serper.dev) —
+            # blog/forum/tutorial text speaks the question's story language
+            # and links the exact paper; measured 5/10 on golds that NO
+            # lexical source reaches within top-100 (ranklab 2026-08-31:
+            # 9/10 generated queries already carried gold vocabulary yet
+            # every scholarly source ranked the gold >100). Bilingual
+            # queries: the Chinese query set surfaces Zhihu/CSDN coverage
+            # of the same papers. Free (Serper free tier) + polite 2.5s
+            # engine spacing inside the source.
+            try:
+                from citens.search.websearch import (
+                    WebSearchSource,
+                    generate_web_query_list,
+                )
+
+                web_qs = await asyncio.to_thread(
+                    _cached_queries, "webq", query,
+                    partial(generate_web_query_list, query),
+                )
+                if web_qs:
+                    web_papers = await WebSearchSource().search(web_qs, 16)
+                    detail_adaptive_queries_extra["web"] = web_qs
+                    for p in web_papers[:_ADAPTIVE_FAMILY_QUOTA]:
+                        k = _key_of(p)
+                        if k not in seen_keys:
+                            seen_keys.add(k)
+                            pool.append(p)
+            except Exception as e:  # noqa: BLE001 — optional channel
+                print(f"[web] failed: {e}", flush=True)
             # seventh family: one-hop citation expansion from the pool's own
             # head — a live probe (seed 42) reached a never-hit gold via a
             # forward citation edge from a HyDE-family anchor that lexical

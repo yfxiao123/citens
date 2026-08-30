@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # credit, single-record view free; the free plan includes $1/day =
     # 10000 credits. Default 9000 leaves headroom.
     openalex_daily_budget: int = 9000
+    # Serper.dev web-search key (Google SERP; free tier 2500 queries) —
+    # the primary engine of the web bridge channel
+    serper_api_key: str = ""
 
     # --- Access layer (declare what YOU can reach; empty = public web only) ---
     # HTTP(S) proxy used when fetching paywalled PDFs / landing pages (e.g. a
