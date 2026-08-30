@@ -52,7 +52,7 @@ PLANNED_DEPTH = 40  # planned-leg per-cell depth (fused top-20 is the answer)
 _ADAPTIVE_FAMILY_QUOTA = 30
 # query-generation cache version — bump when a generator prompt changes, so
 # frozen generations from an older prompt are not reused
-_GEN_CACHE_VER = 2
+_GEN_CACHE_VER = 3
 
 
 def _cached_queries(
@@ -228,10 +228,14 @@ def oa_title_filter(title: str) -> str:
     The relevance endpoint ranks full-text-ish matches; title.search is the
     dedicated title-index — for HyDE-generated titles it is precisely the
     near-exact-title matching shape that our dissection found to be the
-    only reliable lexical retrieval form. Informative words only (the
-    filter treats stopwords loosely but short tokens add noise)."""
+    only reliable lexical retrieval form. HARD TRUNCATION to 5 informative
+    words: title.search ANDs every term, and the 6-10-word conjunction of a
+    SYNTHETIC title returns count=0 (bench 153205: the whole channel came
+    back empty on 14/15 questions); the same gold probed at 4-5 words
+    returns the gold itself at rank 1. The front-loaded words of a
+    descriptive title are its concept core."""
     words = [w for w in re.findall(r"[A-Za-z0-9]+", title) if len(w) > 2]
-    return " ".join(words[:10])
+    return " ".join(words[:5])
 
 
 async def oa_title_search(
@@ -241,10 +245,16 @@ async def oa_title_search(
 
     Cached like search results; empty responses are NOT cached (a throttled
     provider must not poison retries). ``fetch`` is injectable for tests.
+    Skips entirely when the daily OpenAlex budget is spent — this channel is
+    an optional precision add-on, never worth burning core-search quota for.
     """
     import httpx
 
     from citens.config import settings
+    from citens.search.openalex import budget_exceeded, note_openalex_calls
+
+    if budget_exceeded():
+        return {}
 
     async def _default_fetch(filt: str) -> list[dict]:
         headers = {}
@@ -259,6 +269,7 @@ async def oa_title_search(
                     {"filter": f"title.search:{filt}", "per-page": per_page}
                 ),
             )
+            note_openalex_calls()
             if r.status_code != 200:
                 raise RuntimeError(f"openalex {r.status_code}")
             await asyncio.sleep(0.2)
@@ -467,18 +478,31 @@ async def run_agentic(query: str, sources: list[str] | None,
     and done must name the papers it found.
     """
     from citens.agents.planner import plan_queries
+    from citens.agents.hypothetical import hypothetical_queries
     from citens.harness import HarnessBudget, run_retrieval_harness
     from citens.harness.tools import HarnessState
 
     t0 = time.monotonic()
     plan = plan_queries(query, None)
-    papers, _h, stats = await search_round(plan.queries[:4], max_results=40,
+    # vocabulary pre-seeding (bench 153205: the agent coined only generic
+    # 2-word queries — "conversational models", "emotional support" — spent
+    # 20 steps reformulating, and 3/5 runs died on budget:steps before ever
+    # crossing the vocabulary wall). HyDE titles generated UP FRONT join the
+    # seed wave AND stay visible in the prompt as already-executed queries:
+    # the agent starts from title-shaped vocabulary instead of discovering
+    # it one reformulation at a time.
+    try:
+        hyde_qs = await asyncio.to_thread(hypothetical_queries, query)
+    except Exception:  # noqa: BLE001 — seeding is optional
+        hyde_qs = []
+    seed_qs = list(dict.fromkeys(plan.queries[:4] + hyde_qs[:3]))[:7]
+    papers, _h, stats = await search_round(seed_qs, max_results=40,
                                            sources=sources)
     state = HarnessState(
         topic=query,
         plan=plan,
         pool=list(papers),
-        keywords=list(plan.queries),
+        keywords=list(seed_qs),
         query_stats=dict(stats),
         sources=sources,
         max_results=40,
@@ -490,7 +514,7 @@ async def run_agentic(query: str, sources: list[str] | None,
     # one notch wider than the seed-42 16/18 that cut both misses off
     budget = HarnessBudget()
     if goal == "find":
-        budget = HarnessBudget(max_steps=20, max_llm_calls=22, max_search_calls=6)
+        budget = HarnessBudget(max_steps=24, max_llm_calls=24, max_search_calls=8)
     res = await run_retrieval_harness(state, bus=EventBus(), budget=budget)
     return {
         "pool": res.papers,
@@ -674,10 +698,12 @@ async def run_bench(
                     sources,
                 ),
             ]
-            # fifth family: OpenAlex's dedicated title index over the HyDE
-            # titles — title.search is the endpoint-shaped version of the
-            # only retrieval form our dissection found reliable
-            oa_title_cells = await oa_title_search(hyde_qs[:4])
+            # fifth family: OpenAlex's dedicated title index over the two
+            # best HyDE titles — title.search is the endpoint-shaped version
+            # of the only retrieval form our dissection found reliable.
+            # Capped at 2 probes/question: it is an OpenAlex-only channel
+            # and the premium quota is a shared daily budget.
+            oa_title_cells = await oa_title_search(hyde_qs[:2])
             if any(oa_title_cells.values()):
                 families.append(fuse_multi_query(
                     {f"[title] {t}": {"openalex": cs}
@@ -697,7 +723,35 @@ async def run_bench(
                     if k not in seen_keys:
                         seen_keys.add(k)
                         pool.append(p)
-            # sixth family: one-hop citation expansion from the pool's own
+            # sixth family: S2 recommendations from the pool's own head —
+            # the PRF idea upgraded into S2's internal SPECTER semantic
+            # space (deepsearch survey rec #3): lexical families vote with
+            # words, this one votes with embeddings we don't have. One
+            # cheap S2 call (S2 quota — NOT the OpenAlex daily budget).
+            if pool:
+                rec_dois = [p.doi for p in pool[:5] if p.doi]
+                try:
+                    from citens.search.snowball import (
+                        _s2_recommended,
+                        _s2_to_paper,
+                    )
+
+                    rec_items = (
+                        await _s2_recommended(rec_dois, limit=30)
+                        if rec_dois
+                        else []
+                    )
+                except Exception:  # noqa: BLE001 — optional channel
+                    rec_items = []
+                for item in rec_items:
+                    rec = _s2_to_paper(item, "s2-rec", (rec_dois[0] if rec_dois else "")[:30])
+                    if rec is None:
+                        continue
+                    k = _key_of(rec)
+                    if k not in seen_keys:
+                        seen_keys.add(k)
+                        pool.append(rec)
+            # seventh family: one-hop citation expansion from the pool's own
             # head — a live probe (seed 42) reached a never-hit gold via a
             # forward citation edge from a HyDE-family anchor that lexical
             # retrieval had placed correctly; the earlier all-zero verdict
@@ -725,13 +779,26 @@ async def run_bench(
                     if k not in seen2:
                         seen2.add(k)
                         pool.append(p)
+            # autopsy instrumentation (bench 153205 had none: a top-5 miss
+            # was indistinguishable between "gold never retrieved" and "gold
+            # retrieved then ranked out", which need OPPOSITE fixes)
+            gold_rank_pool = next(
+                (k for k, p in enumerate(pool) if match_gold(p, golds)), None
+            )
             det["adaptive"] = await asyncio.to_thread(
                 cascade_rank, query, pool, 50, True
+            )
+            gold_rank_final = next(
+                (k for k, p in enumerate(det["adaptive"]) if match_gold(p, golds)),
+                None,
             )
             detail_adaptive_queries = {
                 "hyde": hyde_qs,
                 "pivot": piv_qs,
                 **detail_adaptive_queries_extra,
+                "_gold_rank_pool": gold_rank_pool,
+                "_gold_rank_final": gold_rank_final,
+                "_pool_size": len(pool),
             }
         if rerank_t is not None:
             det["llm_rerank"] = await rerank_t
@@ -816,20 +883,24 @@ async def run_bench(
         # insertion-order metric stays in the record to show the gain
         raw = ag.get("pool_unranked") or []
         r5_raw = gold_hits(raw, golds, 5) if raw else r5
-        rec = {"pool_hit": round(hit / len(golds), 3), "pool_top5": round(r5, 3),
-               "pool_top5_raw": round(r5_raw, 3),
-               "pool_size": len(ag["pool"]), "queries": ag["queries"][:6],
-               "steps": ag["steps"], "llm_calls": ag["llm_calls"],
-               "search_calls": ag["search_calls"],
-               "finish_reason": ag["finish_reason"], "wall_s": ag["wall_s"]}
-        result.details[qi]["agentic"] = rec
-        _flush({"i": qi, "agentic": rec})
+        gold_pos_raw = next(
+            (k for k, p in enumerate(raw) if match_gold(p, golds)), None
+        )
+        arec = {"pool_hit": round(hit / len(golds), 3), "pool_top5": round(r5, 3),
+                "pool_top5_raw": round(r5_raw, 3),
+                "pool_size": len(ag["pool"]), "queries": ag["queries"][:6],
+                "gold_pos_raw": gold_pos_raw,
+                "steps": ag["steps"], "llm_calls": ag["llm_calls"],
+                "search_calls": ag["search_calls"],
+                "finish_reason": ag["finish_reason"], "wall_s": ag["wall_s"]}
+        result.details[qi]["agentic"] = arec
+        _flush({"i": qi, "agentic": arec})
         bucket = sums.setdefault("agentic", {"r5": 0.0, "r20": 0.0, "n": 0})
-        bucket["r5"] += rec["pool_top5"]
-        bucket["r20"] += rec["pool_hit"]
+        bucket["r5"] += arec["pool_top5"]
+        bucket["r20"] += arec["pool_hit"]
         bucket["n"] += 1
-        print(f"[agentic {qi + 1}] pool_hit={rec['pool_hit']:.0%} "
-              f"pool={rec['pool_size']} llm={rec['llm_calls']} {rec['wall_s']}s",
+        print(f"[agentic {qi + 1}] pool_hit={arec['pool_hit']:.0%} "
+              f"pool={arec['pool_size']} llm={arec['llm_calls']} {arec['wall_s']}s",
               flush=True)
 
     if detail_fh:

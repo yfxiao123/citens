@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     semantic_scholar_api_key: str = ""  # optional, raises rate limits
     openalex_email: str = ""  # optional, polite-pool
     openalex_api_key: str = ""  # premium key: 100k/day + higher rps (api_key param)
+    # Daily self-imposed cap on OpenAlex calls (persisted counter, survives
+    # process restarts so repeated bench runs share one budget). 0 = off.
+    # Default leaves headroom under the 10000/day premium cap; anonymous
+    # users hit OpenAlex's own 1000/day throttle first, so this is harmless.
+    openalex_daily_budget: int = 9000
 
     # --- Access layer (declare what YOU can reach; empty = public web only) ---
     # HTTP(S) proxy used when fetching paywalled PDFs / landing pages (e.g. a

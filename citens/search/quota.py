@@ -31,9 +31,16 @@ def _headers_of(resp_headers: httpx.Headers) -> dict[str, str]:
 
 
 async def probe_openalex(hc: httpx.AsyncClient) -> list[tuple[str, str]]:
+    from citens.search.openalex import usage_today
+
+    used, budget = usage_today()
     rows: list[tuple[str, str]] = [
         ("polite-mailto", "yes" if settings.openalex_email else "NO"),
         ("premium-api-key", "yes" if settings.openalex_api_key else "NO"),
+        (
+            "local-budget-today",
+            f"{used} used / {'unlimited' if budget <= 0 else budget} cap",
+        ),
     ]
     r = await hc.get(
         "https://api.openalex.org/works",

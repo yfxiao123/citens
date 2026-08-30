@@ -10,6 +10,8 @@ words in the abstract, not the title. ``relevance_score`` ordering (not the
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 
 import httpx
 
@@ -38,6 +40,7 @@ def resolve_source_ids(venue_names: list[str]) -> list[str]:
                     params={"filter": f"display_name.search:{name}", "per_page": 1},
                     timeout=20,
                 )
+                note_openalex_calls()
                 r.raise_for_status()
                 results = r.json().get("results") or []
                 hit = results[0].get("id", "") if results else ""
@@ -80,6 +83,7 @@ async def search_venue_restricted(
                     "sort": "cited_by_count:desc", "select": select,
                 }),
             )
+            note_openalex_calls()
             resp.raise_for_status()
             return [OpenAlexSearcher.to_paper(w) for w in resp.json().get("results", [])]
         except Exception:  # noqa: BLE001
@@ -132,6 +136,81 @@ def apply_api_key(params: dict) -> dict:
     return params
 
 
+# --- daily call budget -------------------------------------------------------
+# Premium keys are capped per DAY (bench 153205 measured an anonymous
+# 1000/day cap dying mid-run with SILENT empty responses; the premium tier
+# raises the cap but still burns out under repeated bench runs). Every
+# direct OpenAlex HTTP call site notes its calls here; the counter is
+# persisted to disk so repeated bench runs share ONE daily budget. When the
+# budget is exhausted, OPTIONAL channels (oa_title probes, snowball)
+# skip outright; the core search only warns — a degraded answer beats no
+# answer, and OpenAlex's own 429s already handle the anonymous tier.
+
+_BUDGET_WARNED: dict[str, bool] = {}
+
+
+def _usage_path() -> Path:
+    return Path(settings.cache_dir) / "openalex_usage.json"
+
+
+def _today() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def note_openalex_calls(n: int = 1) -> None:
+    """Record ``n`` OpenAlex HTTP calls against today's persisted budget."""
+    data: dict = {"date": _today(), "used": 0}
+    try:
+        path = _usage_path()
+        if path.exists():
+            stored = json.loads(path.read_text(encoding="utf-8"))
+            if stored.get("date") == _today():
+                data["used"] = int(stored.get("used", 0))
+        data["used"] += n
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except Exception:  # noqa: BLE001 — telemetry must never break retrieval
+        return
+    budget = settings.openalex_daily_budget
+    if budget <= 0:
+        return
+    used = data["used"]
+    for mark, msg in (
+        (0.8, f"[openalex] 80% of daily budget used ({used}/{budget})"),
+        (1.0, f"[openalex] DAILY BUDGET REACHED ({used}/{budget}) — "
+              "optional channels (oa-title, snowball) will skip"),
+    ):
+        key = str(mark)
+        if used >= budget * mark and not _BUDGET_WARNED.get(key):
+            _BUDGET_WARNED[key] = True
+            print(msg, flush=True)
+
+
+def budget_exceeded() -> bool:
+    """True when today's persisted usage has reached the configured budget."""
+    if settings.openalex_daily_budget <= 0:
+        return False
+    try:
+        stored = json.loads(_usage_path().read_text(encoding="utf-8"))
+        if stored.get("date") != _today():
+            return False
+        return int(stored.get("used", 0)) >= settings.openalex_daily_budget
+    except Exception:  # noqa: BLE001 — unreadable counter = no guard
+        return False
+
+
+def usage_today() -> tuple[int, int]:
+    """(used today, configured budget). Budget 0 = unlimited."""
+    try:
+        stored = json.loads(_usage_path().read_text(encoding="utf-8"))
+        used = int(stored.get("used", 0)) if stored.get("date") == _today() else 0
+    except Exception:  # noqa: BLE001
+        used = 0
+    return used, settings.openalex_daily_budget
+
+
 @register("openalex")
 class OpenAlexSearcher(SearchSource):
     name = "OpenAlex"
@@ -182,6 +261,7 @@ class OpenAlexSearcher(SearchSource):
             ),
         }
         resp = await client.get(self.BASE_URL, params=apply_api_key(params))
+        note_openalex_calls()
         resp.raise_for_status()
         papers = [self.to_paper(w) for w in resp.json().get("results", [])]
         for p in papers:

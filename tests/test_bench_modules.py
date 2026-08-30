@@ -383,8 +383,12 @@ def test_cached_queries_freezes_generation(tmp_path):
 def test_oa_title_filter_informative_words_only():
     from citens.eval.litsearch import oa_title_filter
 
+    # 5-word hard cap: title.search ANDs every term — bench 153205 showed a
+    # 6-10-word conjunction of a SYNTHETIC title returns count=0 (channel
+    # empty on 14/15 questions), while the gold probed at 4-5 words returns
+    # itself at rank 1
     f = oa_title_filter("MISC: A Mixed Strategy-Aware Model integrating COMET for")
-    assert f == "MISC Mixed Strategy Aware Model integrating COMET for"
+    assert f == "MISC Mixed Strategy Aware Model"
 
 
 def test_oa_title_search_caches_and_never_caches_failure(tmp_path, monkeypatch):
@@ -412,3 +416,46 @@ def test_oa_title_search_caches_and_never_caches_failure(tmp_path, monkeypatch):
     assert [p.title[:4] for p in papers2["Q One"]] == ["MTAG"]
     assert papers2["Q Two"] == []
     assert len(calls) == 3  # Q Two retried (not poisoned), Q One did not
+
+
+def test_openalex_budget_counter_persists_and_enforces(tmp_path, monkeypatch):
+    import asyncio
+
+    from citens.config import settings
+    from citens.eval import litsearch as ls
+    from citens.search import openalex as oa
+
+    monkeypatch.chdir(tmp_path)  # usage file lives under cwd's .cache
+    monkeypatch.setattr(settings, "openalex_daily_budget", 3)
+
+    oa.note_openalex_calls()
+    oa.note_openalex_calls(2)
+    used, budget = oa.usage_today()
+    assert (used, budget) == (3, 3)
+    assert oa.budget_exceeded() is True
+
+    # optional channels bow out entirely when the budget is spent
+    assert asyncio.run(ls.oa_title_search(["Q One"])) == {}
+
+    # date rollover resets the counter
+    monkeypatch.setattr(oa, "_today", lambda: "2000-01-01")
+    assert oa.budget_exceeded() is False
+
+
+def test_snowball_skips_when_budget_exhausted(tmp_path, monkeypatch):
+    import asyncio
+
+    from citens.config import settings
+    from citens.models import Paper
+    from citens.search import openalex as oa
+    from citens.search.snowball import snowball
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(settings, "openalex_daily_budget", 0)
+    assert oa.budget_exceeded() is False
+    # over budget -> no calls at all (a snowball wave is 5+ calls/anchor,
+    # exactly the shape that empties a quota)
+    monkeypatch.setattr(settings, "openalex_daily_budget", 1)
+    oa.note_openalex_calls()
+    assert oa.budget_exceeded() is True
+    assert asyncio.run(snowball([Paper(title="a", doi="10.1/x")], set())) == []

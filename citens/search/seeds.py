@@ -48,6 +48,9 @@ async def _resolve_one(title: str) -> Paper | None:
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(_OPENALEX_WORKS, params=params)
+            from citens.search.openalex import note_openalex_calls
+
+            note_openalex_calls()
             resp.raise_for_status()
             results = resp.json().get("results", [])
     except Exception:  # noqa: BLE001

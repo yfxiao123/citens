@@ -26,7 +26,7 @@ import httpx
 from citens.config import settings
 from citens.models import Paper
 from citens.search.crossref import fetch_abstract_by_doi
-from citens.search.openalex import OpenAlexSearcher
+from citens.search.openalex import OpenAlexSearcher, note_openalex_calls
 
 # S2 authenticated tier: 1 rps shared across ALL endpoints. Enrichment runs
 # after the search stage (no overlap with the async search throttle), so a
@@ -41,6 +41,7 @@ def _openalex_by_doi(doi: str) -> str:
     try:
         with httpx.Client(timeout=20, headers={"User-Agent": "CiteLens/0.1"}) as client:
             r = client.get(f"https://api.openalex.org/works/https://doi.org/{doi}")
+            note_openalex_calls()
             if r.status_code != 200:
                 return ""
             return OpenAlexSearcher.decode_abstract(r.json().get("abstract_inverted_index"))

@@ -70,10 +70,13 @@ def listwise_rank(
 
 
 _POINTWISE_SYS = """You score retrieval candidates for a literature-search \
-question. Reply ONLY JSON: {"scores": [int, ...]} — one score 0-10 per \
-candidate, same order as listed. 10 = definitely a paper answering the \
-question; 5 = topically related; 0 = unrelated. Judge each candidate \
-independently."""
+question. The question usually describes ONE specific paper (or a very \
+narrow set): some study that performs/answers exactly what the question \
+asks. Reply ONLY JSON: {"scores": [int, ...]} — one score 0-10 per \
+candidate, same order as listed. 10 = this candidate plausibly IS that \
+paper (same task/system/finding); 7-9 = strongly likely; 4-6 = topically \
+related but not the specific paper; 0-3 = unrelated. Judge each candidate \
+independently; abstracts are truncated."""
 
 
 def _pointwise_scores(
@@ -91,7 +94,9 @@ def _pointwise_scores(
 
     def _score(chunk: list[Paper]) -> list[int] | None:
         listing = "\n".join(
-            f"{i}. {p.title} ({p.year or '?'})" for i, p in enumerate(chunk)
+            f"{i}. {p.title} ({p.year or '?'}) — "
+            f"{(p.abstract or '').replace(chr(10), ' ')[:140]}"
+            for i, p in enumerate(chunk)
         )
         try:
             raw = llm.chat(

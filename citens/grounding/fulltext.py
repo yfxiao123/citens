@@ -26,6 +26,7 @@ from citens import cache
 from citens.config import settings
 from citens.models import Paper
 from citens.net import rewrite_url, sync_client
+from citens.search.openalex import note_openalex_calls
 
 _ARXIV_ID_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5}|[a-z\-]+/\.[0-9]+)", re.IGNORECASE)
 # arXiv's own DOI namespace: 10.48550/arXiv.<id> — the ONLY place some
@@ -270,6 +271,7 @@ def _openalex_pdf_urls(doi: str) -> list[str]:
     try:
         with sync_client(timeout=12, headers=_HEADERS) as client:
             r = client.get(f"https://api.openalex.org/works/doi:{doi}")
+            note_openalex_calls()
             r.raise_for_status()
             urls = [
                 (loc.get("pdf_url") or "").strip()

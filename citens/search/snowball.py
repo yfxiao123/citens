@@ -30,6 +30,7 @@ import httpx
 from citens import cache
 from citens.config import settings
 from citens.models import Paper
+from citens.search.openalex import note_openalex_calls
 
 _OPENALEX_WORKS = "https://api.openalex.org/works"
 _S2_GRAPH = "https://api.semanticscholar.org/graph/v1/paper"
@@ -62,6 +63,7 @@ async def _openalex_work_id(doi: str) -> str | None:
                 f"{_OPENALEX_WORKS}/https://doi.org/{doi}",
                 params={"select": "id", **_polite_params()},
             )
+            note_openalex_calls()
             if resp.status_code != 200:
                 return None
             return resp.json().get("id")
@@ -87,6 +89,7 @@ async def _openalex_cited_by(doi: str, limit: int = 10) -> list[dict]:
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(_OPENALEX_WORKS, params=params)
+            note_openalex_calls()
             resp.raise_for_status()
             return resp.json().get("results", [])
     except Exception:  # noqa: BLE001
@@ -104,6 +107,7 @@ async def _openalex_references(doi: str, limit: int = 10) -> list[dict]:
                 f"{_OPENALEX_WORKS}/https://doi.org/{doi}",
                 params={"select": "referenced_works", **_polite_params()},
             )
+            note_openalex_calls()
             resp.raise_for_status()
             ref_ids = (resp.json().get("referenced_works") or [])[:limit]
             if not ref_ids:
@@ -120,6 +124,7 @@ async def _openalex_references(doi: str, limit: int = 10) -> list[dict]:
                     **_polite_params(),
                 },
             )
+            note_openalex_calls()
             resp2.raise_for_status()
             return resp2.json().get("results", [])
     except Exception:  # noqa: BLE001
@@ -142,6 +147,7 @@ async def _openalex_related(doi: str, limit: int = 10) -> list[dict]:
                 f"{_OPENALEX_WORKS}/https://doi.org/{doi}",
                 params={"select": "related_works", **_polite_params()},
             )
+            note_openalex_calls()
             resp.raise_for_status()
             raw = resp.json().get("related_works") or []
             # full URLs -> bare W-ids for the batch filter
@@ -158,6 +164,7 @@ async def _openalex_related(doi: str, limit: int = 10) -> list[dict]:
                     **_polite_params(),
                 },
             )
+            note_openalex_calls()
             resp2.raise_for_status()
             return resp2.json().get("results", [])
     except Exception:  # noqa: BLE001
@@ -341,6 +348,14 @@ async def snowball(
         then citations desc; citation-only order when no terms given)
     """
     if not seed_papers:
+        return []
+    # optional channel: when the daily OpenAlex budget is spent, snowball
+    # bows out entirely instead of burning the last calls (a snowball wave
+    # is 5+ calls per anchor — exactly the shape that empties a quota)
+    from citens.search.openalex import budget_exceeded
+
+    if budget_exceeded():
+        print("[snowball] skipped: OpenAlex daily budget reached", flush=True)
         return []
 
     import re as _re

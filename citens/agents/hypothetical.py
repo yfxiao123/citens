@@ -34,8 +34,11 @@ the question (venue-style, capitalized, 4-14 words).
 question's core concepts exactly as a paper would phrase them, and (b) if a \
 specific task, benchmark, or method name is plausibly involved, a title \
 containing that name verbatim.
-3. Do NOT hedge or explain; titles only. No question marks.
-4. Reply ONLY JSON: {"titles": ["...", ...]}."""
+3. At least ONE title must be SHORT (4-6 words): search engines AND the \
+terms together, so a short title still matches while a long one matches \
+nothing.
+4. Do NOT hedge or explain; titles only. No question marks.
+5. Reply ONLY JSON: {"titles": ["...", ...]}."""
 
 
 def hypothetical_queries(question: str, k: int = 6) -> list[str]:
