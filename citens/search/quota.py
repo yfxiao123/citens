@@ -31,7 +31,10 @@ def _headers_of(resp_headers: httpx.Headers) -> dict[str, str]:
 
 
 async def probe_openalex(hc: httpx.AsyncClient) -> list[tuple[str, str]]:
-    rows: list[tuple[str, str]] = [("polite-mailto", "yes" if settings.openalex_email else "NO")]
+    rows: list[tuple[str, str]] = [
+        ("polite-mailto", "yes" if settings.openalex_email else "NO"),
+        ("premium-api-key", "yes" if settings.openalex_api_key else "NO"),
+    ]
     r = await hc.get(
         "https://api.openalex.org/works",
         params={"per-page": 1, "search": "test"},

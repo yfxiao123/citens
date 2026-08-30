@@ -195,7 +195,20 @@ def _shared_author(a: Paper, b: Paper) -> bool:
     """
 
     def surnames(names: list[str]) -> set[str]:
-        return {n.split()[-1].lower() for n in names if n.split()}
+        out: set[str] = set()
+        for n in names:
+            n = n.strip()
+            if not n:
+                continue
+            # "Cai, H" (repository house style) and "Han Cai" (OpenAlex)
+            # must both yield "cai" — bench run 2026-08-30: a UCL-record
+            # duplicate survived dedup because only "Firstname Lastname"
+            # was understood
+            if "," in n:
+                out.add(n.split(",", 1)[0].strip().lower())
+            else:
+                out.add(n.split()[-1].lower())
+        return out
 
     return bool(surnames(a.authors) & surnames(b.authors))
 

@@ -75,8 +75,10 @@ async def search_venue_restricted(
         try:
             resp = await client.get(
                 OpenAlexSearcher.BASE_URL,
-                params={"filter": flt, "per_page": min(per_query, 25),
-                        "sort": "cited_by_count:desc", "select": select},
+                params=apply_api_key({
+                    "filter": flt, "per_page": min(per_query, 25),
+                    "sort": "cited_by_count:desc", "select": select,
+                }),
             )
             resp.raise_for_status()
             return [OpenAlexSearcher.to_paper(w) for w in resp.json().get("results", [])]
@@ -119,6 +121,15 @@ def best_venue(work: dict) -> str:
     # no formal venue recorded: keep the preprint host as the source
     src = ((work.get("primary_location") or {}).get("source") or {})
     return (src.get("display_name") or "").strip() or "OpenAlex"
+
+
+def apply_api_key(params: dict) -> dict:
+    """Attach the premium api_key when configured (100k/day, higher rps);
+    without it OpenAlex is the 1000-req/day anonymous pool that dies by
+    mid-morning on any bench-heavy day."""
+    if settings.openalex_api_key:
+        params = {**params, "api_key": settings.openalex_api_key}
+    return params
 
 
 @register("openalex")
@@ -170,7 +181,7 @@ class OpenAlexSearcher(SearchSource):
                 "topics,keywords,biblio"
             ),
         }
-        resp = await client.get(self.BASE_URL, params=params)
+        resp = await client.get(self.BASE_URL, params=apply_api_key(params))
         resp.raise_for_status()
         papers = [self.to_paper(w) for w in resp.json().get("results", [])]
         for p in papers:

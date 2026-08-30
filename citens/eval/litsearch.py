@@ -250,10 +250,14 @@ async def oa_title_search(
         headers = {}
         if settings.openalex_email:
             headers["User-Agent"] = f"mailto:{settings.openalex_email}"
+        from citens.search.openalex import apply_api_key
+
         async with httpx.AsyncClient(timeout=25, headers=headers) as hc:
             r = await hc.get(
                 "https://api.openalex.org/works",
-                params={"filter": f"title.search:{filt}", "per-page": per_page},
+                params=apply_api_key(
+                    {"filter": f"title.search:{filt}", "per-page": per_page}
+                ),
             )
             if r.status_code != 200:
                 raise RuntimeError(f"openalex {r.status_code}")

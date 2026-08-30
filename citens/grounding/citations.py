@@ -69,7 +69,7 @@ def _format_label(p: Paper) -> str:
         entry += f", {pages}"
     if p.doi:
         entry += f". https://doi.org/{p.doi}"
-    elif p.url:
+    elif p.url and "openalex.org" not in p.url:
         entry += f". {p.url}"
     return entry
 
@@ -137,7 +137,12 @@ class CitationTable:
             ]
             if p.doi:
                 fields.append(("doi", _bib_escape(p.doi)))
-            if p.url:
+            # aggregator-internal links (openalex.org/W...) are useless to a
+            # reader and pollute Zotero imports — only a landing page the
+            # paper's provider serves (arxiv.org, doi.org, publisher) earns
+            # a url field (bench audit 2026-08-30: 41-entry bib littered
+            # with OpenAlex work ids)
+            if p.url and "openalex.org" not in p.url:
                 fields.append(("url", _bib_escape(p.url)))
             if p.volume:
                 fields.append(("volume", _bib_escape(p.volume)))
@@ -178,7 +183,7 @@ class CitationTable:
                     lines.append(f"EP  - {_bib_escape(last)}")
             if p.doi:
                 lines.append(f"DO  - {_bib_escape(p.doi)}")
-            if p.url:
+            if p.url and "openalex.org" not in p.url:
                 lines.append(f"UR  - {_bib_escape(p.url)}")
             lines.append("ER  - ")
             blocks.append("\n".join(lines))

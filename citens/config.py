@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     search_sources: str = "arxiv,semantic_scholar,openalex,crossref"
     semantic_scholar_api_key: str = ""  # optional, raises rate limits
     openalex_email: str = ""  # optional, polite-pool
+    openalex_api_key: str = ""  # premium key: 100k/day + higher rps (api_key param)
 
     # --- Access layer (declare what YOU can reach; empty = public web only) ---
     # HTTP(S) proxy used when fetching paywalled PDFs / landing pages (e.g. a

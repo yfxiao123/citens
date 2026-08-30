@@ -236,8 +236,11 @@ def _anchor_works(queries: list[str], per_query: int = 8) -> list[dict]:
 
     from citens import net
     from citens.config import settings
+    from citens.search.openalex import apply_api_key
 
-    params: dict[str, Any] = {"per-page": per_query, "sort": "cited_by_count:desc"}
+    params: dict[str, Any] = apply_api_key({
+        "per-page": per_query, "sort": "cited_by_count:desc"
+    })
     if settings.openalex_email:
         params["mailto"] = settings.openalex_email
     out: list[dict] = []

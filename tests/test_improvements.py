@@ -310,3 +310,22 @@ def test_arxiv_title_lookup_parses_atom(monkeypatch):
         url="https://example.com/whatever",
     )
     assert ft._arxiv_pdf_url(paper) == "https://arxiv.org/pdf/2301.12345.pdf"
+
+
+def test_dedup_merges_surname_first_author_format():
+    """Bench run 2026-08-30: a UCL-repository record ("Cai, H") of a paper
+    whose OpenAlex record says "Han Cai" survived dedup — the same study
+    occupied two reference slots ([3]/[6]) in the final review."""
+    a = Paper(
+        title="Real-Time Bidding by Reinforcement Learning in Display Advertising",
+        authors=["Han Cai", "Kan Ren", "Weinan Zhang"],
+        doi="10.1145/3018661.3018702", citation_count=90,
+    )
+    b = Paper(
+        title="Real-Time Bidding by Reinforcement Learning in Display Advertising",
+        authors=["Cai, H", "Ren, K", "Zhang, W"],  # surname-first, initials
+        doi=None, citation_count=12,
+    )
+    out = deduplicate([a, b])
+    assert len(out) == 1
+    assert out[0].doi == "10.1145/3018661.3018702"  # DOI-carrying record wins

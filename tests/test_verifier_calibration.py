@@ -306,3 +306,41 @@ def test_reasoning_effort_levels_map_to_payload():
     assert none_off.get("extra_body") == {"reasoning_effort": "none"}
     default = build_completion_kwargs("m", thinking=True, **kw)
     assert "extra_body" not in default
+
+
+def test_align_near_duplicates_downgrades_conflicting_twins():
+    """Audit 2026-08-30: one DCMAB restatement "supported", its near-duplicate
+    twin "unsupported" — judge noise presented as a hard failure."""
+    from citens.agents.verifier import Verdict, VerificationResult, _align_near_duplicates
+    from citens.models import Claim
+
+    twins = [
+        VerificationResult(
+            claim_text="[4]提出了分布式协调多代理出价方法，实验显示其整体目标优于基线",
+            verdict=Verdict.SUPPORTED, citation_indices=[4],
+        ),
+        VerificationResult(
+            claim_text="[4]提出了分布式协调多代理出价方法，实验显示整体目标优于基线方法",
+            verdict=Verdict.UNSUPPORTED, citation_indices=[4],
+        ),
+        VerificationResult(  # different citations — must NOT be grouped
+            claim_text="[4]提出了分布式协调多代理出价方法，实验显示整体目标优于基线方法",
+            verdict=Verdict.SUPPORTED, citation_indices=[5],
+        ),
+        VerificationResult(  # contradictory stays untouched even in a twin group
+            claim_text="[4]提出了分布式协调多代理出价方法，实验显示整体目标优于基线",
+            verdict=Verdict.CONTRADICTORY, citation_indices=[4],
+        ),
+    ]
+    claims = [Claim(text=r.claim_text, citation_indices=r.citation_indices,
+                    section="s") for r in twins]
+    out = _align_near_duplicates(twins, claims)
+    by_text = {r.claim_text[:12]: r for r in out}
+    aligned = [r for r in out if "aligned" in (r.note or "")]
+    assert len(aligned) == 2  # the two same-citation twins aligned...
+    assert all(r.verdict == Verdict.PARTIAL for r in aligned)
+    # the different-citation claim keeps its supported verdict untouched
+    lone = [r for r in out if r not in aligned and r.verdict == Verdict.SUPPORTED]
+    assert len(lone) == 1
+    # contradictory verdicts are never aligned away
+    assert any(r.verdict == Verdict.CONTRADICTORY for r in out)

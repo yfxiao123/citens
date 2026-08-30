@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed — third-party audit findings (2026-08-30 RL+ads run)
+- **Same-paper duplicates in references**: a UCL-repository record
+  ("Cai, H" surname-first house style) of a paper whose OpenAlex record
+  says "Han Cai" survived dedup — the study occupied two reference slots
+  ([3]/[6]) in the final review. `_shared_author` now understands the
+  "Surname, I" form; re-running the audit run's own pool through fixed
+  dedup merges 24 → 22.
+- **Verifier same-round consistency**: near-duplicate claims citing the
+  same sources were judged in different batches and could disagree (one
+  DCMAB restatement "supported", its twin "unsupported"). Conflicting
+  twins now align to PARTIAL with a note — conservative, never hides a
+  contradiction, no longer presents judge noise as hard failures.
+- **Bib/RIS/text-reference URL hygiene**: openalex.org/W... aggregator
+  work ids no longer exported (doi/arxiv/publisher landing pages still
+  are) — Zotero imports were polluted.
+- **OpenAlex premium api_key** (`OPENALEX_API_KEY`): wired into every
+  OpenAlex call site (search, venue-restricted, anchors, bench title
+  channel, quota probe). Anonymous pool is 1000 req/day (dies mid-run);
+  the key lifts it to 10,000/day — verified live. Console header now
+  shows the running version chip.
+
 ### Added — run cancellation (v1.4.1)
 - **`POST /run/cancel/{id}` + console stop button**: cooperative
   cancellation — the pipeline stops at its next event boundary (a

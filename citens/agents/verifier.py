@@ -348,6 +348,15 @@ def verify_claims(
 
     results = [r for r in placed if r is not None]
 
+    # Same-round consistency: near-duplicate claims citing the same sources
+    # were judged in DIFFERENT batches and can disagree (bench audit
+    # 2026-08-30: one DCMAB restatement "supported", its twin "unsupported"
+    # — judge noise, not evidence). Align disagreeing groups to PARTIAL:
+    # conservative (never hides a contradiction or invents support), and no
+    # longer misleads the user into seeing hard failures that are phrasing
+    # duplicates.
+    results = _align_near_duplicates(results, claims)
+
     # feed the fuzzy store from EVERY verdict (fresh, cached, reused) keyed
     # by claim slot — claims[slot] is the text/citations pair that produced it
     if verdict_fuzzy is not None:
@@ -369,6 +378,65 @@ def verify_claims(
     else:
         precision = 0.0
     return results, precision
+
+
+def _align_near_duplicates(
+    results: list[VerificationResult], claims: list[Claim]
+) -> list[VerificationResult]:
+    """Downgrade conflicting verdicts among near-duplicate claims to partial.
+
+    Two claims with token-similarity >= 0.85 and the SAME citation set are
+    the same statement phrased twice; independent batch judgments of such
+    twins can disagree. "supported" vs "partial" disagreement also aligns
+    (same rationale), while anything involving contradictory stays as-is —
+    a real conflict must stay visible.
+    """
+    import re
+    from difflib import SequenceMatcher
+
+    verifiable = [
+        (i, r) for i, r in enumerate(results)
+        if r.verdict != Verdict.UNVERIFIABLE and r.verdict != Verdict.CONTRADICTORY
+    ]
+
+    def _norm(s: str) -> str:
+        return " ".join(sorted(t for t in re.split(r"\W+", s.lower()) if t))
+
+    normed = [(i, _norm(results[i].claim_text)) for i, _ in verifiable]
+    assigned: dict[int, int] = {}  # result idx -> group id
+    groups: dict[int, list[int]] = {}
+    gid = 0
+    for a in range(len(verifiable)):
+        ia, ta = normed[a]
+        if ia in assigned:
+            continue
+        assigned[ia] = gid
+        members = [ia]
+        for b in range(a + 1, len(verifiable)):
+            ib, tb = normed[b]
+            if ib in assigned:
+                continue
+            if results[ia].citation_indices == results[ib].citation_indices and (
+                SequenceMatcher(None, ta, tb).ratio() >= 0.85
+            ):
+                assigned[ib] = gid
+                members.append(ib)
+        groups[gid] = members
+        gid += 1
+
+    for members in groups.values():
+        verdicts = {results[i].verdict for i in members}
+        if len(verdicts) < 2 or Verdict.CONTRADICTORY in verdicts:
+            continue
+        for i in members:
+            r = results[i]
+            if r.verdict != Verdict.PARTIAL:
+                results[i] = r.model_copy(update={
+                    "verdict": Verdict.PARTIAL,
+                    "note": (r.note + " [aligned: a near-duplicate restatement "
+                             "received a different verdict]").strip(),
+                })
+    return results
 
 
 SPOT_CHECK_PROMPT = """You are a STRICT citation auditor doing a second pass. A previous verifier \

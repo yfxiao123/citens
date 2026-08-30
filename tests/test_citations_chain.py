@@ -119,3 +119,24 @@ class TestProvenance:
         claims = parse_claims_from_review(REVIEW)
         prov = build_provenance(claims, table)
         assert all("verdict" not in e for e in prov)
+
+
+def test_bibtex_and_ris_exclude_aggregator_urls():
+    """Audit 2026-08-30: the bib was littered with openalex.org/W... work
+    ids — useless to readers, noisy in Zotero imports."""
+    from citens.grounding.citations import CitationTable
+    from citens.models import Paper
+
+    p = Paper(
+        title="T", authors=["A"], year=2024,
+        doi="10.1/x", url="https://openalex.org/W2562337727",
+    )
+    bib = CitationTable(papers=[p]).to_bibtex()
+    ris = CitationTable(papers=[p]).to_ris()
+    assert "openalex.org" not in bib
+    assert "doi" in bib
+    assert "UR  - " not in ris
+    # a real landing page still earns the url field
+    p2 = Paper(title="T2", authors=["A"], year=2024,
+               url="https://arxiv.org/abs/2005.11401")
+    assert "arxiv.org" in CitationTable(papers=[p2]).to_bibtex()
