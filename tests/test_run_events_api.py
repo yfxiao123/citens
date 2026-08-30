@@ -11,6 +11,7 @@ keeps the dict bounded.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -128,3 +129,48 @@ def test_buffer_gc_bounded(client, monkeypatch):
     assert client.get(f"/run/events/{ids[0]}").status_code == 404
     assert client.get(f"/run/events/{ids[-1]}").status_code == 200
     assert len(app_mod._RUN_BUFFERS) <= 2
+
+
+def test_cancel_stops_run_and_marks_done(client, monkeypatch):
+    """The cancel contract: cancel flips the flag; the pipeline's next event
+    emission raises, and the log closes with a visible cancelled RunFailed —
+    never a silent hang (the v1.3.3 exe's failure mode)."""
+    started = threading.Event()
+
+    def endless_pipeline(topic, options, bus=None):
+        bus.emit(RunStarted(topic=topic))
+        started.set()
+        for _ in range(200):  # a long stage: no events for a while
+            time.sleep(0.05)
+        bus.emit(RunCompleted(run_dir="runs/x", summary={}))
+
+    monkeypatch.setattr(app_mod, "run_pipeline_async", endless_pipeline)
+    run_id = client.post("/run/start", json={"topic": "长任务"}).json()["run_id"]
+    assert started.wait(timeout=5)
+
+    r = client.post(f"/run/cancel/{run_id}")
+    assert r.status_code == 200 and r.json()["cancelled"] is True
+
+    # cooperative: lands at the NEXT event boundary (the fake's next emit)
+    j = client.get(f"/run/events/{run_id}").json()
+    for _ in range(400):
+        j = client.get(f"/run/events/{run_id}").json()
+        if j["done"]:
+            break
+        time.sleep(0.05)
+    assert j["done"] is True
+    assert j["error"] == "已被用户中断 / cancelled"
+    # RunStarted is still in the log (the cancel only ends future stages)
+    assert j["events"][0]["event"]["type"] == "RunStarted"
+
+
+def test_cancel_unknown_run_404_and_finished_run_noop(client, monkeypatch):
+    assert client.post("/run/cancel/deadbeef0000").status_code == 404
+    monkeypatch.setattr(app_mod, "run_pipeline_async", _fake_pipeline([RunCompleted()]))
+    run_id = client.post("/run/start", json={"topic": "秒完"}).json()["run_id"]
+    for _ in range(50):
+        if client.get(f"/run/events/{run_id}").json()["done"]:
+            break
+        time.sleep(0.05)
+    r = client.post(f"/run/cancel/{run_id}").json()
+    assert r["cancelled"] is False and "finished" in r["reason"]

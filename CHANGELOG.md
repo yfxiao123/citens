@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — run cancellation (v1.4.1)
+- **`POST /run/cancel/{id}` + console stop button**: cooperative
+  cancellation — the pipeline stops at its next event boundary (a
+  blocking LLM/search call adds its own latency), the log closes with a
+  visible "已被用户中断" RunFailed, never a silent hang. The raiser is a
+  BaseException on purpose so pipeline internals cannot swallow it.
+- **Version in the exe filename** (`CiteLens-1.4.1.exe`, unversioned
+  `CiteLens.exe` kept for the stable `releases/latest` link) and the
+  console header shows the running version — the v1.4.0 exe shipped
+  reporting "1.3.3" (frozen-fallback string was never bumped) and was
+  indistinguishable on disk; retracted and re-released as v1.4.1.
+
 ### Added — external benchmarks (quality yardsticks beyond internal metrics)
 - **`citens bench` — LitSearch live-retrieval bench**: samples real
   literature-search questions (Princeton NLP, EMNLP 2024; data snapshot in

@@ -348,6 +348,10 @@ class _QueueBus(EventBus):
 # --- polling event log (the UI's transport; survives stream-buffering) --------
 
 
+class _RunCancelled(BaseException):
+    """Raised at an event boundary when the user cancelled the run."""
+
+
 class _RunBuffer:
     """In-memory append-only event log for one UI-started run.
 
@@ -362,6 +366,7 @@ class _RunBuffer:
         self.done = False
         self.error: str | None = None
         self.created = time.time()
+        self.cancel = threading.Event()
 
     def append(self, event: Event) -> None:
         with self._lock:
@@ -440,9 +445,23 @@ async def run_start(req: RunRequest) -> dict:
             oldest = min(_RUN_BUFFERS, key=lambda k: _RUN_BUFFERS[k].created)
             del _RUN_BUFFERS[oldest]
 
+    class _CancellingBus(_QueueBus):
+        """Cooperative cancellation: the pipeline emits events at every
+        stage boundary, so raising on an emit at cancel time stops the run
+        within one stage (a blocking LLM/search call adds its own latency
+        on top — cancellation is prompt, not instant). BaseException on
+        purpose: pipeline internals must not swallow it."""
+
+        def emit(self, event: Event) -> None:
+            if buf.cancel.is_set():
+                raise _RunCancelled()
+            super().emit(event)
+
     def run_in_thread() -> None:
         try:
-            asyncio.run(run_pipeline_async(req.topic, options, _QueueBus(buf.append)))
+            asyncio.run(run_pipeline_async(req.topic, options, _CancellingBus(buf.append)))
+        except _RunCancelled:
+            buf.append(RunFailed(message="已被用户中断 / cancelled", step="run"))
         except Exception as e:  # noqa: BLE001 - the log must always close
             buf.append(RunFailed(message=str(e), step="pipeline"))
         except BaseException as e:  # noqa: BLE001 - SystemExit must not hang the UI
@@ -456,6 +475,19 @@ async def run_start(req: RunRequest) -> dict:
 
     threading.Thread(target=run_in_thread, daemon=True, name=f"run-{key}").start()
     return {"run_id": key}
+
+
+@app.post("/run/cancel/{key}", dependencies=[Depends(_require_token)])
+def run_cancel(key: str) -> dict:
+    """Cooperatively cancel a UI-started run at its next stage boundary."""
+    with _RUN_BUFFERS_LOCK:
+        buf = _RUN_BUFFERS.get(key)
+    if buf is None:
+        raise HTTPException(404, "unknown or expired run id")
+    if buf.done:
+        return {"cancelled": False, "reason": "already finished"}
+    buf.cancel.set()
+    return {"cancelled": True}
 
 
 @app.get("/run/events/{key}", dependencies=[Depends(_require_token)])

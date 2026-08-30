@@ -57,6 +57,12 @@
   button.primary:hover:not(:disabled) { filter: brightness(1.12); }
   button.primary:active:not(:disabled) { transform: translateY(1px); }
   button.primary:disabled { opacity: .45; cursor: wait; }
+  #stop {
+    margin-top: 8px; width: 100%; padding: 7px; border-radius: 6px;
+    background: none; border: 1px solid var(--err); color: var(--err);
+    font-size: 12.5px; font-weight: 600; cursor: pointer;
+  }
+  #stop:hover { background: rgba(248, 81, 73, .12); }
 
   #history { flex: 1; overflow-y: auto; margin-top: 14px; }
   #history .run {
@@ -224,6 +230,7 @@
       <option value="0">仅摘要（更快）</option>
     </select>
     <button class="primary" id="go">▶ 生成综述 / RUN</button>
+    <button id="stop" hidden>■ 中断运行 / CANCEL</button>
     <div id="history"></div>
   </section>
 
@@ -289,7 +296,7 @@ function showJumpLatest() {
 
 /* ---------- header chips ---------- */
 fetch("/health").then(r => r.json()).then(h => {
-  $("chip-model").innerHTML = `model <b>${h.llm_model}</b>`;
+  $("chip-model").innerHTML = `model <b>${h.llm_model}</b>` + (h.version ? ` · v${h.version}` : "");
   $("chip-sjr").innerHTML = h.sjr_data ? `SJR <b>loaded</b>` : `SJR <b>absent</b>`;
   const wd = $("chip-workdir");
   wd.textContent = "📁 " + (h.workdir || "");
@@ -368,7 +375,7 @@ async function run() {
   const topic = $("topic").value.trim();
   if (!topic) { alert("请输入研究主题"); return; }
   state.running = true; state.t0 = Date.now();
-  $("go").disabled = true;
+  $("go").disabled = true; $("stop").hidden = false;
   $("feed").innerHTML = ""; llmCount = 0; feedStick = true; pendingUnseen = 0;
   $("llm-count").textContent = "0 次调用";
   setNow("启动管线…", false);
@@ -441,7 +448,7 @@ async function pollEvents(id, after) {
 
 function finishRunUI() {
   state.running = false; state.runKey = null;
-  $("go").disabled = false; stopTimer();
+  $("go").disabled = false; $("stop").hidden = true; stopTimer();
   history.replaceState(null, "", location.pathname + location.search);
   localStorage.removeItem(ACTIVE_RUN_KEY);
   loadHistory();
@@ -477,7 +484,7 @@ async function resumeActiveRun() {
     return;
   }
   state.running = true; state.t0 = t0 || Date.now(); state.runKey = id;
-  $("go").disabled = true;
+  $("go").disabled = true; $("stop").hidden = false;
   $("viewer").innerHTML = '<div class="placeholder">运行中 · running…</div>';
   startTimer();
   let finished = false, cursor = 0;
@@ -714,6 +721,20 @@ document.querySelectorAll("#tabs button").forEach(btn => {
 });
 
 $("go").addEventListener("click", run);
+$("stop").addEventListener("click", async () => {
+  const key = state.runKey;
+  if (!key) return;
+  if (!confirm("中断当前综述运行？/ cancel this run?")) return;
+  $("stop").disabled = true;
+  try {
+    await fetch(`/run/cancel/${encodeURIComponent(key)}`, { method: "POST" });
+    setNow("中断中… 等当前阶段收尾", true);
+  } catch (e) {
+    setNow(`中断请求失败: ${e.message}`, true);
+  } finally {
+    $("stop").disabled = false;
+  }
+});
 $("topic").addEventListener("keydown", e => { if (e.key === "Enter") run(); });
 
 /* ---------- app exit (the windowed exe has no console to close) ---------- */
@@ -834,7 +855,7 @@ $("shutdown").addEventListener("click", async (ev) => {
       })).json();
       if (j.applied) {
         fetch("/health").then(r => r.json()).then(h =>
-          $("chip-model").innerHTML = `model <b>${h.llm_model}</b>`).catch(() => {});
+          $("chip-model").innerHTML = `model <b>${h.llm_model}</b>` + (h.version ? ` · v${h.version}` : "")).catch(() => {});
       }
       const r = $("settings-test-result"); r.className = "ok-text";
       r.textContent = "已保存: " + j.applied.join(", ") +

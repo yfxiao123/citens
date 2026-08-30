@@ -7,6 +7,6 @@ try:  # installed package metadata tracks pyproject (the release version)
 
     __version__ = version("citens")
 except PackageNotFoundError:  # frozen/source-tree fallback
-    __version__ = "1.3.3"
+    __version__ = "1.4.1"
 
 __all__ = ["__version__"]
