@@ -53,6 +53,15 @@ def _polite_params() -> dict:
     return {}
 
 
+def _keyed(params: dict) -> dict:
+    """api_key + polite params. Unkeyed requests land in OpenAlex's
+    anonymous pool whose 1000/day cap dies mid-morning — the snowball then
+    silently returns nothing while the keyed pool still has budget."""
+    from citens.search.openalex import apply_api_key
+
+    return apply_api_key(params)
+
+
 async def _openalex_work_id(doi: str) -> str | None:
     """Resolve a DOI to its OpenAlex ID (needed for the cites: filter)."""
     if not doi:
@@ -61,9 +70,9 @@ async def _openalex_work_id(doi: str) -> str | None:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
                 f"{_OPENALEX_WORKS}/https://doi.org/{doi}",
-                params={"select": "id", **_polite_params()},
+                params=_keyed({"select": "id", **_polite_params()}),
             )
-            note_openalex_calls()
+            note_openalex_calls(0)  # single-record view: free
             if resp.status_code != 200:
                 return None
             return resp.json().get("id")
@@ -88,7 +97,7 @@ async def _openalex_cited_by(doi: str, limit: int = 10) -> list[dict]:
     }
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(_OPENALEX_WORKS, params=params)
+            resp = await client.get(_OPENALEX_WORKS, params=_keyed(params))
             note_openalex_calls()
             resp.raise_for_status()
             return resp.json().get("results", [])
@@ -105,9 +114,9 @@ async def _openalex_references(doi: str, limit: int = 10) -> list[dict]:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
                 f"{_OPENALEX_WORKS}/https://doi.org/{doi}",
-                params={"select": "referenced_works", **_polite_params()},
+                params=_keyed({"select": "referenced_works", **_polite_params()}),
             )
-            note_openalex_calls()
+            note_openalex_calls(0)  # single-record view: free
             resp.raise_for_status()
             ref_ids = (resp.json().get("referenced_works") or [])[:limit]
             if not ref_ids:
@@ -116,13 +125,13 @@ async def _openalex_references(doi: str, limit: int = 10) -> list[dict]:
             filter_str = "|".join(ref_ids)
             resp2 = await client.get(
                 _OPENALEX_WORKS,
-                params={
+                params=_keyed({
                     "filter": f"openalex_id:{filter_str}",
                     "per_page": len(ref_ids),
                     "select": "id,title,authorships,publication_year,abstract_inverted_index,"
                     "cited_by_count,doi,primary_location",
                     **_polite_params(),
-                },
+                }),
             )
             note_openalex_calls()
             resp2.raise_for_status()
@@ -145,9 +154,9 @@ async def _openalex_related(doi: str, limit: int = 10) -> list[dict]:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
                 f"{_OPENALEX_WORKS}/https://doi.org/{doi}",
-                params={"select": "related_works", **_polite_params()},
+                params=_keyed({"select": "related_works", **_polite_params()}),
             )
-            note_openalex_calls()
+            note_openalex_calls(0)  # single-record view: free
             resp.raise_for_status()
             raw = resp.json().get("related_works") or []
             # full URLs -> bare W-ids for the batch filter
@@ -156,13 +165,13 @@ async def _openalex_related(doi: str, limit: int = 10) -> list[dict]:
                 return []
             resp2 = await client.get(
                 _OPENALEX_WORKS,
-                params={
+                params=_keyed({
                     "filter": f"openalex_id:{'|'.join(ids)}",
                     "per_page": len(ids),
                     "select": "id,title,authorships,publication_year,abstract_inverted_index,"
                     "cited_by_count,doi,primary_location",
                     **_polite_params(),
-                },
+                }),
             )
             note_openalex_calls()
             resp2.raise_for_status()

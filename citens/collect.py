@@ -50,11 +50,18 @@ def _oa_get_sync(url: str, params: dict) -> httpx.Response:
     """
     import time as _time
 
+    from citens.search.openalex import apply_api_key, note_openalex_calls
+
     if settings.openalex_email:
         params = {**params, "mailto": settings.openalex_email}
+    # api_key or the request lands in the anonymous pool (1000/day, dead by
+    # mid-morning) and the retry loop just hammers a 429 for a minute
+    params = apply_api_key(params)
     last: Exception | None = None
     for attempt in range(4):
         resp = httpx.get(url, params=params, timeout=30, headers=_HEADERS)
+        if resp.status_code == 200:
+            note_openalex_calls()
         if resp.status_code != 429 and resp.status_code < 500:
             return resp
         last = RuntimeError(f"OpenAlex {resp.status_code}")
@@ -63,13 +70,18 @@ def _oa_get_sync(url: str, params: dict) -> httpx.Response:
 
 
 async def _oa_get_async(client: httpx.AsyncClient, url: str, params: dict) -> httpx.Response:
+    from citens.search.openalex import apply_api_key, note_openalex_calls
+
     if settings.openalex_email:
         params = {**params, "mailto": settings.openalex_email}
+    params = apply_api_key(params)
     import asyncio as _aio
 
     last: Exception | None = None
     for attempt in range(4):
         resp = await client.get(url, params=params)
+        if resp.status_code == 200:
+            note_openalex_calls()
         if resp.status_code != 429 and resp.status_code < 500:
             return resp
         last = RuntimeError(f"OpenAlex {resp.status_code}")

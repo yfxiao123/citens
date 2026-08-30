@@ -16,6 +16,7 @@ import httpx
 from citens import cache
 from citens.config import settings
 from citens.models import Paper
+from citens.search.openalex import apply_api_key
 
 _OPENALEX_WORKS = "https://api.openalex.org/works"
 
@@ -38,8 +39,13 @@ def _title_similarity(query: str, title: str) -> float:
 
 
 async def _resolve_one(title: str) -> Paper | None:
+    # filter=title.search — the exact-title shape for landmark resolution.
+    # MUST apply_api_key: unkeyed requests land in the anonymous pool whose
+    # 1000/day cap dies mid-morning — the resolve then silently returns
+    # None (measured: keyed query 200/gold-rank-1, unkeyed 429/NONE). The
+    # >=0.6 similarity guard keeps a mere-mention resolution out.
     params = {
-        "search": title,
+        "filter": f"title.search:{title}",
         "per_page": 5,
         "select": "id,title,authorships,publication_year,abstract_inverted_index,"
         "cited_by_count,doi,primary_location",
@@ -47,7 +53,7 @@ async def _resolve_one(title: str) -> Paper | None:
     }
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(_OPENALEX_WORKS, params=params)
+            resp = await client.get(_OPENALEX_WORKS, params=apply_api_key(params))
             from citens.search.openalex import note_openalex_calls
 
             note_openalex_calls()

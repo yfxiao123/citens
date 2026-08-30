@@ -428,7 +428,7 @@ def test_openalex_budget_counter_persists_and_enforces(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # usage file lives under cwd's .cache
     monkeypatch.setattr(settings, "openalex_daily_budget", 3)
 
-    oa.note_openalex_calls()
+    oa.note_openalex_calls(1)  # credits, not calls: every works query = 10
     oa.note_openalex_calls(2)
     used, budget = oa.usage_today()
     assert (used, budget) == (3, 3)

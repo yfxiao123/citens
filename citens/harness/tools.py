@@ -236,8 +236,16 @@ def _anchor_works(queries: list[str], per_query: int = 8) -> list[dict]:
 
     from citens import net
     from citens.config import settings
-    from citens.search.openalex import apply_api_key, note_openalex_calls
+    from citens.search.openalex import (
+        FILTER_CREDITS,
+        apply_api_key,
+        note_openalex_calls,
+    )
 
+    # filter=title_and_abstract.search — the relevance shape that includes
+    # abstract terms; keyed requests MUST carry api_key or they land in the
+    # anonymous pool (1000/day, dead mid-morning → anchors falsely reports
+    # "coverage unknowable")
     params: dict[str, Any] = apply_api_key({
         "per-page": per_query, "sort": "cited_by_count:desc"
     })
@@ -255,10 +263,10 @@ def _anchor_works(queries: list[str], per_query: int = 8) -> list[dict]:
             for attempt in range(3):
                 resp = client.get(
                     "https://api.openalex.org/works",
-                    params={"search": q, **params},
+                    params={"filter": f"title_and_abstract.search:{q}", **params},
                 )
                 if resp.status_code != 429:
-                    note_openalex_calls()
+                    note_openalex_calls(FILTER_CREDITS)
                     break
                 import time as _time
 

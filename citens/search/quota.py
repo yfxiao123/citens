@@ -13,6 +13,7 @@ import asyncio
 import httpx
 
 from citens.config import settings
+from citens.search.openalex import apply_api_key
 
 _RATE_KEYS = (
     "x-ratelimit-limit",
@@ -39,12 +40,16 @@ async def probe_openalex(hc: httpx.AsyncClient) -> list[tuple[str, str]]:
         ("premium-api-key", "yes" if settings.openalex_api_key else "NO"),
         (
             "local-budget-today",
-            f"{used} used / {'unlimited' if budget <= 0 else budget} cap",
+            f"{used} credits / {'unlimited' if budget <= 0 else f'{budget} cap'}"
+            f" (~${used / 10000:.2f} of $1/day free tier)",
         ),
     ]
     r = await hc.get(
         "https://api.openalex.org/works",
-        params={"per-page": 1, "search": "test"},
+        # filter= form + api_key on purpose: probe the KEYED pool (the
+        # anonymous 1000/day pool being exhausted is normal and misleading —
+        # it once read "429, 0 remaining" while the keyed pool had 5100+)
+        params=apply_api_key({"per-page": 1, "filter": "default.search:test"}),
     )
     body_note = ""
     if r.status_code == 429:

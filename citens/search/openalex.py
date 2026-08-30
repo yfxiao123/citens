@@ -136,17 +136,22 @@ def apply_api_key(params: dict) -> dict:
     return params
 
 
-# --- daily call budget -------------------------------------------------------
-# Premium keys are capped per DAY (bench 153205 measured an anonymous
-# 1000/day cap dying mid-run with SILENT empty responses; the premium tier
-# raises the cap but still burns out under repeated bench runs). Every
-# direct OpenAlex HTTP call site notes its calls here; the counter is
-# persisted to disk so repeated bench runs share ONE daily budget. When the
-# budget is exhausted, OPTIONAL channels (oa_title probes, snowball)
-# skip outright; the core search only warns — a degraded answer beats no
-# answer, and OpenAlex's own 429s already handle the anonymous tier.
+# --- daily credit budget -----------------------------------------------------
+# OpenAlex's keyed API is CREDIT-based: the free plan includes $1/day =
+# 10000 credits, midnight-UTC refill. MEASURED LIVE (2026-08-30, x-ratelimit
+# remaining deltas): EVERY works query costs 10 credits — search= AND
+# filter= alike (the dashboard's "filtered list: 1 credit" does NOT apply
+# to works queries); a single-record view (works/doi:...) is FREE.
+# → the free plan buys ~1000 works queries/day; a full bench leg costs
+# ~$0.28. The counter below is persisted to disk so repeated bench runs
+# share ONE daily budget. When exhausted, OPTIONAL channels (oa_title,
+# snowball) skip outright; the core search only warns.
 
 _BUDGET_WARNED: dict[str, bool] = {}
+
+QUERY_CREDITS = 10  # any works query (search= or filter=) — measured
+VIEW_CREDITS = 0  # single-record view works/doi:... — free
+FILTER_CREDITS = QUERY_CREDITS  # kept for call sites; filters are queries too
 
 
 def _usage_path() -> Path:
@@ -159,8 +164,8 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def note_openalex_calls(n: int = 1) -> None:
-    """Record ``n`` OpenAlex HTTP calls against today's persisted budget."""
+def note_openalex_calls(credits: int = FILTER_CREDITS) -> None:
+    """Record ``credits`` spent against today's persisted budget."""
     data: dict = {"date": _today(), "used": 0}
     try:
         path = _usage_path()
@@ -168,7 +173,7 @@ def note_openalex_calls(n: int = 1) -> None:
             stored = json.loads(path.read_text(encoding="utf-8"))
             if stored.get("date") == _today():
                 data["used"] = int(stored.get("used", 0))
-        data["used"] += n
+        data["used"] += credits
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data), encoding="utf-8")
     except Exception:  # noqa: BLE001 — telemetry must never break retrieval
@@ -178,8 +183,8 @@ def note_openalex_calls(n: int = 1) -> None:
         return
     used = data["used"]
     for mark, msg in (
-        (0.8, f"[openalex] 80% of daily budget used ({used}/{budget})"),
-        (1.0, f"[openalex] DAILY BUDGET REACHED ({used}/{budget}) — "
+        (0.8, f"[openalex] 80% of daily credit budget used ({used}/{budget})"),
+        (1.0, f"[openalex] DAILY CREDIT BUDGET REACHED ({used}/{budget}) — "
               "optional channels (oa-title, snowball) will skip"),
     ):
         key = str(mark)
@@ -202,7 +207,7 @@ def budget_exceeded() -> bool:
 
 
 def usage_today() -> tuple[int, int]:
-    """(used today, configured budget). Budget 0 = unlimited."""
+    """(credits used today, configured credit budget). Budget 0 = unlimited."""
     try:
         stored = json.loads(_usage_path().read_text(encoding="utf-8"))
         used = int(stored.get("used", 0)) if stored.get("date") == _today() else 0
