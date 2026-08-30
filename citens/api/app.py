@@ -445,6 +445,14 @@ async def run_start(req: RunRequest) -> dict:
             asyncio.run(run_pipeline_async(req.topic, options, _QueueBus(buf.append)))
         except Exception as e:  # noqa: BLE001 - the log must always close
             buf.append(RunFailed(message=str(e), step="pipeline"))
+        except BaseException as e:  # noqa: BLE001 - SystemExit must not hang the UI
+            # the v1.3.3 desktop exe died HERE silently (thread gone, no
+            # terminal event) and the UI polled forever — any thread death
+            # must land as a visible RunFailed
+            buf.append(RunFailed(
+                message=f"{type(e).__name__}: {e}", step="pipeline"
+            ))
+            raise
 
     threading.Thread(target=run_in_thread, daemon=True, name=f"run-{key}").start()
     return {"run_id": key}
