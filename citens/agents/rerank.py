@@ -60,6 +60,14 @@ def listwise_rank(
             strong=strong,
             temperature=0.0,
             response_json=True,
+            # thinking MUST stay off for listwise: the hybrid reasoning model
+            # burns the whole 4096-token budget on reasoning for a 50-candidate
+            # listing and returns an EMPTY body (measured: 30s + empty), and
+            # the empty-parse fallback silently discards the fine stage.
+            # thinking=False measured 2.3s with a full order — and ranklab
+            # showed BETTER recall (26.7% vs 20% on identical pools): the
+            # bench's fine stage had been a silent no-op the whole time.
+            thinking=False,
         )
         order = (_json.loads(raw) or {}).get("order") or []
         idxs = [i for i in order if isinstance(i, int) and 0 <= i < len(candidates)]
@@ -80,13 +88,15 @@ independently; abstracts are truncated."""
 
 
 def _pointwise_scores(
-    question: str, papers: list[Paper], batch: int = 50
+    question: str, papers: list[Paper], batch: int = 25
 ) -> list[int] | None:
     """Cheap per-candidate relevance scores over the WHOLE pool (coarse
     stage). Returns None on any failure — the caller then skips coarse
     ranking rather than ranking on garbage. Batches run concurrently:
-    the coarse stage is latency-bound (3 sequential 10-25s calls doubled
-    the bench's per-question wall time), not token-bound."""
+    the coarse stage is latency-bound, not token-bound. batch=25 not 50:
+    ranklab measured the gold drowning in a 50-batch (score 2 while it
+    scored 8 alone) and b25 converting the lost gold at half the @20 cost
+    (recall 26.7/33.3 vs 26.7/26.7) — finer batches, tighter attention."""
     import json as _json
     from concurrent.futures import ThreadPoolExecutor
 
@@ -105,6 +115,10 @@ def _pointwise_scores(
                 cheap=True,
                 temperature=0.0,
                 response_json=True,
+                # thinking off: mechanical scoring measured 1.0s/call vs 20.0s
+                # with identical output (ranklab 2026-08-30) — reasoning is
+                # pure latency here and risks eating the body budget
+                thinking=False,
             )
             vals = (_json.loads(raw) or {}).get("scores") or []
             if not isinstance(vals, list) or len(vals) != len(chunk):
