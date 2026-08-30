@@ -246,6 +246,99 @@ def facet_coverage_report(facets: list, papers: list) -> list[dict]:
     return out
 
 
+def thin_facet_queries(
+    facets: list, report: list[dict], already_searched: list[str], cap: int = 6
+) -> list[str]:
+    """Queries of under-covered facets, deduped against everything searched.
+
+    The facet plan previously only *measured* coverage after the fact; this
+    turns thin facets into an actual second search wave. A facet counts as
+    thin at <3 papers (same threshold the writer's honesty paragraph uses).
+    """
+    thin = {r["facet"] for r in report if r["papers"] < 3}
+    known = {q.lower().strip() for q in already_searched}
+    out: list[str] = []
+    for f in facets or []:
+        if f.get("name") not in thin:
+            continue
+        for q in f.get("queries") or []:
+            ql = str(q).lower().strip()
+            if ql and ql not in known and str(q) not in out:
+                out.append(str(q))
+    return out[:cap]
+
+
+def query_yield_report(
+    concepts: list, pool: list, kept: list
+) -> list[dict]:
+    """Per-concept retrieval yield: pool hits vs filter survivors.
+
+    The non-neural version of "query vector clustering + direction coverage":
+    the concept blocks ARE the directions (each searched query is a concept's
+    primary term or a combo of two), and a paper's matched_queries attribute
+    its retrieval to directions. Rows expose which directions over-fetch
+    junk (high hits, low kept) — the feedback substrate for query
+    refinement and future reflect-loop decisions.
+    """
+    import re
+
+    def _concepts_of(paper) -> set[int]:
+        cis: set[int] = set()
+        for q in getattr(paper, "matched_queries", None) or []:
+            qwords = {w for w in re.findall(r"[a-z]{4,}", q.lower())}
+            if not qwords:
+                continue
+            for i, c in enumerate(concepts or []):
+                cwords = {
+                    w
+                    for w in re.findall(
+                        r"[a-z]{4,}", str(c.get("term", "")).lower()
+                    )
+                }
+                # word-subset, not substring: an anchored query
+                # ("generative recommendation models") must still credit its
+                # generic source concept ("generative models")
+                if cwords and cwords <= qwords:
+                    cis.add(i)
+        return cis
+
+    hits: dict[int, int] = {}
+    keeps: dict[int, int] = {}
+    for p in pool:
+        for i in _concepts_of(p):
+            hits[i] = hits.get(i, 0) + 1
+    kept_ids = {p.id for p in kept}
+    for p in pool:
+        if p.id in kept_ids:
+            for i in _concepts_of(p):
+                keeps[i] = keeps.get(i, 0) + 1
+    return [
+        {
+            "concept": str((concepts[i] or {}).get("term", "")),
+            "hits": hits.get(i, 0),
+            "kept": keeps.get(i, 0),
+        }
+        for i in range(len(concepts or []))
+        if re.search(r"[a-z]", str((concepts[i] or {}).get("term", "")))
+    ]
+
+
+def low_yield_directions(
+    yield_rows: list[dict], min_hits: int = 4, max_kept: int = 0
+) -> list[dict]:
+    """Directions that retrieved papers but none survived the filter.
+
+    hits >= min_hits with kept <= max_kept means the direction is actively
+    over-fetching off-topic material — rephrasing it (or swapping its
+    untried synonyms) buys more than inventing new directions. Feeds both
+    the reflector's prompt and the deterministic synonym-swap list.
+    """
+    return [
+        r for r in yield_rows or []
+        if r.get("hits", 0) >= min_hits and r.get("kept", 0) <= max_kept
+    ]
+
+
 def coverage_note_text(
     report: list[dict], themes: list, n_blind: int
 ) -> str:

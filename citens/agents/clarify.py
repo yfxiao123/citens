@@ -63,7 +63,7 @@ def generate_clarifying_questions(topic: str) -> list[dict]:
         result = chat_json(
             SYSTEM_PROMPT.replace("{lang_name}", lang),
             f"研究主题 / Topic: {topic}",
-            max_tokens=1536,
+            max_tokens=1536, cheap=True,
         )
     except Exception:  # noqa: BLE001
         return []

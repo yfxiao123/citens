@@ -128,7 +128,7 @@ def filter_papers(
             # A score + short reason is tiny; the small budget keeps reasoning
             # models from padding generation. chat_json retries larger if the
             # thinking squeezes the JSON out.
-            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=1024)
+            result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=1024, cheap=True)
             score = int(result.get("score", 1))
             reason = str(result.get("reason", ""))
         except Exception as e:  # noqa: BLE001
@@ -150,7 +150,7 @@ def filter_papers(
         )
         by_index: dict[int, dict] = {}
         try:
-            result = chat_json(BATCH_SYSTEM_PROMPT, user_prompt, max_tokens=4096)
+            result = chat_json(BATCH_SYSTEM_PROMPT, user_prompt, max_tokens=4096, cheap=True)
             for entry in result.get("results", []):
                 if isinstance(entry, dict) and "paper_index" in entry:
                     try:

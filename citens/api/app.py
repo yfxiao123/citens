@@ -81,6 +81,7 @@ class RunRequest(BaseModel):
     enrich_abstracts: bool = True
     allow_supplement: bool = True
     use_cache: bool = True
+    agentic: bool = False  # agentic retrieval harness (Phase 1)
     filters: dict = Field(default_factory=dict)  # answers from /clarify
 
 
@@ -298,6 +299,7 @@ async def run(req: RunRequest):
             enrich_abstracts=req.enrich_abstracts,
             allow_supplement=req.allow_supplement,
             use_cache=req.use_cache,
+            agentic_retrieval=req.agentic,
             filters=req.filters,
         )
 
@@ -426,6 +428,7 @@ async def run_start(req: RunRequest) -> dict:
         enrich_abstracts=req.enrich_abstracts,
         allow_supplement=req.allow_supplement,
         use_cache=req.use_cache,
+        agentic_retrieval=req.agentic,
         filters=req.filters,
     )
     key = uuid.uuid4().hex[:12]

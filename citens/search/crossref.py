@@ -37,8 +37,16 @@ class CrossrefSearcher(SearchSource):
 
     async def search(self, keywords: list[str], max_results: int) -> list[Paper]:
         per_keyword = max(max_results // max(len(keywords), 1), 5)
+        from citens.search.base import SEARCH_CONCURRENCY
+
+        sem = asyncio.Semaphore(SEARCH_CONCURRENCY)
+
+        async def _guarded(q: str) -> list[Paper]:
+            async with sem:
+                return await self._one(client, q, per_keyword)
+
         async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "CiteLens/0.1"}) as client:
-            tasks = [self._one(client, kw, per_keyword) for kw in keywords]
+            tasks = [_guarded(kw) for kw in keywords]
             results = await asyncio.gather(*tasks, return_exceptions=True)
         out: list[Paper] = []
         for res in results:
@@ -47,11 +55,27 @@ class CrossrefSearcher(SearchSource):
         return out
 
     async def _one(self, client: httpx.AsyncClient, query: str, limit: int) -> list[Paper]:
-        params = {"query.bibliographic": query, "rows": min(limit, 30), **_polite_params()}
+        params: dict[str, str | int] = {
+            "query.bibliographic": query,
+            "rows": min(limit, 30),
+            **_polite_params(),
+        }
+        # native Crossref date filters for the clarification year window
+        filters: list[str] = []
+        if self.constraints and self.constraints.year_from:
+            filters.append(f"from-pub-date:{self.constraints.year_from}-01-01")
+        if self.constraints and self.constraints.year_to:
+            filters.append(f"until-pub-date:{self.constraints.year_to}-12-31")
+        if filters:
+            params["filter"] = ",".join(filters)
         resp = await client.get(f"{_BASE}/works", params=params)
         resp.raise_for_status()
         items = resp.json().get("message", {}).get("items", [])
-        return [self._to_paper(it) for it in items]
+        out = [self._to_paper(it) for it in items]
+        for p in out:
+            p.matched_queries.append(query)  # retrieval provenance
+        self.query_stats[query] = len(out)
+        return out
 
     @staticmethod
     def _to_paper(item: dict) -> Paper:

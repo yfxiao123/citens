@@ -79,7 +79,11 @@ async def test_resume_skips_retrieval_and_composes(tmp_path, monkeypatch):
 
     monkeypatch.setattr("citens.orchestration.pipeline.search_papers", _no_network)
     monkeypatch.setattr(
-        "citens.orchestration.pipeline.generate_keywords",
+        "citens.orchestration.pipeline.search_round",
+        _no_network,
+    )
+    monkeypatch.setattr(
+        "citens.orchestration.pipeline.plan_queries",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no planner on resume")),
     )
 

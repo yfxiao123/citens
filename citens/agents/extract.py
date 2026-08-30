@@ -110,7 +110,7 @@ def _extract_one(paper: ScoredPaper, topic: str, assess_quality: bool = True) ->
         "Extract the deep structured information."
     )
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=4096)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=4096, cheap=True)
     except Exception as e:  # noqa: BLE001
         print(f"    extract failed ({paper.title[:40]}): {e}")
         result = {}
@@ -131,7 +131,7 @@ def _extract_batch(
     )
     by_index: dict[int, dict] = {}
     try:
-        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=_BATCH_MAX_TOKENS)
+        result = chat_json(SYSTEM_PROMPT, user_prompt, max_tokens=_BATCH_MAX_TOKENS, cheap=True)
         for entry in result.get("papers", []):
             if isinstance(entry, dict) and "paper_index" in entry:
                 try:

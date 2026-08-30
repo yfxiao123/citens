@@ -43,3 +43,7 @@ requirements.txt
 
 # local console logs (run transcripts stay in runs/, which is ignored)
 *.log
+
+# benchmark snapshots + results (LitSearch data is CC BY-NC — never commit)
+/bench_data/
+/bench_results/

@@ -4,6 +4,304 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added — external benchmarks (quality yardsticks beyond internal metrics)
+- **`citens bench` — LitSearch live-retrieval bench**: samples real
+  literature-search questions (Princeton NLP, EMNLP 2024; data snapshot in
+  gitignored `bench_data/litsearch/`), runs them through the production
+  searchers over live APIs, and scores gold recall@5/@20 (DOI → arXiv →
+  title matching) across variants that isolate each lever: per-source,
+  score-free union, planner keyword-ification (`--planned`), cheap-model
+  listwise rerank (`--llm-rerank`), and the full hybrid agent
+  (`--agentic N`, pool-hit rate). Details flush to disk incrementally —
+  a killed run keeps every completed query. Measured (15 queries, 3
+  sources, seed 13): raw-union 6.7% @20 → planned 20% @20 → agentic
+  find-mode 60% pool-hit; S2/OpenAlex return ZERO hits for raw
+  natural-language questions, so query formulation is not an optimization
+  but the difference between 0% and working retrieval. Two bench-found
+  defects fixed: combo queries must be preferred over single-concept
+  coverage queries for find-style questions (gold titles ARE concept
+  combinations), and multi-query fusion must be RRF, not round-robin (a
+  gold at cell-rank ~5 landed fused #29 under interleave).
+- **`citens coverage` — AutoSurvey-protocol coverage eval**: the recall
+  axis internal metrics never measured. Given a run directory and a human
+  survey's reference list (`bench_data/coverage/*.json`, fetched from S2),
+  computes survey_recall / core50_recall (the survey's 50 most-cited refs
+  — fair to a 20-paper review) / overlap_precision, plus a cheap-tier
+  LLM judge scoring coverage-coherence-relevance and naming the missing
+  core references. Title matching requires ≥3 informative tokens — short
+  numbered titles collapse to a skeleton that matches everything. First
+  measurement (agentic run on "LLMs in science" vs a 392-ref survey):
+  verifier precision 97.5% but core50_recall 6% and judge coverage 3/10 —
+  precision was solved, coverage was the blind spot.
+
+### Changed — harness: falsifiable completion (bench-driven fixes)
+- **`anchors` tool**: fetches the topic's most-cited field-defining works
+  (OpenAlex, sort=cited_by_count) and reports which are MISSING from the
+  pool. Pool size measures effort; anchor overlap measures coverage — the
+  two diverged exactly in the coverage eval. Unreachable anchors degrade
+  to a warning and never gate done forever.
+- **done gate**: the first `done` without an anchors check is bounced
+  once with instructions — "enough papers" must be falsified against the
+  field's core, not felt. A second done is honored (the model may
+  legitimately judge anchors unreachable).
+- **`goal="find"` mode** (`HarnessState.goal`): targeted retrieval — the
+  question names specific papers, not a survey pool. Pool size stops
+  counting as success; done must name the found papers. Measured: 2 →
+  8-10 orchestrator turns per question and pool-hit 0% → 60% on the
+  LitSearch agentic leg; the failure mode changed from premature
+  `budget:pool` exits to "ran out of steps still digging" — a better
+  failure, and a tunable one.
+
+### Fixed — bench-found defects
+- **Capture-time citation enrichment (the arXiv blind spot, closed)**:
+  every arXiv-leg capture carries `citation_count=0` (the arXiv API has
+  no citation data), so a classic that ONLY the arXiv leg found still
+  sorted as uncited. Before the pool cap, one Semantic Scholar batch
+  call now joins arXiv ids → (citationCount, DOI) for zero-cited
+  records (verified live: Lewis et al. 2020 → 17,476 citations restored
+  from its arXiv id alone). Degrades to a no-op on failure — enrichment
+  optimizes ranking, it must never fail a run.
+- **`blend_pool` citation spine**: the pre-filter pool cap sorted purely
+  within source groups, and an arXiv-leg capture of a field-defining work
+  carries `citation_count=0` — measured live: Lewis et al. 2020 (17k
+  citations) was pulled into the pool by the harness's exact-title search
+  and then arbitrarily cut by the blend, never reaching the filter. Half
+  the cap is now reserved for the globally most-cited papers; per-source
+  diversity fill takes the rest.
+- **`anchors` 429 handling**: OpenAlex rate-limit bursts (anchors runs
+  right after a search wave on the same host) were swallowed as "no
+  anchor works found" — misleading both the model and the audit trail.
+  Now retried with backoff; persistent failure reports honestly as
+  unavailable.
+- **`read_paper` shows DOIs**: the model needs them to chain snowball
+  anchors; without them it guessed (and snowball refused the guess).
+- **Bench: planned-leg cell depth 20 → 40**: gold papers ranking 21-40
+  in every (query, source) cell were invisible to fusion at zero depth.
+  One depth-40 fetch now feeds both legs — truncating cells to 20
+  reproduces the depth-20 fusion exactly (RRF only sums ranks), so the
+  depth lever is measured at zero extra API cost (`planned_d40`).
+- **Bench: find-mode budget widened** (12/14/5 → 16/18/6): both seed-13
+  agentic misses ended `budget:steps` mid-dig at 8-10 LLM calls —
+  targeted find-that-paper questions need the turns to read candidates
+  and name exact titles.
+- **find mode ignores the pool cap**: the find-goal prompt says pool
+  size is NOT success, yet the loop still hard-stopped at
+  `budget:pool` — seed 42's find miss died at 169 papers while still
+  reformulating, a direct contradiction of the mode's own instructions.
+  `budget:pool` now applies only to survey-mode economics.
+- **Bench: `planned_raw` variant**: the question's own phrasing joins
+  the RRF fusion (cells already fetched for the union leg — zero extra
+  API). Motivated by a measured seed-42 case where union hit 100% via
+  crossref title matching while planned hit 0%: the question's words
+  were IN the gold title and the planner's combos were not.
+- **Snowball: Semantic Scholar fallback for all three directions**:
+  OpenAlex free-tier daily budget can exhaust mid-run ("Insufficient
+  budget … Resets at midnight UTC"), and a dead OpenAlex used to mean a
+  silent zero-candidate snowball. Backward/forward now fall back to the
+  S2 citation-graph endpoints, related to S2 recommendations; DOI-style
+  arXiv ids are normalized to the `ARXIV:` prefix S2 requires
+  (`DOI:10.48550/arxiv.*` 404s). Provenance marks the serving provider.
+- **Snowball cache: empty results are never cached**: a provider outage
+  wrote zeros into the kv cache, and the retry run served those zeros
+  instantly — poisoned. Only non-empty expansions are cached now.
+
+### Changed — retrieval quality round 2 + console polish
+- **Adaptive pool: citation-expansion family** (`--expand`): one-hop S2
+  citation expansion from the fused pool's own head, as the sixth family
+  in the quota pool. A live probe re-tested one-hop reach from
+  HyDE-family anchors (the earlier all-zero verdict came from
+  wrong-subfield planned anchors) and reached a never-hit gold through a
+  forward citation edge — the channel is alive; the anchor quality was
+  the problem.
+- **HyDE dual-temperature union**: each question now gets a
+  deterministic (temp 0) plus a wide (temp 0.9) sample, unioned —
+  single-sample coinage was a lottery (a HyDE-caught gold vanished when
+  a redraw changed the mix); coverage comes from sampling breadth.
+- **Bench cascade on the strong tier** for the deliverable-ranking call
+  (LitSearch's rerank gains came from their strongest model).
+- **find done-gate verifies named papers**: a find-mode `done` summary
+  naming papers absent from the pool (>=half informative-token overlap
+  required, so one shared generic word never passes) is bounced once
+  with retrieval instructions — bench seed 42 produced confident done
+  calls whose named papers were not in the pool.
+- **`citens sources --probe`**: one polite request per source, reading
+  back the provider's own rate-limit headers and error bodies (OpenAlex
+  daily budget/remaining/reset, S2 key presence + status, Crossref
+  quota, arXiv latency). Provider limits are server-side accounting;
+  proxies change latency, never quotas.
+- **Bench cell health**: every (query, source) cell records
+  ok/empty/failed into details.jsonl and the console shows `!! DEAD:`
+  — an exhausted provider can no longer masquerade as "no results".
+- **OpenAlex title.search channel** as a fifth adaptive family: the
+  dedicated title index over HyDE-generated titles (endpoint-shaped
+  near-exact-title matching); cached, failures never cached.
+- **Console (web UI) smoothness**: rAF-batched feed autoscroll with
+  unseen-count on the jump-latest button (per-line scrollHeight reads
+  forced layout during agent bursts), `content-visibility` on feed
+  lines, batched DOM trimming, reduced-motion respect; readability:
+  80ch review column, zebra table rows, blockquote/tab-hover/primary-
+  button states.
+
+### Added — vocabulary-wall countermeasures (bench-validated)
+The bench's central diagnosis (seed 42, 15 queries): gold papers of
+find-that-paper questions live in a different lexical space than the
+question — question words ∩ gold-title words ≈ ∅, planned keyword cells
+never contain the gold even at depth 40, S2 relevance search returned
+zero golds on all 15, and one-hop citation/recommendation bridging from
+the nearest neighbors reached nothing (all four observation metrics zero
+on 7/15). The LitSearch paper's own numbers agree: lexical BM25 and
+commercial engines cap ~43% recall@5 where dense semantic retrieval
+reaches ~75% — a vocabulary wall. The fixes below are the two proven
+ways to cross it plus the semantic layer our API tier can afford:
+- **`pivot` harness tool (PRF vocabulary pivot)**: reads the abstracts
+  of the pool's most-relevant papers and coins queries in the subfield's
+  OWN vocabulary — task/benchmark/method names copied verbatim
+  (mechanism verified: mined "SemEval-2022 Task 4" retrieved its gold;
+  paraphrased variants do not). Bench-validated 13.3% vs planned 6.7%
+  with a superset hit set. Prompt rule 9 tells the orchestrator to reach
+  for it exactly when searches return results but the RIGHT papers are
+  missing; find-mode suffix teaches the same move.
+- **Hypothetical-title queries (`citens.agents.hypothetical`)**: the
+  question-side complement (HyDE/query2doc shape): a cheap LLM writes
+  plausible TITLES of the answering papers, searched as plain text where
+  title matching lives (crossref). Dissection showed near-exact-title
+  matching is the ONLY lexical form that reliably crosses the wall;
+  hypothetical titles systematize it. Covers descriptive-titled golds;
+  pivot covers entity-named golds the question cannot guess.
+- **Bench `--adaptive` leg**: hypothetical titles + PRF-mined phrases +
+  planned cells + raw question, each FAMILY's fused head guaranteed a
+  quota of seats in the candidate pool, then ranked by the LLM listwise
+  over that pool. Global RRF alone DILUTES the good cells twice over —
+  measured: pivot-only 13.3% → 6.7% fused with planned noise cells, and
+  a live probe where union's rank-0 crossref hit fell out of the fused
+  top-100 entirely, so the semantic rank never even saw it. The
+  family-quota pool plus LLM ranking is the affordable semantic layer
+  (no embedding endpoint on this API tier). Reported as `adaptive_rrf`
+  (global fusion — the dilution witness) vs `adaptive` (family-quota
+  pool + semantic rank) so each lever stays measurable.
+- **Shared listwise ranker (`citens.agents.rerank.listwise_rank`)**: the
+  judgment both consumers need — bench candidate-pool ranking and
+  harness find-mode output. Falls back to input order on any failure;
+  never drops papers.
+- **find mode ranks its deliverable**: the harness's find output was the
+  pool in insertion order — bench seed 42 had the gold IN the pool 3/5
+  and in its top-5 0/5. At finish the pool is now pre-sorted by
+  (query-match count, citations), LLM-ranked against the question on the
+  strong tier (LitSearch's rerank gains came from their strongest model;
+  the cheap tier demoted measured golds when judging 100+ candidates),
+  with `papers_unranked` keeping the pre-ranking order auditable. Survey
+  mode unchanged — the pipeline ranks downstream. Agentic dig budget one
+  notch wider (16/18 → 20/22): every agentic miss so far died
+  `budget:steps` mid-reformulation, never stalled.
+
+### Added — robustness: model routing, red team, bounded fan-out
+- **Three-tier model routing**: `LLM_MODEL_CHEAP` joins `LLM_MODEL` /
+  `LLM_MODEL_STRONG`. Mechanical high-volume stages (planner family /
+  filter / extract / clarify / intent — 10 call sites) pass `cheap=True`
+  and route to the cheap tier; judgment stages (harness orchestrator /
+  organize / audit / rewriter) stay default; quality stages stay strong.
+  Per-model token accounting (`record_usage`) makes the savings visible
+  per run. Empty = current behavior.
+- **Red-team adversarial review** (deep mode, once per run): after the
+  reflect loop, a strong-model attacker hits the FINAL document for what
+  per-claim verification cannot see — overclaims on correlational
+  evidence, numbers stronger than their sources, cherry-picking, internal
+  contradictions, missing limitations. One bounded revision pass follows
+  (hard rules: no citation/number/claim changes; unfixable findings land
+  in an honest Limitations section). Findings persist as `09_redteam`;
+  fragment revisions are rejected (never silently truncate a review), and
+  the revision token budget scales with review length (acceptance found a
+  23k-char review overflowing a fixed 8192 cap — correctly refused then,
+  budgeted properly now).
+- **Bounded search fan-out**: per-source `asyncio.Semaphore(6)` on the
+  query fan-out (OpenAlex / S2 / Crossref) — query counts grew with
+  concept-block planning + calibration waves, and unbounded bursts are
+  how polite APIs decide to throttle.
+
+### Added — agentic retrieval harness (Phase 1)
+- **The workflow gains an agent mode**: `--agentic` (CLI) / `agentic: true`
+  (API) replaces the three hardcoded retrieval waves (facet gap / zero-hit
+  synonyms / thin-pool refine) with a budgeted tool-calling loop — the
+  model perceives the pool and drives retrieval itself:
+  `search` (multi-source, constraints-aware), `snowball` (citation +
+  semantic, query-aware ranked), `pool_report` (composition / facet
+  coverage / zero-hits), `read_paper` (title+abstract), `done`.
+- **Safety rails**: budget ledger (steps / LLM calls / search calls / pool
+  cap, defaults 12/14/5/150), duplicate-search rejection, saturation stop
+  (3 consecutive empty searches), two-prose-turn forced finish. Every
+  decision lands in the web transcript as detail lines; LLM traces show
+  the orchestrator's reasoning.
+- First live run (generative-recs topic, DeepSeek function calling):
+  pool_report → 4x read_paper → one targeted 3-query search (+36 papers,
+  pool 98→134) → pool_report → clean budget exit. Decision log persisted
+  as `02h_harness`.
+- `llm.chat_tool_call()` joins the LLM layer (multi-turn + tools, retried,
+  traced, uncached); `_chat_with_retry(gained return_message=)`.
+- Default runs unchanged — the deterministic waves remain the predictable
+  path; resume/eval/golden tests unaffected.
+
+### Added — provenance now drives the reflect loop
+- Low-yield directions (>=4 pool hits, zero filter survivors — the
+  direction is mis-phrased, not merely unlucky) feed the reflect loop two
+  ways: the reflector's prompt carries a query-yield note ("include
+  REPLACEMENT queries for these directions"), and their concepts' untried
+  synonyms join the supplement-query merge deterministically. The
+  provenance data collected at filter time now steers the next retrieval
+  round instead of only being reported.
+
+### Added — semantic snowball + retrieval provenance (the query-aware layer)
+- **Semantic snowball direction**: citation chaining (backward/forward) is
+  joined by OpenAlex `related_works` — topical neighbors that are NOT on
+  any citation edge. Measured on a generative-recs topic: 4-7 unique
+  topical candidates per run entering the fixed top-20 admission window
+  that the citation graph alone cannot produce, skewing fresher (median
+  citations 314 -> 84 in the admitted set).
+- **Query-aware snowball ranking**: candidates rank by topic-term overlap
+  before citations — a famous off-topic paper no longer outranks a
+  less-cited paper matching the query directions.
+- **Retrieval provenance**: every searcher tags papers with the query that
+  retrieved them (`matched_queries`, unioned across dedup merges). 98/98
+  papers tagged in the live benchmark.
+- **Direction-coverage measurement**: `03e_query_yield` per concept block —
+  pool hits vs filter survivors from real provenance (the non-neural
+  version of query-vector clustering; the concept blocks ARE the
+  directions). Surfaces over-fetching junk directions in the transcript.
+- **Generic-term anchoring** (found by the benchmark): a concept like
+  "survey" or "generative models" searched standalone returns every
+  discipline's mega-surveys (measured: SF-36, 30k citations, in a
+  generative-recs pool — snowball anchors went medical). Generic terms are
+  now anchored to the central concept ("generative recommendation survey"),
+  duplicate words collapsing.
+
+### Changed — retrieval planning rebuilt on librarian methodology (concept blocks + calibration)
+- **Concept-block planning**: the planner LLM now returns core concepts WITH
+  synonym variants (GenRec, generative retrieval, ...), and deterministic
+  code assembles the query list from them (one coverage query per concept +
+  precision combos of the central pairs). A flat 3-6-word query list misses
+  every paper that uses a different variant of the same concept.
+- **Zero-hit calibration (PRESS test-search loop)**: per-query hit counts
+  flow back from every source; a query that returned nothing gets its
+  concept's untried synonyms swapped in as a follow-up wave, and zero-hit
+  queries are fed to the refinement prompt ("the field does not use this
+  phrasing").
+- **Facet queries actually run**: the facet plan used to only *measure*
+  coverage after the fact; facets the first round left thin (<3 papers) now
+  get their planned queries searched for real (second wave).
+- **Native per-source date filters**: the clarification year window compiles
+  into OpenAlex `from/to_publication_date`, S2 `year`, Crossref
+  `from/until-pub-date` params (arXiv post-filters — no client-friendly date
+  syntax). The `"2023..2026"` text hack inside planner queries is gone; it
+  only worked by accident on some backends and polluted relevance ranking.
+  Supplementary retrieval (_supplement_search) rides the same constraints.
+- New artifacts: `01a_query_plan` (concepts + synonyms + assembled queries);
+  transcript gains detail lines for both calibration waves.
+- `search_round()` (papers, health, per-query stats) joins the search API;
+  `SearchSource.set_constraints()` is opt-in for third-party sources.
+- Tests: +19 (assembly, fallback, thin-facet selection, native filters per
+  source via respx, stats aggregation with failed sources excluded).
+
 ## [1.3.3] — 2026-08-23
 
 ### Fixed — "records vanished" + history not time-sorted
