@@ -107,6 +107,43 @@ All notable changes to this project are documented here. The format follows
   wrote zeros into the kv cache, and the retry run served those zeros
   instantly — poisoned. Only non-empty expansions are cached now.
 
+### Changed — retrieval quality round 2 + console polish
+- **Adaptive pool: citation-expansion family** (`--expand`): one-hop S2
+  citation expansion from the fused pool's own head, as the sixth family
+  in the quota pool. A live probe re-tested one-hop reach from
+  HyDE-family anchors (the earlier all-zero verdict came from
+  wrong-subfield planned anchors) and reached a never-hit gold through a
+  forward citation edge — the channel is alive; the anchor quality was
+  the problem.
+- **HyDE dual-temperature union**: each question now gets a
+  deterministic (temp 0) plus a wide (temp 0.9) sample, unioned —
+  single-sample coinage was a lottery (a HyDE-caught gold vanished when
+  a redraw changed the mix); coverage comes from sampling breadth.
+- **Bench cascade on the strong tier** for the deliverable-ranking call
+  (LitSearch's rerank gains came from their strongest model).
+- **find done-gate verifies named papers**: a find-mode `done` summary
+  naming papers absent from the pool (>=half informative-token overlap
+  required, so one shared generic word never passes) is bounced once
+  with retrieval instructions — bench seed 42 produced confident done
+  calls whose named papers were not in the pool.
+- **`citens sources --probe`**: one polite request per source, reading
+  back the provider's own rate-limit headers and error bodies (OpenAlex
+  daily budget/remaining/reset, S2 key presence + status, Crossref
+  quota, arXiv latency). Provider limits are server-side accounting;
+  proxies change latency, never quotas.
+- **Bench cell health**: every (query, source) cell records
+  ok/empty/failed into details.jsonl and the console shows `!! DEAD:`
+  — an exhausted provider can no longer masquerade as "no results".
+- **OpenAlex title.search channel** as a fifth adaptive family: the
+  dedicated title index over HyDE-generated titles (endpoint-shaped
+  near-exact-title matching); cached, failures never cached.
+- **Console (web UI) smoothness**: rAF-batched feed autoscroll with
+  unseen-count on the jump-latest button (per-line scrollHeight reads
+  forced layout during agent bursts), `content-visibility` on feed
+  lines, batched DOM trimming, reduced-motion respect; readability:
+  80ch review column, zebra table rows, blockquote/tab-hover/primary-
+  button states.
+
 ### Added — vocabulary-wall countermeasures (bench-validated)
 The bench's central diagnosis (seed 42, 15 queries): gold papers of
 find-that-paper questions live in a different lexical space than the

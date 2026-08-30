@@ -29,6 +29,24 @@ class HarnessBudget:
     max_pool: int = 150          # stop adding papers beyond this
 
 
+def _find_claimed_titles(summary: str) -> list[str]:
+    """Title-ish chunks from a find-mode done summary, for pool-match
+    verification. Heuristic: quoted strings, then lines/sentences that look
+    like titles (4+ words with a capitalized word). Imperfect on purpose —
+    only chunks with >=3 informative tokens get verified, so false bounces
+    stay rare."""
+    import re as _re
+
+    chunks = _re.findall(r'"([^"]{10,160})"', summary)
+    if not chunks:
+        chunks = [
+            line.strip(" -*•\t")
+            for line in summary.splitlines()
+            if len(line.split()) >= 4
+        ]
+    return chunks[:6]
+
+
 @dataclass
 class HarnessResult:
     papers: list = field(default_factory=list)
@@ -160,22 +178,22 @@ async def run_retrieval_harness(
         # pool: bench seed 42 put 3/5 golds IN the pool and 0/5 in its top-5
         # (survey mode keeps insertion order — the pipeline ranks downstream)
         if state.goal == "find" and len(state.pool) >= 2:
-            from citens.agents.rerank import listwise_rank
+            from citens.agents.rerank import cascade_rank
 
             res.papers_unranked = list(state.pool)
-            # pre-sort by query-match count then citations so the most
-            # promising papers reach the ranker's window: insertion order
-            # is arbitrary, and a 200+ pool cannot be listed whole. Strong
-            # tier for the one call that orders the user-facing shortlist
-            # (bench seed 42: golds IN the pool, yet never in the cheap
-            # ranker's top-5)
+            # pre-sort by query-match count then citations so the coarse
+            # stage starts from a sane order (insertion order is random);
+            # the cascade scores the WHOLE pool pointwise (a gold past any
+            # fixed window still gets scored), then strong-listwise-orders
+            # the top slice — bench seed 42: golds IN the pool 3/5, in the
+            # cheap single-pass top-5 0/5
             promising = sorted(
                 state.pool,
                 key=lambda p: (len(p.matched_queries or []), p.citation_count),
                 reverse=True,
             )
             res.papers = await asyncio.to_thread(
-                listwise_rank, state.topic, promising, 120, True
+                cascade_rank, state.topic, promising, 50, True
             )
             _emit(bus, StepProgress(
                 step="search",
@@ -246,6 +264,42 @@ async def run_retrieval_harness(
                         ),
                     })
                     continue
+                # find mode: the summary names specific papers — bench seed 42
+                # produced confident done calls whose named papers were NOT
+                # in the pool (pool_hit=0). A named paper that matches nothing
+                # bounces once with instructions to actually retrieve it.
+                if state.goal == "find":
+                    from citens.eval.litsearch import _title_tokens
+
+                    claimed = str(args.get("summary", ""))
+                    pool_toks = [_title_tokens(p.title) for p in state.pool if p.title]
+                    unmatched = []
+                    for chunk in _find_claimed_titles(claimed):
+                        toks = _title_tokens(chunk)
+                        if len(toks) < 3:
+                            continue
+                        # >=half the informative tokens overlapping a pool
+                        # title counts as present; one shared generic word
+                        # ("paper") must not (measured false-negative)
+                        best = max(
+                            (len(toks & pt) / len(toks) for pt in pool_toks),
+                            default=0.0,
+                        )
+                        if best < 0.5:
+                            unmatched.append(chunk)
+                    if unmatched and not state.done_refused:
+                        state.done_refused = True
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": (
+                                "NOT DONE YET: these papers you named are NOT "
+                                "in the pool: " + "; ".join(unmatched[:3]) + ". "
+                                "Search for them (exact-title or pivot-mined "
+                                "queries), or remove them from the summary."
+                            ),
+                        })
+                        continue
                 return await finish(
                     "done",
                     summary=str(args.get("summary", "")),

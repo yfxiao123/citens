@@ -52,7 +52,10 @@
   button.primary {
     margin-top: 14px; width: 100%; padding: 9px; border: 0; border-radius: 6px;
     background: var(--accent); color: #06121f; font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: filter .15s ease, transform .05s ease;
   }
+  button.primary:hover:not(:disabled) { filter: brightness(1.12); }
+  button.primary:active:not(:disabled) { transform: translateY(1px); }
   button.primary:disabled { opacity: .45; cursor: wait; }
 
   #history { flex: 1; overflow-y: auto; margin-top: 14px; }
@@ -86,8 +89,11 @@
     padding: 2px 10px; cursor: pointer;
   }
   #feed { flex: 1; overflow-y: auto; font-size: 12px; line-height: 1.55; padding-right: 4px; }
+  #feed > div { content-visibility: auto; contain-intrinsic-size: auto 20px; }
   @keyframes feedin { from { opacity: 0; } to { opacity: 1; } }
-  #feed > div { animation: feedin .22s ease; }
+  @media (prefers-reduced-motion: no-preference) {
+    #feed > div { animation: feedin .18s ease; }
+  }
   #feed .ln { position: relative; padding: 1px 0 1px 78px; color: var(--fg); }
   #feed .tag {
     position: absolute; left: 0; top: 2px; width: 70px; text-align: right;
@@ -115,7 +121,7 @@
     background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 10px; text-align: center;
   }
-  .metric .v { font-size: 17px; font-weight: 700; font-family: var(--mono); }
+  .metric .v { font-size: 17px; font-weight: 700; font-family: var(--mono); transition: color .25s ease; }
   .metric .k { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
   .metric.good .v { color: var(--ok); }
   .metric.bad .v { color: var(--err); }
@@ -126,14 +132,22 @@
     background: none; border: 0; color: var(--muted); font-size: 12px; padding: 8px 12px;
     cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
   }
+  #tabs button:hover:not(:disabled) { color: var(--fg); }
   #tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
   #tabs button:disabled { opacity: .3; cursor: default; }
   #viewer { flex: 1; overflow-y: auto; padding: 14px 16px; font-size: 13.5px; line-height: 1.8; }
+  #viewer > * { max-width: 80ch; margin-left: auto; margin-right: auto; }
   #viewer h1, #viewer h2, #viewer h3 { border-bottom: 1px solid var(--border); padding-bottom: 5px; margin: 1em 0 .5em; }
   #viewer h1 { font-size: 19px; } #viewer h2 { font-size: 16px; } #viewer h3 { font-size: 14px; }
   #viewer pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
   #viewer code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
-  #viewer table { border-collapse: collapse; } #viewer td, #viewer th { border: 1px solid var(--border); padding: 4px 8px; }
+  #viewer table { border-collapse: collapse; width: 100%; }
+  #viewer td, #viewer th { border: 1px solid var(--border); padding: 4px 8px; }
+  #viewer tbody tr:nth-child(odd) { background: var(--panel2); }
+  #viewer blockquote {
+    margin: .6em 0; padding: 2px 12px; border-left: 3px solid var(--accent);
+    color: var(--muted); background: var(--panel2); border-radius: 0 6px 6px 0;
+  }
   .placeholder { color: var(--muted); text-align: center; padding: 80px 0; font-size: 13px; }
   .vgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 10px 0 16px; }
   .vnote { font-size: 12px; color: var(--muted); margin: 6px 0; }
@@ -251,6 +265,27 @@ const $ = (id) => document.getElementById(id);
 const state = { runId: null, running: false, t0: null, timerHandle: null };
 let feedStick = true;   // auto-scroll while the user stays at the bottom
 let llmCount = 0;
+let pendingUnseen = 0;  // lines added while the user is scrolled up
+let scrollQueued = false;
+
+/* batched autoscroll: agentic bursts add dozens of lines per second and
+   per-line scrollHeight reads force synchronous layout — one rAF tick does */
+function scheduleStick() {
+  if (!feedStick) { pendingUnseen++; showJumpLatest(); return; }
+  if (scrollQueued) return;
+  scrollQueued = true;
+  requestAnimationFrame(() => {
+    scrollQueued = false;
+    const f = $("feed");
+    f.scrollTop = f.scrollHeight;
+  });
+}
+
+function showJumpLatest() {
+  const b = $("jump-latest");
+  b.textContent = pendingUnseen > 0 ? `↓ 最新 (${pendingUnseen})` : "↓ 最新";
+  b.hidden = false;
+}
 
 /* ---------- header chips ---------- */
 fetch("/health").then(r => r.json()).then(h => {
@@ -334,7 +369,7 @@ async function run() {
   if (!topic) { alert("请输入研究主题"); return; }
   state.running = true; state.t0 = Date.now();
   $("go").disabled = true;
-  $("feed").innerHTML = ""; llmCount = 0; feedStick = true;
+  $("feed").innerHTML = ""; llmCount = 0; feedStick = true; pendingUnseen = 0;
   $("llm-count").textContent = "0 次调用";
   setNow("启动管线…", false);
   ["m-prec", "m-canary", "m-lenient", "m-unver"].forEach(id => setMetric(id, "–", ""));
@@ -490,8 +525,13 @@ function addLine(opts) {
   if (opts.node) div.appendChild(opts.node);
   const f = $("feed");
   f.appendChild(div);
-  while (f.childElementCount > 900) f.removeChild(f.firstChild);  // bound the DOM
-  if (feedStick) f.scrollTop = f.scrollHeight;
+  // bound the DOM in one batch: trimming line-by-line during bursts churns
+  // the layout for siblings that are about to be removed anyway
+  if (f.childElementCount > 950) {
+    const excess = f.childElementCount - 900;
+    for (let i = 0; i < excess; i++) f.removeChild(f.firstChild);
+  }
+  scheduleStick();
   return div;
 }
 
@@ -499,13 +539,16 @@ function addLine(opts) {
 $("feed").addEventListener("scroll", () => {
   const f = $("feed");
   const near = f.scrollHeight - f.scrollTop - f.clientHeight < 48;
+  if (near && !feedStick) { pendingUnseen = 0; }
   if (near !== feedStick) {
     feedStick = near;
-    $("jump-latest").hidden = near;
+    if (near) { $("jump-latest").hidden = true; pendingUnseen = 0; }
+    else showJumpLatest();
   }
 });
 $("jump-latest").addEventListener("click", () => {
   feedStick = true;
+  pendingUnseen = 0;
   const f = $("feed");
   f.scrollTop = f.scrollHeight;
   $("jump-latest").hidden = true;

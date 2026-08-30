@@ -345,7 +345,7 @@ async def test_find_goal_ignores_pool_cap_but_survey_stops(monkeypatch):
     import citens.agents.rerank as rerank_mod
 
     monkeypatch.setattr(
-        rerank_mod, "listwise_rank", lambda q, papers, top=100, strong=False: list(papers)
+        rerank_mod, "cascade_rank", lambda q, papers, coarse_keep=50, strong=False: list(papers)
     )
     budget = HarnessBudget(max_pool=2, max_steps=8, max_llm_calls=8)
 
@@ -383,13 +383,13 @@ async def test_find_goal_ranks_output_survey_keeps_insertion_order(monkeypatch):
 
     calls = {}
 
-    def fake_rank(question, papers, top=100, strong=False):
+    def fake_rank(question, papers, coarse_keep=50, strong=False):
         calls["question"] = question
         calls["n"] = len(papers)
         calls["strong"] = strong
         return list(reversed(papers))
 
-    monkeypatch.setattr(rerank_mod, "listwise_rank", fake_rank)
+    monkeypatch.setattr(rerank_mod, "cascade_rank", fake_rank)
     monkeypatch.setattr(
         tools_mod, "_anchor_works", lambda queries, per_query=8: []
     )
@@ -416,3 +416,32 @@ async def test_find_goal_ranks_output_survey_keeps_insertion_order(monkeypatch):
     res2 = await run_retrieval_harness(survey_state, bus=None)
     assert [p.title for p in res2.papers] == ["P0", "P1", "P2", "P3"]
     assert res2.papers_unranked == []
+
+
+@pytest.mark.asyncio
+async def test_find_done_bounces_when_named_paper_not_in_pool(monkeypatch):
+    """Bench seed 42: confident done calls whose named papers were NOT in
+    the pool (pool_hit=0). The gate verifies named titles against the pool
+    and bounces once with retrieval instructions."""
+    monkeypatch.setattr(
+        tools_mod, "_anchor_works", lambda queries, per_query=8: []
+    )
+    script = [
+        _msg(tool_calls=[_tool_call("anchors", {})]),
+        _msg(tool_calls=[_tool_call(
+            "done",
+            {"summary": 'Found "Totally Unrelated Paper About Quantum Widgets" as the answer'},
+        )]),
+        _msg(tool_calls=[_tool_call(
+            "done",
+            {"summary": 'Found "Base Paper That We Truly Have"'},
+        )]),
+    ]
+    monkeypatch.setattr(
+        "citens.harness.loop.llm.chat_tool_call", _script_model(script)
+    )
+    state = _state(pool=[_paper("Base Paper That We Truly Have")], goal="find")
+    res = await run_retrieval_harness(state, bus=None)
+    assert res.finish_reason == "done"
+    # the fake model saw the bounce message between the two dones
+    assert res.steps == 3

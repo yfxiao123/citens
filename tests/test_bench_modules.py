@@ -295,3 +295,120 @@ def test_llm_rerank_delegates_to_shared_ranker(monkeypatch):
     union = [_p(f"P{i}", doi=f"10.1/{i}") for i in range(5)]
     assert litsearch.llm_rerank("q", union, top=100) == union
     assert seen["top"] == 100  # the adaptive leg's pool-wide call shape
+
+
+def test_cascade_rank_coarse_then_fine(monkeypatch):
+    from citens.agents import rerank
+
+    papers = [_p(f"P{i}", doi=f"10.1/{i}") for i in range(6)]
+    # coarse scores: P4 highest, P0 lowest
+    monkeypatch.setattr(
+        rerank, "_pointwise_scores",
+        lambda q, ps, batch=40: [1, 2, 3, 4, 9, 5],
+    )
+    seen = {}
+
+    def fake_listwise(question, ps, top=100, strong=False):
+        seen["n"] = len(ps)
+        seen["strong"] = strong
+        seen["titles"] = [p.title for p in ps]
+        return list(reversed(ps))
+
+    monkeypatch.setattr(rerank, "listwise_rank", fake_listwise)
+    out = rerank.cascade_rank("q", papers, coarse_keep=3)
+    # coarse kept top-3 by score (P4, P5, P3); listwise reversed them;
+    # the rest follow in coarse order (P2, P1, P0)
+    assert [p.title for p in out] == ["P3", "P5", "P4", "P2", "P1", "P0"]
+    assert seen["n"] == 3 and seen["titles"] == ["P4", "P5", "P3"]
+
+
+def test_cascade_rank_degrades_when_coarse_fails(monkeypatch):
+    from citens.agents import rerank
+
+    papers = [_p(f"P{i}", doi=f"10.1/{i}") for i in range(4)]
+    monkeypatch.setattr(rerank, "_pointwise_scores", lambda q, ps, batch=40: None)
+    monkeypatch.setattr(
+        rerank, "listwise_rank",
+        lambda q, ps, top=100, strong=False: list(ps),
+    )
+    out = rerank.cascade_rank("q", papers, coarse_keep=2)
+    assert [p.title for p in out] == ["P0", "P1", "P2", "P3"]
+
+
+def test_pointwise_scores_batches_and_validates(monkeypatch):
+    from citens.agents import rerank
+
+    papers = [_p(f"P{i}", doi=f"10.1/{i}") for i in range(3)]
+    calls = []
+
+    all_scores = ["2", "10", "0"]
+    served = 0
+
+    def fake_chat(sys_p, user_p, **kw):
+        nonlocal served
+        n = len([ln for ln in user_p.splitlines() if ln[:1].isdigit()])
+        calls.append(n)
+        got = all_scores[served:served + n]
+        served += n
+        return '{"scores": [' + ", ".join(got) + "]}"
+
+    monkeypatch.setattr("citens.llm.chat", fake_chat)
+    assert rerank._pointwise_scores("q", papers, batch=2) == [2, 10, 0]
+    assert len(calls) == 2  # batched: 2 + 1
+
+    # length mismatch = garbage, not partial scores
+    monkeypatch.setattr("citens.llm.chat", lambda *a, **k: '{"scores": [1]}')
+    assert rerank._pointwise_scores("q", papers) is None
+
+
+def test_cached_queries_freezes_generation(tmp_path):
+    from citens.eval.litsearch import _cached_queries
+
+    cache_file = tmp_path / "gen_cache.json"
+    calls = []
+
+    def gen():
+        calls.append(1)
+        return ["a query", "another"]
+
+    out1 = _cached_queries("hyde", "Q1?", gen, path=cache_file)
+    out2 = _cached_queries("hyde", "Q1?", gen, path=cache_file)  # cache hit
+    assert out1 == out2 == ["a query", "another"]
+    assert len(calls) == 1  # generator ran once, second call was a hit
+    # a different question is a different key
+    _cached_queries("hyde", "Q2?", gen, path=cache_file)
+    assert len(calls) == 2
+
+
+def test_oa_title_filter_informative_words_only():
+    from citens.eval.litsearch import oa_title_filter
+
+    f = oa_title_filter("MISC: A Mixed Strategy-Aware Model integrating COMET for")
+    assert f == "MISC Mixed Strategy Aware Model integrating COMET for"
+
+
+def test_oa_title_search_caches_and_never_caches_failure(tmp_path, monkeypatch):
+    import asyncio
+
+    from citens.eval import litsearch as ls
+
+    calls = []
+
+    async def fake_fetch(filt):
+        calls.append(filt)
+        if len(calls) == 1:
+            return [{"display_name": "MTAG: Modal-Temporal Attention Graph",
+                     "doi": "https://doi.org/10.1/x", "publication_year": 2022,
+                     "cited_by_count": 55}]
+        raise RuntimeError("openalex 429")
+
+    monkeypatch.chdir(tmp_path)  # cache under cwd like the rest of the bench
+    papers = asyncio.run(ls.oa_title_search(["Q One", "Q Two"], fetch=fake_fetch))
+    assert [p.title[:4] for p in papers["Q One"]] == ["MTAG"]
+    assert papers["Q One"][0].doi == "10.1/x"
+    assert papers["Q Two"] == []  # failure -> empty, not cached
+    # second round: hit read from disk, only the failed one refetches
+    papers2 = asyncio.run(ls.oa_title_search(["Q One", "Q Two"], fetch=fake_fetch))
+    assert [p.title[:4] for p in papers2["Q One"]] == ["MTAG"]
+    assert papers2["Q Two"] == []
+    assert len(calls) == 3  # Q Two retried (not poisoned), Q One did not
