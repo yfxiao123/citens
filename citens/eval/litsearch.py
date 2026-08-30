@@ -35,9 +35,12 @@ import json
 import random
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
+from citens import cache
 from citens.events import EventBus
 from citens.models import Paper, ScoredPaper
 from citens.ranking import rank_papers
@@ -47,6 +50,46 @@ PER_SOURCE = 20  # per-source result cap == the union@20 ceiling
 PLANNED_DEPTH = 40  # planned-leg per-cell depth (fused top-20 is the answer)
 # each query family's guaranteed seats in the adaptive candidate pool
 _ADAPTIVE_FAMILY_QUOTA = 30
+# query-generation cache version — bump when a generator prompt changes, so
+# frozen generations from an older prompt are not reused
+_GEN_CACHE_VER = 2
+
+
+def _cached_queries(
+    kind: str,
+    question: str,
+    gen: Callable[[], list[str]],
+    path: Path | None = None,
+) -> list[str]:
+    """Freeze LLM query generation per question (planner / hyde / pivot).
+
+    Measured problem: every generator regenerates per run (planner combos,
+    pivot-mined phrases), so between-run comparisons measured generation
+    luck, not the lever under test — a hyde-caught gold vanished next run
+    when the planner redraw changed the fusion mix. With generation frozen
+    AND search results cached, only the ranking lever varies. The cache
+    lives under bench_results/ (gitignored); bump _GEN_CACHE_VER to reseed.
+    """
+    p = path or Path("bench_results") / "gen_cache.json"
+    key = f"{_GEN_CACHE_VER}:{kind}:{question}"
+    try:
+        cache_doc = (
+            json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        )
+    except (OSError, json.JSONDecodeError):
+        cache_doc = {}
+    if key in cache_doc:
+        return [str(q) for q in cache_doc[key]]
+    out = [str(q) for q in gen()]
+    try:
+        cache_doc[key] = out
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps(cache_doc, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    except OSError:
+        pass  # cache write is best-effort; the run proceeds regardless
+    return out
 
 
 # --- data loading ------------------------------------------------------------
@@ -134,17 +177,39 @@ def gold_hits(ordered: list[Paper], golds: list[dict], k: int) -> float:
 
 
 async def search_one_query(
-    query: str, sources: list[str], per_source: int = PER_SOURCE
+    query: str,
+    sources: list[str],
+    per_source: int = PER_SOURCE,
+    health_out: dict[str, list[int]] | None = None,
 ) -> dict[str, list[Paper]]:
-    """Per-source result lists for one question (native relevance order)."""
+    """Per-source result lists for one question (native relevance order).
+
+    ``health_out`` accumulates per-source cell buckets [ok, empty, failed]
+    across every call that passes it — an exhausted provider 429s into
+    empty results that are indistinguishable from "the words didn't match"
+    unless counted (measured: OpenAlex dies mid-day and silently zeros
+    whole bench legs).
+    """
 
     async def _one(s: str) -> list[Paper]:
         try:
-            papers, _health, _stats = await search_round(
+            papers, health, _stats = await search_round(
                 [query], max_results=per_source, sources=[s]
             )
+            if health_out is not None:
+                b = health_out.setdefault(s, [0, 0, 0])
+                b[0] += 1
+                if not papers:
+                    h = health.get(s, "")
+                    if h.startswith("failed"):
+                        b[2] += 1
+                        b[0] -= 1
+                    else:
+                        b[1] += 1
             return papers
         except Exception:  # noqa: BLE001 — a dead source must not kill the bench
+            if health_out is not None:
+                health_out.setdefault(s, [0, 0, 0])[2] += 1
             return []
 
     results = await asyncio.gather(*(_one(s) for s in sources))
@@ -155,6 +220,82 @@ def _key_of(p: Paper) -> str:
     return ("d:" + _norm_doi(p.doi)) if p.doi else (
         "t:" + " ".join(sorted(_title_tokens(p.title)))
     )
+
+
+def oa_title_filter(title: str) -> str:
+    """OpenAlex ``filter=title.search:`` payload for one candidate title.
+
+    The relevance endpoint ranks full-text-ish matches; title.search is the
+    dedicated title-index — for HyDE-generated titles it is precisely the
+    near-exact-title matching shape that our dissection found to be the
+    only reliable lexical retrieval form. Informative words only (the
+    filter treats stopwords loosely but short tokens add noise)."""
+    words = [w for w in re.findall(r"[A-Za-z0-9]+", title) if len(w) > 2]
+    return " ".join(words[:10])
+
+
+async def oa_title_search(
+    titles: list[str], per_page: int = 20, fetch=None
+) -> dict[str, list[Paper]]:
+    """One OpenAlex title.search cell per candidate title (HyDE family).
+
+    Cached like search results; empty responses are NOT cached (a throttled
+    provider must not poison retries). ``fetch`` is injectable for tests.
+    """
+    import httpx
+
+    from citens.config import settings
+
+    async def _default_fetch(filt: str) -> list[dict]:
+        headers = {}
+        if settings.openalex_email:
+            headers["User-Agent"] = f"mailto:{settings.openalex_email}"
+        async with httpx.AsyncClient(timeout=25, headers=headers) as hc:
+            r = await hc.get(
+                "https://api.openalex.org/works",
+                params={"filter": f"title.search:{filt}", "per-page": per_page},
+            )
+            if r.status_code != 200:
+                raise RuntimeError(f"openalex {r.status_code}")
+            await asyncio.sleep(0.2)
+            return r.json().get("results", [])
+
+    fetch = fetch or _default_fetch
+    out: dict[str, list[Paper]] = {}
+    for t in titles:
+        cache_ns, cache_key = "eval.oa-title", {"t": t}
+        cached = cache.get(cache_ns, cache_key)
+        if cached is None:
+            try:
+                works = await fetch(oa_title_filter(t))
+            except Exception as e:  # noqa: BLE001 — a dead OA stays dead
+                print(f"[oa-title] {t[:40]}… failed: {e}", flush=True)
+                out[t] = []
+                continue
+            cached = [
+                {
+                    "title": w.get("display_name") or "",
+                    "doi": (w.get("doi") or "").replace("https://doi.org/", ""),
+                    "year": w.get("publication_year"),
+                    "cited": w.get("cited_by_count") or 0,
+                    "abstract": "",
+                }
+                for w in works
+            ]
+            if any(c["title"] for c in cached):
+                cache.put(cache_ns, cache_key, cached)
+        out[t] = [
+            Paper(
+                title=c["title"],
+                authors=[],
+                year=c["year"],
+                doi=c["doi"] or None,
+                citation_count=c["cited"],
+                source="oa-title",
+            )
+            for c in cached
+        ]
+    return out
 
 
 def interleave(per_source: dict[str, list[Paper]], order: list[str]) -> list[Paper]:
@@ -375,6 +516,7 @@ async def run_bench(
     sources: list[str] | None = None,
     with_planned: bool = False,
     with_adaptive: bool = False,
+    with_expand: bool = False,
     with_llm_rerank: bool = False,
     with_snowball: bool = False,
     agentic_n: int = 0,
@@ -407,7 +549,21 @@ async def run_bench(
         golds = [gold_map[str(c)] for c in row["corpusids"] if str(c) in gold_map]
         if not golds:
             continue
-        per_source = await search_one_query(query, sources)
+        # per-source cell health [ok, empty, failed] across ALL calls this
+        # question makes — a throttled provider shows up as failures, not
+        # as innocent zero-result queries
+        cell_health: dict[str, list[int]] = {}
+
+        async def _soq(
+            qtext: str,
+            depth: int = PER_SOURCE,
+            _h: dict[str, list[int]] = cell_health,
+        ) -> dict[str, list[Paper]]:
+            return await search_one_query(
+                qtext, sources, per_source=depth, health_out=_h
+            )
+
+        per_source = await _soq(query)
         union = interleave(per_source, sources)
         det: dict[str, list[Paper]] = {f"single:{s}": per_source[s] for s in sources}
         det["union"] = union
@@ -420,13 +576,13 @@ async def run_bench(
                 asyncio.to_thread(llm_rerank, query, union)
             )
         if with_planned:
-            qs = await asyncio.to_thread(plan_keyword_queries, query)
+            qs = await asyncio.to_thread(
+                _cached_queries, "planned", query,
+                partial(plan_keyword_queries, query),
+            )
             per_query = dict(zip(
                 qs,
-                await asyncio.gather(
-                    *(search_one_query(q, sources, per_source=PLANNED_DEPTH)
-                      for q in qs)
-                ),
+                await asyncio.gather(*(_soq(q, PLANNED_DEPTH) for q in qs)),
                 strict=True,
             ))
             # one depth-40 fetch feeds both legs: RRF only ever sums ranks,
@@ -461,13 +617,19 @@ async def run_bench(
             # doubled r@5 whenever the gold was in the candidate pool).
             from citens.agents.hypothetical import hypothetical_queries
             from citens.agents.pivot import pivot_from_abstracts
+            from citens.agents.rerank import cascade_rank
 
             hyde_qs = [
-                q for q in await asyncio.to_thread(hypothetical_queries, query)
+                q for q in await asyncio.to_thread(
+                    _cached_queries, "hyde", query,
+                    partial(hypothetical_queries, query),
+                )
                 if q and q.lower() not in {k.lower() for k in per_query}
             ]
+            piv_head = det["planned_raw"][:10]
             piv_qs = await asyncio.to_thread(
-                pivot_from_abstracts, query, det["planned_raw"][:10]
+                _cached_queries, "pivot", query,
+                partial(pivot_from_abstracts, query, piv_head),
             )
             # mined names are exact entity strings — quoting keeps the terms
             # together; hypothetical titles are searched raw (title-shaped
@@ -483,9 +645,7 @@ async def run_bench(
             ]
             extra_cells = dict(zip(
                 extra_qs,
-                await asyncio.gather(
-                    *(search_one_query(q, sources) for q in extra_qs)
-                ),
+                await asyncio.gather(*(_soq(q) for q in extra_qs)),
                 strict=True,
             )) if extra_qs else {}
             # global RRF over everything — kept as the dilution witness: a
@@ -510,6 +670,21 @@ async def run_bench(
                     sources,
                 ),
             ]
+            # fifth family: OpenAlex's dedicated title index over the HyDE
+            # titles — title.search is the endpoint-shaped version of the
+            # only retrieval form our dissection found reliable
+            oa_title_cells = await oa_title_search(hyde_qs[:4])
+            if any(oa_title_cells.values()):
+                families.append(fuse_multi_query(
+                    {f"[title] {t}": {"openalex": cs}
+                     for t, cs in oa_title_cells.items()},
+                    ["openalex"],
+                ))
+                detail_adaptive_queries_extra = {
+                    "oa_title": [t for t, v in oa_title_cells.items() if v]
+                }
+            else:
+                detail_adaptive_queries_extra = {"oa_title": []}
             pool: list[Paper] = []
             seen_keys: set[str] = set()
             for fam in families:
@@ -518,10 +693,42 @@ async def run_bench(
                     if k not in seen_keys:
                         seen_keys.add(k)
                         pool.append(p)
+            # sixth family: one-hop citation expansion from the pool's own
+            # head — a live probe (seed 42) reached a never-hit gold via a
+            # forward citation edge from a HyDE-family anchor that lexical
+            # retrieval had placed correctly; the earlier all-zero verdict
+            # came from WRONG-subfield (planned) anchors, not from the
+            # channel being dead
+            expanded: list[Paper] = []
+            if with_expand:
+                from citens.search.snowball import snowball
+
+                anchors = [p for p in pool[:8] if p.doi][:5]
+                if anchors:
+                    try:
+                        existing = seen_keys
+                        expanded = await snowball(
+                            anchors, existing_ids=existing,
+                            backward=True, forward=True, related=False,
+                            limit_per_paper=100, top=120,
+                        )
+                    except Exception as e:  # noqa: BLE001 — expansion is optional
+                        print(f"[expand] failed: {e}", flush=True)
+            if expanded:
+                seen2 = set(seen_keys)
+                for p in expanded[:_ADAPTIVE_FAMILY_QUOTA]:
+                    k = _key_of(p)
+                    if k not in seen2:
+                        seen2.add(k)
+                        pool.append(p)
             det["adaptive"] = await asyncio.to_thread(
-                llm_rerank, query, pool, 4 * _ADAPTIVE_FAMILY_QUOTA
+                cascade_rank, query, pool, 50, True
             )
-            detail_adaptive_queries = {"hyde": hyde_qs, "pivot": piv_qs}
+            detail_adaptive_queries = {
+                "hyde": hyde_qs,
+                "pivot": piv_qs,
+                **detail_adaptive_queries_extra,
+            }
         if rerank_t is not None:
             det["llm_rerank"] = await rerank_t
 
@@ -535,6 +742,10 @@ async def run_bench(
             detail["planned_queries"] = planned_qs
         if with_adaptive and with_planned:
             detail["adaptive_queries"] = detail_adaptive_queries
+        detail["cells"] = {
+            s: {"ok": b[0], "empty": b[1], "failed": b[2]}
+            for s, b in cell_health.items()
+        } if cell_health else None
         for name, ordered in det.items():
             r5 = gold_hits(ordered, golds, 5)
             r20 = gold_hits(ordered, golds, 20)
@@ -577,9 +788,11 @@ async def run_bench(
             f" recs={sbd['recs']:.0%} sem@20={sbd['sem20']:.0%}"
             if sbd and "reach" in sbd else ""
         )
+        dead = [s for s, b in cell_health.items() if b[2] > 0]
+        dead_s = f" !! DEAD:{','.join(dead)}" if dead else ""
         print(f"[{qi + 1}/{len(rows)}] {row['query_set']:14s} "
               f"union r@5={detail['union']['r5']:.0%} r@20={detail['union']['r20']:.0%}"
-              f"{pl_s}{ad_s}{sb_s} ({got})", flush=True)
+              f"{pl_s}{ad_s}{sb_s}{dead_s} ({got})", flush=True)
 
     # agentic leg on the first agentic_n sampled questions
     for qi in range(min(agentic_n, len(result.details))):

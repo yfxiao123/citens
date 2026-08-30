@@ -212,8 +212,26 @@ def _clarify_interactive(topic: str) -> dict:
 
 
 @app.command()
-def sources():
+def sources(
+    probe: bool = typer.Option(
+        False, "--probe", help="各源实时发一次探测请求，读回限流头与配额余量"
+    ),
+):
     """List available search sources."""
+    if probe:
+        import asyncio
+
+        from citens.search.quota import probe_all
+
+        res = asyncio.run(probe_all())
+        for name, rows in res.items():
+            t = Table(title=f"{name}")
+            t.add_column("field", style="cyan")
+            t.add_column("value")
+            for k, v in rows:
+                t.add_row(k, str(v)[:100])
+            console.print(t)
+        return
     tbl = Table(title="可用检索源 / Search sources")
     tbl.add_column("name", style="cyan")
     for name in SEARCH_REGISTRY:
@@ -297,6 +315,10 @@ def bench(
         False, "--adaptive",
         help="加测自适应检索腿：假想标题(HyDE)+PRF挖词 并池，LLM top-100 语义排序（需 --planned）",
     ),
+    expand: bool = typer.Option(
+        False, "--expand",
+        help="adaptive 池加一跳引文扩展（S2，锚=池头部；实测可达词法进不来的金标）",
+    ),
     snowball: bool = typer.Option(
         False, "--snowball",
         help="加测图搭桥观察腿：锚=planned 融合 top-5，测可达天花板/词法排序/语义重排",
@@ -336,6 +358,7 @@ def bench(
             sources=[s.strip() for s in sources.split(",") if s.strip()] or None,
             with_planned=planned,
             with_adaptive=adaptive,
+            with_expand=expand,
             with_llm_rerank=llm_rerank,
             with_snowball=snowball,
             agentic_n=agentic,

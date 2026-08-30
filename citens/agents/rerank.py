@@ -67,3 +67,85 @@ def listwise_rank(
         return [candidates[i] for i in idxs] + papers[top:]
     except Exception:  # noqa: BLE001 — model hiccup: keep deterministic order
         return list(papers)
+
+
+_POINTWISE_SYS = """You score retrieval candidates for a literature-search \
+question. Reply ONLY JSON: {"scores": [int, ...]} — one score 0-10 per \
+candidate, same order as listed. 10 = definitely a paper answering the \
+question; 5 = topically related; 0 = unrelated. Judge each candidate \
+independently."""
+
+
+def _pointwise_scores(
+    question: str, papers: list[Paper], batch: int = 50
+) -> list[int] | None:
+    """Cheap per-candidate relevance scores over the WHOLE pool (coarse
+    stage). Returns None on any failure — the caller then skips coarse
+    ranking rather than ranking on garbage. Batches run concurrently:
+    the coarse stage is latency-bound (3 sequential 10-25s calls doubled
+    the bench's per-question wall time), not token-bound."""
+    import json as _json
+    from concurrent.futures import ThreadPoolExecutor
+
+    from citens import llm
+
+    def _score(chunk: list[Paper]) -> list[int] | None:
+        listing = "\n".join(
+            f"{i}. {p.title} ({p.year or '?'})" for i, p in enumerate(chunk)
+        )
+        try:
+            raw = llm.chat(
+                _POINTWISE_SYS,
+                f"Question: {question}\n\nCandidates:\n{listing}",
+                cheap=True,
+                temperature=0.0,
+                response_json=True,
+            )
+            vals = (_json.loads(raw) or {}).get("scores") or []
+            if not isinstance(vals, list) or len(vals) != len(chunk):
+                return None
+            return [v if isinstance(v, int) else 0 for v in vals]
+        except Exception:  # noqa: BLE001 — coarse failure = skip, not fail
+            return None
+
+    chunks = [papers[s:s + batch] for s in range(0, len(papers), batch)]
+    with ThreadPoolExecutor(max_workers=min(3, len(chunks))) as ex:
+        results = list(ex.map(_score, chunks))
+    scores: list[int] = []
+    for r in results:
+        if r is None:
+            return None
+        scores.extend(r)
+    return scores
+
+
+def cascade_rank(
+    question: str,
+    papers: list[Paper],
+    coarse_keep: int = 50,
+    strong: bool = False,
+) -> list[Paper]:
+    """Two-stage rank: pointwise coarse over the whole pool, listwise fine.
+
+    Why a cascade (bench-measured): the cheap listwise over 100+ candidates
+    is high-variance — it promotes some golds to #1 and demotes others below
+    rank 20 in the same run; over ~30 it was stable and doubled recall@5.
+    The coarse pointwise pass sees EVERY candidate (no truncation loss: a
+    gold at pool position 52 still gets scored), keeps the top
+    ``coarse_keep``; the listwise fine stage then orders a set small enough
+    to be reliable. Any stage failure degrades to the remaining stage, and
+    ultimately to the input order — never drops papers.
+    """
+    if len(papers) <= coarse_keep:
+        coarse_order = list(papers)  # pool already fits the fine stage
+    else:
+        scores = _pointwise_scores(question, papers)
+        if scores is None:
+            coarse_order = list(papers)
+        else:
+            idx = sorted(range(len(papers)), key=lambda i: (-scores[i], i))
+            coarse_order = [papers[i] for i in idx]
+    fine = listwise_rank(
+        question, coarse_order[:coarse_keep], top=coarse_keep, strong=strong
+    )
+    return fine + coarse_order[coarse_keep:]

@@ -38,17 +38,26 @@ containing that name verbatim.
 4. Reply ONLY JSON: {"titles": ["...", ...]}."""
 
 
-def hypothetical_queries(question: str, k: int = 4) -> list[str]:
+def hypothetical_queries(question: str, k: int = 6) -> list[str]:
     """Title-shaped queries for the answering papers (HyDE variant).
+
+    Two samples per question — a deterministic one (temperature 0) and a
+    wide one (temperature 0.9) — UNIONED in order. Measured motivation:
+    which titles a single sample coins is a lottery (a HyDE-caught gold
+    vanished next run when the redraw changed the mix), while the oracle
+    ceiling of the title shape is high (13/15 golds retrievable at rank 1
+    by their own titles) — so coverage comes from sampling breadth, not
+    from any single lucky draw.
 
     Returns [] on any LLM failure — a hypothesis that cannot be generated
     must degrade to "no extra queries", never fail the caller.
     """
-    try:
+    def _sample(temperature: float) -> list[str]:
         result = chat_json(
             SYSTEM_PROMPT,
             f"Literature question: {question}",
             max_tokens=400,
+            temperature=temperature,
             thinking=False,
             cheap=True,
         )
@@ -59,6 +68,14 @@ def hypothetical_queries(question: str, k: int = 4) -> list[str]:
             t = t.strip().strip('"')[:120]
             if 3 <= len(t.split()) <= 16:
                 out.append(t)
-        return out[:k]
+        return out
+
+    try:
+        strict = _sample(0.0)
     except Exception:  # noqa: BLE001 — degrade to no queries, never fail
         return []
+    try:
+        wide = _sample(0.9)
+    except Exception:  # noqa: BLE001 — the strict sample is already enough
+        wide = []
+    return list(dict.fromkeys(strict + wide))[:k]
