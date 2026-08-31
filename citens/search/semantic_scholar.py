@@ -31,7 +31,8 @@ _MIN_INTERVAL = 1.1  # 1 rps + clock-skew margin
 
 
 async def _throttled_get(
-    client: httpx.AsyncClient, url: str, *, params: dict
+    client: httpx.AsyncClient, url: str, *, params: dict,
+    headers: dict | None = None,
 ) -> httpx.Response:
     global _last_start
     for attempt in range(2):
@@ -40,7 +41,7 @@ async def _throttled_get(
             if wait > 0:
                 await asyncio.sleep(wait)
             _last_start = time.monotonic()
-            resp = await client.get(url, params=params)
+            resp = await client.get(url, params=params, headers=headers)
         if resp.status_code != 429:
             return resp
         await asyncio.sleep(2.0 * (attempt + 1))  # rejected anyway — back off

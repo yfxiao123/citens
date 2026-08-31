@@ -767,7 +767,10 @@ async def run_bench(
                 )
 
                 web_qs = await asyncio.to_thread(
-                    _cached_queries, "webq", query,
+                    # "webq3": v3 prompt (3 EN queries; first two quote the
+                    # question's most distinctive spans verbatim) — reseed
+                    # without touching other families' cached generations.
+                    _cached_queries, "webq3", query,
                     partial(generate_web_query_list, query),
                 )
                 if web_qs:

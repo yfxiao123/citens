@@ -37,9 +37,20 @@ _BING_URL = "https://www.bing.com/search"
 _SERPER_URL = "https://google.serper.dev/search"
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
-_ARXIV_HREF_RE = re.compile(r"arxiv\.org/(?:abs|pdf|html)/([0-9]{4}\.[0-9]{4,5})", re.I)
-_ACL_HREF_RE = re.compile(r"aclanthology\.org/([A-Z0-9.\-]+)/", re.I)
-_DOI_HREF_RE = re.compile(r"doi\.org/(10\.[0-9]{4,9}/\S+)", re.I)
+_ARXIV_HREF_RE = re.compile(
+    r"(?:arxiv\.org/(?:abs|pdf|html)|alphaxiv\.org/abs)/([0-9]{4}\.[0-9]{4,5})",
+    re.I,
+)
+# aclanthology.org/<venue-id>(.pdf|/) → DOI 10.18653/v1/<venue-id>, no request
+_ACL_HREF_RE = re.compile(r"aclanthology\.org/([A-Z0-9.\-]+?)(?:\.[a-z]+)?(?:[/?#]|$)", re.I)
+# DOI anywhere it appears in a result URL: doi.org/..., publisher /doi/ or
+# /article/ paths (dl.acm.org, journals.sagepub.com, link.springer.com, ...)
+_DOI_HREF_RE = re.compile(
+    r"(?:doi\.org/|/doi/(?:abs/|full/)?|/article/)(10\.[0-9]{4,9}/[^?&#\s]+)",
+    re.I,
+)
+# semanticscholar.org/paper/<slug>/<40-hex paperId>
+_S2_HREF_RE = re.compile(r"semanticscholar\.org/paper/[^/]+/([0-9a-f]{40})", re.I)
 # redirect-wrapped result hrefs: //duckduckgo.com/l/?uddg=<urlencoded>
 _UDDG_RE = re.compile(r"[?&]uddg=([^&]+)")
 
@@ -48,12 +59,21 @@ question is about. Blogs and forums describe papers by their contribution \
 story, not their title, so search the story.
 
 Rules:
-1. Reply ONLY JSON: {"en": ["...", ...], "zh": ["...", ...]} — 2 English and \
+1. Reply ONLY JSON: {"en": ["...", ...], "zh": ["...", ...]} — 3 English and \
 2 Chinese queries.
-2. Queries are plain keyword phrases (3-8 words), no operators, no site:.
-3. The Chinese ones must be natural Chinese CS-community phrasing (the kind \
+2. FIRST English query: quote VERBATIM the question's most DISTINCTIVE span \
+— 4-8 words carrying its unusual technical wording, the part a generic paper \
+on the topic would NOT share ("re-attempting the abstained instances", \
+"unifying diffusion process across resolutions"). NOT the generic topic \
+words. Questions paraphrase abstracts, so the question's own phrasing often \
+matches the paper's title wording on blogs and paper pages.
+3. Second English query: a DIFFERENT distinctive verbatim span from another \
+part of the question.
+4. Third English query: broader concept keywords (3-8 words) describing the \
+contribution story.
+5. The Chinese ones must be natural Chinese CS-community phrasing (the kind \
 used in Zhihu/CSDN tutorials), not translations of the English ones.
-4. Cover different aspects of the question across the queries."""
+6. Plain keyword phrases only — no operators, no quotes, no site:."""
 
 
 def _decode_href(href: str) -> str:
@@ -203,15 +223,30 @@ async def _anchor_papers(results: list[dict], client: httpx.AsyncClient) -> list
         paper.source = provenance
         papers.append(paper)
 
-    # 1. URL anchors — exact
-    for r in results:
-        url = r["url"]
-        m = _ARXIV_HREF_RE.search(url)
-        if m:
+    async def _resolve_doi(doi: str, provenance: str) -> None:
+        try:
+            rr = await client.get(
+                f"https://api.crossref.org/works/{doi}", timeout=15
+            )
+            msg = rr.json().get("message") or {}
+            title = (msg.get("title") or [""])[0]
+            if title:
+                await _add(Paper(
+                    title=title, authors=[],
+                    doi=doi.split("?")[0],
+                    citation_count=msg.get("is-referenced-by-count") or 0,
+                ), provenance)
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _arxiv_lookup(arxiv_id: str, provenance: str) -> None:
+        # export.arxiv.org drops connections intermittently (measured
+        # 2026-08-31: plain ConnectError mid-batch) — one retry recovers it.
+        for attempt in range(2):
             try:
                 rr = await client.get(
-                    f"https://export.arxiv.org/api/query",
-                    params={"id_list": m.group(1), "max_results": 1},
+                    "https://export.arxiv.org/api/query",
+                    params={"id_list": arxiv_id, "max_results": 1}, timeout=15,
                 )
                 entries = re.findall(r"<entry>(.*?)</entry>", rr.text, re.S)
                 if entries:
@@ -219,57 +254,144 @@ async def _anchor_papers(results: list[dict], client: httpx.AsyncClient) -> list
                     if t:
                         await _add(Paper(
                             title=re.sub(r"\s+", " ", t.group(1)).strip(),
-                            authors=[], doi=f"10.48550/arxiv.{m.group(1)}",
-                            url=f"https://arxiv.org/abs/{m.group(1)}",
-                        ), "web-arxiv-link")
+                            authors=[], doi=f"10.48550/arxiv.{arxiv_id}",
+                            url=f"https://arxiv.org/abs/{arxiv_id}",
+                        ), provenance)
+                return
             except Exception:  # noqa: BLE001
-                pass
+                if attempt:
+                    return
+                await asyncio.sleep(1.5)
+
+    # 1. URL anchors — exact
+    for r in results:
+        url = r["url"]
+        m = _ARXIV_HREF_RE.search(url)
+        if m:
+            await _arxiv_lookup(m.group(1), "web-arxiv-link")
+            continue
+        m = _ACL_HREF_RE.search(url)
+        if m and re.search(r"\d", m.group(1)):
+            # anthology venue-id → ACL DOI directly, no page fetch
+            await _resolve_doi(f"10.18653/v1/{m.group(1)}", "web-acl-link")
             continue
         m = _DOI_HREF_RE.search(url)
         if m:
+            from urllib.parse import unquote
+
+            await _resolve_doi(unquote(m.group(1)), "web-doi-link")
+            continue
+        m = _S2_HREF_RE.search(url)
+        if m:
             try:
-                rr = await client.get(
-                    f"https://api.crossref.org/works/{m.group(1)}", timeout=15
+                from citens.search.semantic_scholar import _throttled_get
+
+                headers = {}
+                if settings.semantic_scholar_api_key:
+                    headers["x-api-key"] = settings.semantic_scholar_api_key
+                rr = await _throttled_get(
+                    client,
+                    f"https://api.semanticscholar.org/graph/v1/paper/{m.group(1)}",
+                    params={"fields": "title,externalIds,citationCount"},
+                    headers=headers or None,
                 )
-                msg = rr.json().get("message") or {}
-                title = (msg.get("title") or [""])[0]
-                if title:
+                if rr.status_code == 200:
+                    data = rr.json()
+                    ext = data.get("externalIds") or {}
+                    arxiv_id = ext.get("ArXiv")
                     await _add(Paper(
-                        title=title, authors=[],
-                        doi=m.group(1).split("?")[0],
-                        citation_count=msg.get("is-referenced-by-count") or 0,
-                    ), "web-doi-link")
+                        title=data.get("title") or "",
+                        authors=[],
+                        doi=ext.get("DOI")
+                        or (f"10.48550/arxiv.{arxiv_id}" if arxiv_id else None),
+                        citation_count=data.get("citationCount") or 0,
+                        url=(f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else url),
+                    ), "web-s2-link")
             except Exception:  # noqa: BLE001
                 pass
 
-    # 2. Title-string anchors — candidates, similarity-gated
+    # 2. Title-string anchors — candidates, similarity-gated.
+    # Crossref covers journals/proceedings; arXiv ti-search rescues the ML
+    # preprint majority Crossref does not index (measured: SafeDreamer's
+    # SERP subtitle hits its arXiv title at sim 0.88 while Crossref returns
+    # nothing). arXiv calls are capped per batch and spaced — API etiquette.
+    arxiv_calls = 0
     for r in results:
         cand = _clean_title_candidate(r["title"])
         if len(cand.split()) < 5 and len(cand) < 20:
             continue
+        paper = await _title_anchor_crossref(client, cand)
+        if paper is None and arxiv_calls < 3:
+            if arxiv_calls:
+                await asyncio.sleep(1.0)
+            arxiv_calls += 1
+            paper = await _title_anchor_arxiv(client, cand)
+        if paper is not None:
+            await _add(paper, "web-title-anchor")
+    return papers
+
+
+async def _title_anchor_crossref(
+    client: httpx.AsyncClient, cand: str
+) -> Paper | None:
+    try:
+        rr = await client.get(
+            "https://api.crossref.org/works",
+            params={"query.bibliographic": cand, "rows": 3},
+            timeout=15,
+        )
+        items = (rr.json().get("message") or {}).get("items") or []
+        best, best_sim = None, 0.0
+        for it in items:
+            t = (it.get("title") or [""])[0]
+            sim = _title_sim(cand, t)
+            if sim > best_sim:
+                best, best_sim = (t, it), sim
+        if best and best_sim >= 0.75:
+            t, it = best
+            return Paper(
+                title=t, authors=[],
+                doi=(it.get("DOI") or "") or None,
+                citation_count=it.get("is-referenced-by-count") or 0,
+            )
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+async def _title_anchor_arxiv(
+    client: httpx.AsyncClient, cand: str
+) -> Paper | None:
+    for attempt in range(2):  # export.arxiv.org drops connections at times
         try:
             rr = await client.get(
-                "https://api.crossref.org/works",
-                params={"query.bibliographic": cand, "rows": 3},
+                "https://export.arxiv.org/api/query",
+                params={"search_query": f'ti:"{cand}"', "max_results": 3},
                 timeout=15,
             )
-            items = (rr.json().get("message") or {}).get("items") or []
-            best, best_sim = None, 0.0
-            for it in items:
-                t = (it.get("title") or [""])[0]
-                sim = _title_sim(cand, t)
+            entries = re.findall(r"<entry>(.*?)</entry>", rr.text, re.S)
+            best_title, best_id, best_sim = None, None, 0.0
+            for e in entries:
+                t = re.search(r"<title>(.*?)</title>", e, re.S)
+                iid = re.search(r"/abs/([^<]+)</id>", e)
+                if not t or not iid:
+                    continue
+                title = re.sub(r"\s+", " ", t.group(1)).strip()
+                sim = _title_sim(cand, title)
                 if sim > best_sim:
-                    best, best_sim = (t, it), sim
-            if best and best_sim >= 0.75:
-                t, it = best
-                await _add(Paper(
-                    title=t, authors=[],
-                    doi=(it.get("DOI") or "") or None,
-                    citation_count=it.get("is-referenced-by-count") or 0,
-                ), "web-title-anchor")
+                    best_title, best_id, best_sim = title, iid.group(1), sim
+            if best_title and best_sim >= 0.75:
+                return Paper(
+                    title=best_title, authors=[],
+                    doi=f"10.48550/arxiv.{best_id}",
+                    url=f"https://arxiv.org/abs/{best_id}",
+                )
+            return None
         except Exception:  # noqa: BLE001
-            continue
-    return papers
+            if attempt:
+                return None
+            await asyncio.sleep(1.5)
+    return None
 
 
 def _title_sim(a: str, b: str) -> float:
@@ -288,14 +410,20 @@ def generate_web_queries(question: str) -> dict[str, list[str]]:
 
     try:
         result = chat_json(
+            # Strong model, not cheap: span selection ("which 4-8 words of the
+            # question are unusual enough to match the paper's own wording?")
+            # is exactly where the cheap model flops — measured on seed-42
+            # misses it kept picking the generic topic span (2026-08-31).
             QUERY_SYSTEM, f"Literature question: {question}",
-            max_tokens=300, thinking=False, cheap=True,
+            max_tokens=400, thinking=False,
         )
-        pick = lambda v: [  # noqa: E731
-            str(q).strip()[:120] for q in (v or [])
-            if isinstance(q, str) and 2 <= len(q.split()) <= 12
-        ][:2]
-        return {"en": pick(result.get("en")), "zh": pick(result.get("zh"))}
+        def pick(v, cap: int):
+            return [
+                str(q).strip()[:120] for q in (v or [])
+                if isinstance(q, str) and 2 <= len(q.split()) <= 12
+            ][:cap]
+
+        return {"en": pick(result.get("en"), 3), "zh": pick(result.get("zh"), 2)}
     except Exception:  # noqa: BLE001 — optional channel
         return {"en": [], "zh": []}
 
@@ -312,7 +440,9 @@ class WebSearchSource(SearchSource):
     BASE_URL = _DDG_URL
 
     async def search(self, keywords: list[str], max_results: int) -> list[Paper]:
-        per_query = max(max_results // max(len(keywords), 1), 5)
+        # depth ≥8 per query: the SERP call count is fixed per query, so
+        # deeper pages are free — they catch golds ranked 6-8 under siblings
+        per_query = max(max_results // max(len(keywords), 1), 8)
         out: list[Paper] = []
         async with httpx.AsyncClient(
             timeout=20, headers={"User-Agent": _UA}, follow_redirects=True

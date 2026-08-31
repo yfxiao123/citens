@@ -99,3 +99,136 @@ def test_source_registered():
     from citens.search.base import REGISTRY
 
     assert "web" in REGISTRY
+
+
+def test_arxiv_href_regex_includes_alphaxiv_and_html():
+    from citens.search.websearch import _ARXIV_HREF_RE
+
+    m = _ARXIV_HREF_RE.search("https://alphaxiv.org/abs/2402.15610")
+    assert m and m.group(1) == "2402.15610"
+    m = _ARXIV_HREF_RE.search("https://arxiv.org/html/2309.15840v2")
+    assert m and m.group(1) == "2309.15840"
+    assert not _ARXIV_HREF_RE.search("https://arxiv.org/list/cs.LG/recent")
+
+
+def test_s2_href_regex():
+    from citens.search.websearch import _S2_HREF_RE
+
+    url = ("https://www.semanticscholar.org/paper/SafeDreamer%3A-Safe-RL"
+           "-with-World-Models/abc123abc123abc123abc123abc123abc123abc1")
+    m = _S2_HREF_RE.search(url)
+    assert m and m.group(1) == "abc123abc123abc123abc123abc123abc123abc1"
+    assert not _S2_HREF_RE.search("https://semanticscholar.org/my-library")
+
+
+class _FakeResp:
+    def __init__(self, text="", payload=None, status_code=200):
+        self.text = text
+        self._payload = payload or {}
+        self.status_code = status_code
+
+    def json(self):
+        return self._payload
+
+
+class _FakeClient:
+    def __init__(self, resp):
+        self._resp = resp
+        self.calls = []
+
+    async def get(self, url, **kw):
+        self.calls.append(url)
+        return self._resp
+
+
+def test_title_anchor_arxiv_parses_and_gates():
+    import asyncio
+
+    from citens.search.websearch import _title_anchor_arxiv
+
+    feed = """<feed><entry><title>SafeDreamer: Safe Reinforcement Learning
+      with World Models</title><id>http://arxiv.org/abs/2408.08787v2</id>
+      </entry><entry><title>Unrelated Paper on Cooking</title>
+      <id>http://arxiv.org/abs/1900.00001v1</id></entry></feed>"""
+    p = asyncio.run(_title_anchor_arxiv(
+        _FakeClient(_FakeResp(text=feed)),
+        "Safe Reinforcement Learning with World Models",
+    ))
+    assert p is not None
+    assert p.title.startswith("SafeDreamer")
+    assert p.doi == "10.48550/arxiv.2408.08787v2"
+
+    # subtitle-level similarity (0.88 measured) still passes the 0.75 gate
+    feed2 = feed.replace("SafeDreamer: Safe", "SafeDreamer%3A Safe")
+    p2 = asyncio.run(_title_anchor_arxiv(
+        _FakeClient(_FakeResp(text=feed2)),
+        "Safe Reinforcement Learning with World Models",
+    ))
+    assert p2 is not None
+
+    # no similar title -> no anchor
+    p3 = asyncio.run(_title_anchor_arxiv(
+        _FakeClient(_FakeResp(text=feed)),
+        "Completely Different Query About Quantum Chemistry",
+    ))
+    assert p3 is None
+
+
+def test_title_anchor_crossref_gate():
+    import asyncio
+
+    from citens.search.websearch import _title_anchor_crossref
+
+    miss = _FakeResp(payload={"message": {"items": [
+        {"title": ["Some Other Journal Article Name"], "DOI": "10.1/x"},
+    ]}})
+    p = asyncio.run(_title_anchor_crossref(
+        _FakeClient(miss), "Completely Different Query About Something",
+    ))
+    assert p is None
+
+    hit = _FakeResp(payload={"message": {"items": [
+        {"title": ["A Paper About Exactly This Topic With A Long Title"],
+         "DOI": "10.1234/abc", "is-referenced-by-count": 7},
+    ]}})
+    p2 = asyncio.run(_title_anchor_crossref(
+        _FakeClient(hit), "A Paper About Exactly This Topic With A Long Title",
+    ))
+    assert p2 is not None and p2.doi == "10.1234/abc"
+
+
+def test_query_prompt_requires_verbatim_phrase():
+    from citens.search.websearch import QUERY_SYSTEM
+
+    assert "VERBATIM" in QUERY_SYSTEM
+
+
+def test_doi_href_regex_catches_publisher_paths():
+    from urllib.parse import unquote
+
+    from citens.search.websearch import _DOI_HREF_RE
+
+    cases = [
+        "https://doi.org/10.18653/v1/2021.naacl-main.79",
+        "https://dl.acm.org/doi/10.1145/3542927",
+        "https://journals.sagepub.com/doi/10.3233/FAIA251029",
+        "https://link.springer.com/article/10.1007/s10489-026-07175-4",
+        "https://ieeexplore.ieee.org/document/12345",  # no DOI → no match
+    ]
+    got = [_DOI_HREF_RE.search(u) for u in cases]
+    assert got[0] and got[0].group(1) == "10.18653/v1/2021.naacl-main.79"
+    assert got[1] and got[1].group(1) == "10.1145/3542927"
+    assert got[2] and got[2].group(1) == "10.3233/FAIA251029"
+    assert got[3] and got[3].group(1) == "10.1007/s10489-026-07175-4"
+    assert got[4] is None
+
+
+def test_acl_href_regex_strips_extension():
+    from citens.search.websearch import _ACL_HREF_RE
+
+    m = _ACL_HREF_RE.search("https://aclanthology.org/2021.naacl-main.79.pdf")
+    assert m and m.group(1) == "2021.naacl-main.79"
+    m = _ACL_HREF_RE.search("https://aclanthology.org/2021.naacl-main.79/")
+    assert m and m.group(1) == "2021.naacl-main.79"
+    m = _ACL_HREF_RE.search("https://aclanthology.org/P19-1234")
+    assert m and m.group(1) == "P19-1234"
