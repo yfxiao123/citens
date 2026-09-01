@@ -783,6 +783,30 @@ async def run_bench(
                             pool.append(p)
             except Exception as e:  # noqa: BLE001 — optional channel
                 print(f"[web] failed: {e}", flush=True)
+            # ninth family: survey-seed reference harvest — a subfield
+            # survey's reference list is a human-curated canon holding
+            # exactly the milestone papers "which paper did X" questions
+            # ask about. Seeds come free from the pool's citation head
+            # (surveys ARE the most-cited pool members), references from
+            # S2's graph. Ranking stays with the LLM cascade: citation
+            # count is an INVERTED signal for this task (measured
+            # feature-only ranker 0/5 vs LLM 4/5 on the same pools).
+            try:
+                from citens.search.survey_seed import survey_seed_papers
+
+                survey_papers, survey_seeds = await survey_seed_papers(
+                    query, pool[:40],
+                    planner=planned_qs, quota=_ADAPTIVE_FAMILY_QUOTA,
+                )
+                if survey_seeds:
+                    detail_adaptive_queries_extra["survey"] = survey_seeds
+                for p in survey_papers:
+                    k = _key_of(p)
+                    if k not in seen_keys:
+                        seen_keys.add(k)
+                        pool.append(p)
+            except Exception as e:  # noqa: BLE001 — optional channel
+                print(f"[survey] failed: {e}", flush=True)
             # seventh family: one-hop citation expansion from the pool's own
             # head — a live probe (seed 42) reached a never-hit gold via a
             # forward citation edge from a HyDE-family anchor that lexical

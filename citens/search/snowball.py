@@ -203,15 +203,20 @@ def _s2_headers() -> dict:
 
 
 async def _s2_neighbors(doi: str, field: str, limit: int) -> list[dict]:
-    """references/citations of a DOI from the S2 graph (the OpenAlex
-    fallback). Shares the process-wide S2 throttle."""
+    """references/citations of a DOI (or raw 40-hex S2 paperId) from the S2
+    graph (the OpenAlex fallback). Shares the process-wide S2 throttle."""
     from citens.search.semantic_scholar import _throttled_get
 
+    pid = (
+        doi
+        if re.fullmatch(r"[0-9a-f]{40}", doi)
+        else _s2_paper_id(doi)
+    )
     try:
         async with httpx.AsyncClient(timeout=30, headers=_s2_headers()) as client:
             resp = await _throttled_get(
                 client,
-                f"{_S2_GRAPH}/{_s2_paper_id(doi)}/{field}",
+                f"{_S2_GRAPH}/{pid}/{field}",
                 params={"fields": _S2_FIELDS, "limit": min(limit, 100)},
             )
             if resp.status_code != 200:

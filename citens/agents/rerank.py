@@ -138,11 +138,70 @@ def _pointwise_scores(
     return scores
 
 
+_PAIRWISE_SYS = (
+    "You compare two candidate papers for a literature-search question. "
+    "Reply ONLY JSON: {\"winner\": \"A\"} or {\"winner\": \"B\"} — the paper "
+    "the question is more likely asking about. Judge by how specifically "
+    "the title/abstract matches the question's described contribution."
+)
+
+
+def _pairwise_pick(question: str, a: Paper, b: Paper) -> str | None:
+    """A/B judgment between two candidates. None = failure/no preference."""
+    import json as _json
+
+    from citens import llm
+
+    fmt = lambda p: (  # noqa: E731
+        f"{p.title} ({p.year or '?'}) — "
+        f"{(p.abstract or '').replace(chr(10), ' ')[:160]}"
+    )
+    try:
+        raw = llm.chat(
+            _PAIRWISE_SYS,
+            f"Question: {question}\n\nA: {fmt(a)}\n\nB: {fmt(b)}",
+            cheap=True,
+            temperature=0.0,
+            response_json=True,
+            thinking=False,
+        )
+        w = (_json.loads(raw) or {}).get("winner")
+        return w if w in ("A", "B") else None
+    except Exception:  # noqa: BLE001 — a failed pair keeps the current order
+        return None
+
+
+def _pairwise_refine(
+    question: str, papers: list[Paper], scores: list[int], band: int = 8
+) -> list[Paper]:
+    """One adjacent-comparison pass over the coarse head's TIED pairs.
+
+    Measured NO-GAIN on the seed-42 pools (2026-09-01 A/B: 26.7/26.7 with
+    and without; the pass DID fire — 5 tied pairs on q0 — but the gold sits
+    at score 8 under a 9/10-score cluster, and tie-only swaps cannot
+    promote across score levels). Kept behind ``cascade_rank(pairwise=)``
+    because it is order-conservative and cheap; the plateau it targets
+    (q0: ~5 plausible answers tied, question itself ambiguous) is a label
+    ambiguity, not a resolution problem. Degrades to input order.
+    """
+    head_p = list(papers[:band])
+    head_s = list(scores[:band])
+    for i in range(len(head_p) - 1):
+        if head_s[i] != head_s[i + 1]:
+            continue  # coarse scores already separate this pair
+        w = _pairwise_pick(question, head_p[i], head_p[i + 1])
+        if w == "B":
+            head_p[i], head_p[i + 1] = head_p[i + 1], head_p[i]
+            head_s[i], head_s[i + 1] = head_s[i + 1], head_s[i]
+    return head_p + list(papers[band:])
+
+
 def cascade_rank(
     question: str,
     papers: list[Paper],
     coarse_keep: int = 50,
     strong: bool = False,
+    pairwise: bool = False,
 ) -> list[Paper]:
     """Two-stage rank: pointwise coarse over the whole pool, listwise fine.
 
@@ -154,7 +213,12 @@ def cascade_rank(
     ``coarse_keep``; the listwise fine stage then orders a set small enough
     to be reliable. Any stage failure degrades to the remaining stage, and
     ultimately to the input order — never drops papers.
+
+    ``pairwise``: A/B re-judgement of adjacent TIED pairs in the coarse
+    head before the fine stage — measured no-gain (see _pairwise_refine),
+    off by default.
     """
+    scores: list[int] | None = None
     if len(papers) <= coarse_keep:
         coarse_order = list(papers)  # pool already fits the fine stage
     else:
@@ -164,6 +228,9 @@ def cascade_rank(
         else:
             idx = sorted(range(len(papers)), key=lambda i: (-scores[i], i))
             coarse_order = [papers[i] for i in idx]
+            scores = [scores[i] for i in idx]
+    if pairwise and scores is not None and len(coarse_order) > 1:
+        coarse_order = _pairwise_refine(question, coarse_order, scores)
     fine = listwise_rank(
         question, coarse_order[:coarse_keep], top=coarse_keep, strong=strong
     )
