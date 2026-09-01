@@ -252,3 +252,17 @@ LitSearch 是 Princeton 发的一个文献检索评测集，597 道真实的研�
 **综述种子召回（实现完成，对本失败集证伪，保留）**。`citens/search/survey_seed.py`：池内综述形论文扫描（免费）→ S2 关键词搜综述（免费）→ S2 拉引文收割（免费，进程级节流）。守卫迭代三轮：①原句搜索找来错误子领域综述（射电天文 "FIRST Radio Survey" 配扩散模型问题）→改用 planner 关键词；②"survey/review" 标记词本身是万能桥、"learning" 类泛词桥接 → 标记词剔出主题词集；③松档 ≥1 兜底放行（planner 措辞 junk "first" 与 "FIRST Radio Survey" 重叠）→ 改严格 ≥2、无种子则弃权（错误综述收割 30 篇离题引文 = 纯排序噪声，比弃权更糟）。终版 0/10 增益：**证伪测试表明金标不在正确子领域综述的前 100 条引文里**（Low-bit LLM survey 无 GLM、World Models survey 无 SafeDreamer）——LitSearch 未入池金标是近年 niche 论文，不是综述收录的经典。通道保留：弃权干净、对"哪篇是经典"型问题仍有潜在价值，S2 免费无预算压力。
 
 **边界带 pairwise 破平（实现完成，零增益，默认关）**。`rerank.py` `_pairwise_refine`：粗排头部等分相邻对 A/B 复议后进精排。A/B 同池对照 26.7/26.7 完全一致——诊断显示比较确实触发（q0 top-8 内 5 对并列）但 q0 金标得 8 分排在第 9-12 位：等分换位设计上不做跨分数层提升，金标被 9/10 分兄弟压死。这与"边界重打分无增益"指向同一结论：q0 型并列平台是**题面歧义**（5 篇都像正确答案），不是排序分辨率不足。旗标保留（`cascade_rank(pairwise=)`，默认 False）。
+
+### M. S2 语义召回实验（2026-09-01）：SPECTER 桥接对剩余词汇断层证伪
+
+三个角度测完，结论一致——**S2 的语义面跨不过剩余的词汇断层**：
+
+1. **relevance/裸文本端点不存在**。`/paper/relevance/search` 404；推荐族传闻的 `forctx`（段落文本进、推荐出）不存在于公开 API；问题原句进普通 `/paper/search` 返回空（BM25 词法墙本体）。S2 没有可用的"问题侧"语义入口。
+
+2. **recommendations 端点操作性不可用**。`forlist`（多锚 POST）对本 key 持续 429（4 次退避重试 + 65/90 秒间隔均无效）；`forpaper`（单锚 GET）也间歇 429——限流窗口远比 graph 端点严苛，15 题的 bench 量级都撑不住。
+
+3. **最好情形的质量证伪**。锚点改用"正确子领域兄弟论文"（我们池/web 实际产得出的最强锚，如 q10 用同概念的 Selective Selective Prediction、q12 用 Safe Planning via World Model）：4 题干净测完 **0/4** 命中，且 q10 的 30 篇推荐全是 VLM 社区论文——SPECTER 邻域按**引文社区**成形而非按概念：同概念不同社区（QA vs VLM）的金标不会被推荐；引文稀疏的新论文（我们的金标画像）本来就进不了基于引文共现的推荐。
+
+**净结论**：剩余 3 题词汇断层的语义通道必须是**问题侧真 embedding**（hosted embedding 模型或本地模型 + 论文侧向量库），锚点式 SPECTER 无论怎么选锚都到不了。
+
+**顺手修复的实证 bug**：第六家族（S2 recs）和 expand 的锚点选择此前不过滤 Crossref 的图表/审稿/补充材料子 DOI（q10 池头锚点是 `fig-5`/`review1`/`.s001`，S2 调用全部浪费）——`snowball.is_article_doi()` 过滤器接入两处。

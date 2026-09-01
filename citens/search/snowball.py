@@ -37,6 +37,17 @@ _S2_GRAPH = "https://api.semanticscholar.org/graph/v1/paper"
 _S2_RECS = "https://api.semanticscholar.org/recommendations/v1/papers"
 _S2_FIELDS = "title,authors,year,abstract,citationCount,externalIds,venue,url"
 _ARXIV_DOI_RE = re.compile(r"10\.48550/arxiv\.([0-9]{4}\.[0-9]{4,5})", re.I)
+# component DOIs Crossref mints for figures/tables/peer-reviews/supplementary
+# files — they resolve to media objects, not papers, and S2 recs/graph calls
+# on them are wasted (measured: a seed-42 pool head fed recs five of these)
+_SUB_DOI_RE = re.compile(
+    r"/(?:fig-\d+|t\d+|review\d+)|\.(?:s\d+|t\d+|fig\d+)$|/v\d+/review", re.I
+)
+
+
+def is_article_doi(doi: str | None) -> bool:
+    """True for paper-level DOIs (filters figure/review/supplementary)."""
+    return bool(doi) and not _SUB_DOI_RE.search(doi)
 
 
 def _s2_paper_id(doi: str) -> str:

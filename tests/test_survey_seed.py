@@ -160,3 +160,15 @@ def test_pairwise_refine_swaps_only_tied_adjacents(monkeypatch):
     assert titles[4:6] == ["F0", "E0"]
     # only adjacent tied pairs were compared
     assert len(calls) == 4
+
+
+def test_is_article_doi_filters_sub_dois():
+    from citens.search.snowball import is_article_doi
+
+    assert is_article_doi("10.18653/v1/2021.naacl-main.79")
+    assert is_article_doi("10.48550/arxiv.2408.08787")
+    assert not is_article_doi("10.7717/peerj-cs.3948/fig-5")
+    assert not is_article_doi("10.1111/acps.13761/v2/review1")
+    assert not is_article_doi("10.1021/acs.analchem.8b04768.s001")
+    assert not is_article_doi(None)
+    assert not is_article_doi("")

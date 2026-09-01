@@ -729,7 +729,15 @@ async def run_bench(
             # words, this one votes with embeddings we don't have. One
             # cheap S2 call (S2 quota — NOT the OpenAlex daily budget).
             if pool:
-                rec_dois = [p.doi for p in pool[:5] if p.doi]
+                # article-level DOIs only: pool heads carry Crossref figure/
+                # review/supplementary DOIs that S2 cannot use as anchors
+                # (measured on seed-42 q10: fig-5/.s001/review1 junk)
+                from citens.search.snowball import is_article_doi
+
+                rec_dois = [
+                    p.doi for p in pool[:10]
+                    if is_article_doi(p.doi)
+                ][:5]
                 try:
                     from citens.search.snowball import (
                         _s2_recommended,
@@ -815,9 +823,9 @@ async def run_bench(
             # channel being dead
             expanded: list[Paper] = []
             if with_expand:
-                from citens.search.snowball import snowball
+                from citens.search.snowball import is_article_doi, snowball
 
-                anchors = [p for p in pool[:8] if p.doi][:5]
+                anchors = [p for p in pool[:8] if is_article_doi(p.doi)][:5]
                 if anchors:
                     try:
                         existing = seen_keys
