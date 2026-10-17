@@ -491,10 +491,105 @@ def main() -> int:
     test_install()
     test_registry()
     test_cli_fallback()
+    test_engine_override_and_driver_scoping()
+    test_init_wizard()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
         print("failed: " + ", ".join(FAIL))
     return 0 if not FAIL else 1
+
+
+def test_engine_override_and_driver_scoping() -> None:
+    print("\n== installer engine/driver scoping (sandbox HOME) ==")
+    tmp = Path(tempfile.mkdtemp(prefix="citlens-scope-"))
+    # an old, coherent install living elsewhere with its own drivers
+    old_engine = tmp / "old-engine"
+    (old_engine / "tools").mkdir(parents=True)
+    (old_engine / "tools" / "citlens_recall.py").write_text("# old", encoding="utf-8")
+    (old_engine / "tools" / "citens_review.py").write_text("# old", encoding="utf-8")
+    cc = tmp / ".citlens"
+    cc.mkdir(parents=True)
+    (cc / "config.json").write_text(json.dumps({
+        "home": str(tmp / "old-home"),
+        "python": sys.executable,
+        "engine": str(old_engine),
+        "recall_driver": str(old_engine / "tools" / "citlens_recall.py"),
+        "review_driver": str(old_engine / "tools" / "citens_review.py"),
+        "jobs_dir": str(cc / "jobs"),
+    }, ensure_ascii=False), encoding="utf-8")
+    # one detectable client, else apply exits "no agent detected"
+    (tmp / ".zcode" / "cli").mkdir(parents=True)
+    (tmp / ".zcode" / "cli" / "config.json").write_text(
+        '{"mcp": {"servers": {}}}', encoding="utf-8")
+    env = _sandbox_home(tmp)
+    try:
+        # 1) no --engine: a coherent old install is reused verbatim
+        r1 = _run_install(env, "apply", "--no-dsh-auto")
+        check("plain apply on coherent install runs",
+              r1.returncode == 0, r1.stdout[-300:])
+        cfg1 = json.loads((cc / "config.json").read_text(encoding="utf-8"))
+        check("coherent old install keeps its engine",
+              Path(cfg1["engine"]).resolve() == old_engine.resolve())
+        check("coherent old install keeps its drivers",
+              Path(cfg1["recall_driver"]).resolve()
+              == (old_engine / "tools" / "citlens_recall.py").resolve())
+
+        # 2) explicit --engine <this repo>: engine AND drivers must switch
+        # to this tree (measured bug 2026-10-18: --engine was silently
+        # ignored against an existing config and old drivers survived)
+        this_repo = PORTABLE.parent
+        r2 = _run_install(env, "apply", "--no-dsh-auto",
+                          "--engine", str(this_repo),
+                          "--python", sys.executable, "--home", str(tmp))
+        check("override apply runs", r2.returncode == 0, r2.stdout[-300:])
+        cfg2 = json.loads((cc / "config.json").read_text(encoding="utf-8"))
+        check("--engine wins over existing config",
+              Path(cfg2["engine"]).resolve() == this_repo.resolve(),
+              f"got {cfg2['engine']}")
+        check("engine switch carries this tree's drivers",
+              Path(cfg2["recall_driver"]).resolve()
+              == (PORTABLE / "drivers" / "citlens_recall.py").resolve(),
+              f"got {cfg2['recall_driver']}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_init_wizard() -> None:
+    print("\n== init wizard (tmp home) ==")
+    tmp = Path(tempfile.mkdtemp(prefix="citlens-init-"))
+    env = _sandbox_home(tmp)
+    try:
+        # non-interactive on an empty home: required keys missing -> rc 1
+        r1 = _run_install(env, "init", "--home", str(tmp), "--non-interactive")
+        check("init reports missing required keys",
+              r1.returncode == 1 and "LLM_API_KEY" in r1.stdout)
+        check("init without sets writes nothing",
+              not (tmp / ".env").exists())
+
+        # scripted --set writes keys, never clobbers existing values
+        r2 = _run_install(env, "init", "--home", str(tmp), "--non-interactive",
+                          "--set", "LLM_API_KEY=sk-test", "--set", "LLM_MODEL=m1",
+                          "--set", "LLM_API_BASE=https://api.example.com")
+        check("init --set satisfies required keys", r2.returncode == 0, r2.stdout[-300:])
+        envp = (tmp / ".env").read_text(encoding="utf-8")
+        check("env file holds the set keys", "LLM_API_KEY=sk-test" in envp
+              and "LLM_MODEL=m1" in envp)
+        r3 = _run_install(env, "init", "--home", str(tmp), "--non-interactive",
+                          "--set", "SERPER_API_KEY=sp-1")
+        envp2 = (tmp / ".env").read_text(encoding="utf-8")
+        check("second init keeps earlier keys", "LLM_API_KEY=sk-test" in envp2
+              and "SERPER_API_KEY=sp-1" in envp2)
+        check("second init still ok with required present", r3.returncode == 0)
+
+        # upsert replaces in place, no duplicates
+        r4 = _run_install(env, "init", "--home", str(tmp), "--non-interactive",
+                          "--set", "LLM_MODEL=m2")
+        envp3 = (tmp / ".env").read_text(encoding="utf-8")
+        check("upsert replaces value in place",
+              "LLM_MODEL=m2" in envp3 and "LLM_MODEL=m1" not in envp3
+              and envp3.count("LLM_MODEL=") == 1)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

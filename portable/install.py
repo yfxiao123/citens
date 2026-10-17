@@ -205,11 +205,9 @@ def discover() -> dict:
         engine / "data" if engine else None,
         CITLENS_DIR / "data",
     )
+    # Driver choice lives HERE, not in discover(): reuse of an old install's
+    # drivers is decided in cmd_apply() once explicit overrides are known.
     recall_drv, review_drv = _drivers()
-    old_recall = _first_existing(old.get("recall_driver"))
-    old_review = _first_existing(old.get("review_driver"))
-    if old_recall and old_review:
-        recall_drv, review_drv = str(old_recall), str(old_review)
     return {
         "home": str(home) if home else None,
         "python": str(python) if python else sys.executable,
@@ -362,7 +360,10 @@ def install_config(p: Plan, cfg: dict) -> None:
     except Exception:  # noqa: BLE001
         existing = {}
     merged = {**cfg, **{k: v for k, v in existing.items() if v not in (None, "", [], {})}}
-    for key in ("home", "python", "recall_driver", "review_driver", "jobs_dir"):
+    # the six path keys are the machine layout under test — an explicit
+    # `--engine/--python/--home` must win over whatever an old config says
+    for key in ("home", "python", "engine",
+                "recall_driver", "review_driver", "jobs_dir"):
         merged[key] = cfg[key]
     text = _dump_json(merged)
     if _read_text(CONFIG_PATH) == text:
@@ -784,6 +785,101 @@ def print_snippet(name: str, entry: dict, cfg: dict) -> int:
 # ── commands ────────────────────────────────────────────────────────────────
 
 
+# ── init: interactive .env configuration wizard ─────────────────────────────
+
+INIT_KEYS: list[tuple[str, str, bool]] = [
+    ("LLM_API_KEY", "LLM API key (OpenAI-compatible) — the only hard requirement", True),
+    ("LLM_API_BASE", "API base URL, e.g. https://api.deepseek.com", True),
+    ("LLM_MODEL", "default model name, e.g. deepseek-chat", True),
+    ("SERPER_API_KEY", "web recall family (Google SERP, free 2500 searches)", False),
+    ("SEMANTIC_SCHOLAR_API_KEY", "Semantic Scholar higher rate limits (free)", False),
+    ("OPENALEX_API_KEY", "OpenAlex keyed pool (free 10k credits/day)", False),
+    ("OPENALEX_EMAIL", "OpenAlex polite-pool email", False),
+]
+
+
+def _read_env_pairs(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not path.is_file():
+        return out
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = re.match(r"\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$", line)
+        if m:
+            out[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+    return out
+
+
+def _upsert_env(path: Path, updates: dict[str, str]) -> None:
+    """KEY=value upsert: existing lines replaced in place, new keys appended.
+    Existing values are NEVER touched unless the key is in `updates`."""
+    lines = (path.read_text(encoding="utf-8", errors="replace").splitlines()
+             if path.is_file() else [])
+    for k, v in updates.items():
+        pat = re.compile(rf"^\s*{re.escape(k)}\s*=")
+        for idx, line in enumerate(lines):
+            if pat.match(line):
+                lines[idx] = f"{k}={v}"
+                break
+        else:
+            lines.append(f"{k}={v}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def cmd_init(home: Path, *, non_interactive: bool, sets: list[str]) -> int:
+    env_file = home / ".env"
+    have = _read_env_pairs(env_file)
+    updates: dict[str, str] = {}
+    for s in sets:
+        k, _, v = s.partition("=")
+        if not k or "=" not in s:
+            print(f"--set expects KEY=VALUE, got {s!r}")
+            return 2
+        updates[k.strip()] = v.strip()
+
+    def missing(k: str) -> bool:
+        return k not in have and k not in updates
+
+    print(f"configuring {env_file}")
+    if non_interactive:
+        for k, desc, req in INIT_KEYS:
+            state = (("MISSING (required)" if req else "missing (optional)")
+                     if missing(k) else "present")
+            print(f"  {k:<24} {state:<20} {desc}")
+        if updates:
+            _upsert_env(env_file, updates)
+            print(f"  wrote {len(updates)} key(s)")
+        still = [k for k, _, req in INIT_KEYS if req and missing(k)]
+        if still:
+            print(f"required keys still missing: {', '.join(still)}")
+        print("next: `install.py apply` (or `--only <agent>`), then run the "
+              "`doctor` tool from your agent")
+        return 1 if still else 0
+    for k, desc, req in INIT_KEYS:
+        if not missing(k):
+            print(f"  {k:<24} present — kept")
+            continue
+        try:
+            val = input(f"  {k} ({'required' if req else 'optional'}) — {desc}\n    > ").strip()
+        except EOFError:
+            val = ""
+        if val:
+            updates[k] = val
+        elif req:
+            print(f"    skipped — {k} stays missing")
+    if updates:
+        _upsert_env(env_file, updates)
+        print(f"wrote {len(updates)} key(s) to {env_file} — existing values untouched")
+    final = _read_env_pairs(env_file)
+    still = [k for k, _, req in INIT_KEYS if req and k not in final]
+    if still:
+        print(f"still missing required: {', '.join(still)} — the engine cannot run")
+        return 1
+    print("next: `install.py apply` (or `--only <agent>`), then ask your agent "
+          "to run the `doctor` tool")
+    return 0
+
+
 def cmd_list(registry: dict) -> int:
     det = set(detected_agents(registry))
     print(f"{'agent':<12} {'dialect':<14} {'confidence':<10} {'detected':<9} file / note")
@@ -895,6 +991,24 @@ def cmd_apply(registry: dict, names: list[str], *, dry_run: bool, remove: bool,
         for key in ("engine", "python", "home"):
             if overrides.get(key):
                 cfg[key] = str(Path(overrides[key]).expanduser().resolve())
+    # Driver reuse is scoped: an already-configured machine keeps its old
+    # drivers only when the engine resolves to that SAME old install and
+    # nothing explicitly overrides the engine (--engine / CITLENS_ENGINE).
+    # An explicit engine switch must carry this tree's own drivers — else a
+    # fresh clone silently keeps running a diverged old driver copy
+    # (measured 2026-10-18: `--engine .` left config.engine and both
+    # drivers pointing at the previous tree while python switched).
+    old = _existing_config()
+    engine_explicit = bool(
+        overrides.get("engine") or os.environ.get("CITLENS_ENGINE")
+    )
+    if not engine_explicit:
+        old_recall = _first_existing(old.get("recall_driver"))
+        old_review = _first_existing(old.get("review_driver"))
+        if (old_recall and old_review and cfg.get("engine")
+                and str(cfg["engine"]) == str(old.get("engine"))):
+            cfg["recall_driver"] = str(old_recall)
+            cfg["review_driver"] = str(old_review)
     p = Plan(dry_run)
     if dry_run:
         print("DRY RUN — nothing will be written.\n")
@@ -944,6 +1058,8 @@ def main(argv: list[str] | None = None) -> int:
     profile = "desktop"
     dsh_auto = True
     all_clients = False
+    non_interactive = False
+    set_pairs: list[str] = []
     overrides: dict = {}
     dry_run = cmd == "plan"
     i = 0
@@ -964,6 +1080,12 @@ def main(argv: list[str] | None = None) -> int:
         elif tok in ("--all", "-a"):
             all_clients = True
             i += 1
+        elif tok == "--non-interactive":
+            non_interactive = True
+            i += 1
+        elif tok == "--set" and i + 1 < len(rest):
+            set_pairs.append(rest[i + 1])
+            i += 2
         elif tok == "--dry-run":
             dry_run = True
             i += 1
@@ -972,6 +1094,13 @@ def main(argv: list[str] | None = None) -> int:
     registry = load_registry()
     if cmd == "list":
         return cmd_list(registry)
+    if cmd == "init":
+        home = (Path(overrides["home"]).expanduser().resolve()
+                if overrides.get("home")
+                else Path((_existing_config().get("home")
+                           or _first_existing(MODE_ROOT)
+                           or Path.cwd())))
+        return cmd_init(home, non_interactive=non_interactive, sets=set_pairs)
     if cmd == "status":
         return cmd_status(registry)
     if cmd == "snippet":
@@ -984,7 +1113,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return print_snippet(target, registry[target], discover())
     if cmd not in ("plan", "apply", "uninstall"):
-        print(f"unknown command {cmd!r}; use list | plan | apply | status | snippet | uninstall")
+        print(f"unknown command {cmd!r}; use list | init | plan | apply | status | snippet | uninstall")
         return 2
     if only:
         names = only
