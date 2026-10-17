@@ -1,0 +1,190 @@
+{
+  "_comment": [
+    "Declarative registry of agent clients. install.py reads this file — adding an",
+    "agent is adding an entry here (or dropping a JSON file into ~/.citlens/agents.d/),",
+    "not writing code. Dialects:",
+    "  json-map     file[container...][name] = {type:'stdio', command, args, env}  (most agents)",
+    "  toml-block   file += [mcp_servers.<name>] command/args/env                  (Codex)",
+    "  dsh-bundle   DSH composes from a bundle patch row, installed by `dsh plugin`",
+    "  snippet      we cannot write it safely -> print a paste-ready snippet",
+    "  cli-only     no MCP at all -> the CLI shim is the integration",
+    "confidence: verified = a real client on this machine accepted it | likely = documented,",
+    "not exercised here | template = shape may differ by version, install.py only prints a snippet."
+  ],
+  "version": 1,
+  "builtin": {
+    "dsh": {
+      "label": "DeepSeek Harness",
+      "dialect": "dsh-bundle",
+      "detect": ["~/.dsh"],
+      "confidence": "verified",
+      "docs": "https://github.com/deepseek-ai/dsh"
+    },
+    "claude": {
+      "label": "Claude Code",
+      "dialect": "json-map",
+      "file": "~/.claude.json",
+      "container": ["mcpServers"],
+      "env": true,
+      "detect": ["~/.claude.json", "~/.claude"],
+      "skillDirs": ["~/.claude/skills"],
+      "confidence": "verified"
+    },
+    "codex": {
+      "label": "Codex CLI / app",
+      "dialect": "toml-block",
+      "file": "~/.codex/config.toml",
+      "detect": ["~/.codex"],
+      "skillEntry": "~/.agents/skills/citlens/SKILL.md",
+      "confidence": "verified"
+    },
+    "zcode": {
+      "label": "ZCode",
+      "dialect": "json-map",
+      "file": "~/.zcode/cli/config.json",
+      "container": ["mcp", "servers"],
+      "env": false,
+      "detect": ["~/.zcode"],
+      "skillDirs": ["~/.zcode/skills"],
+      "confidence": "verified"
+    },
+    "cursor": {
+      "label": "Cursor",
+      "dialect": "json-map",
+      "file": "~/.cursor/mcp.json",
+      "container": ["mcpServers"],
+      "env": true,
+      "detect": ["~/.cursor"],
+      "skillDirs": ["~/.cursor/skills"],
+      "confidence": "likely"
+    },
+    "windsurf": {
+      "label": "Windsurf",
+      "dialect": "json-map",
+      "file": "~/.codeium/windsurf/mcp_config.json",
+      "container": ["mcpServers"],
+      "env": true,
+      "detect": ["~/.codeium/windsurf"],
+      "confidence": "likely"
+    },
+    "gemini": {
+      "label": "Gemini CLI",
+      "dialect": "json-map",
+      "file": "~/.gemini/settings.json",
+      "container": ["mcpServers"],
+      "env": true,
+      "detect": ["~/.gemini"],
+      "skillDirs": ["~/.gemini/skills"],
+      "confidence": "likely"
+    },
+    "qwen": {
+      "label": "Qwen Code",
+      "dialect": "json-map",
+      "file": "~/.qwen/settings.json",
+      "container": ["mcpServers"],
+      "env": true,
+      "detect": ["~/.qwen"],
+      "confidence": "template"
+    },
+    "cline": {
+      "label": "Cline (VS Code)",
+      "dialect": "json-map",
+      "file": "~/AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+      "container": ["mcpServers"],
+      "env": true,
+      "detect": ["~/AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev"],
+      "confidence": "likely"
+    },
+    "roo": {
+      "label": "Roo Code (VS Code)",
+      "dialect": "json-map",
+      "file": "~/AppData/Roaming/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/cline_mcp_settings.json",
+      "container": ["mcpServers"],
+      "env": true,
+      "detect": ["~/AppData/Roaming/Code/User/globalStorage/rooveterinaryinc.roo-cline"],
+      "confidence": "likely"
+    },
+    "kilo": {
+      "label": "Kilo Code (VS Code)",
+      "dialect": "json-map",
+      "file": "~/AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/settings/cline_mcp_settings.json",
+      "container": ["mcpServers"],
+      "env": true,
+      "detect": ["~/AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code"],
+      "confidence": "likely"
+    },
+    "opencode": {
+      "label": "OpenCode",
+      "dialect": "json-opencode",
+      "file": "~/.config/opencode/opencode.json",
+      "container": ["mcp"],
+      "detect": ["~/.config/opencode", "~/AppData/Local/opencode"],
+      "skillDirs": ["~/.config/opencode/skills"],
+      "confidence": "likely"
+    },
+    "zed": {
+      "label": "Zed",
+      "dialect": "snippet",
+      "detect": ["~/AppData/Roaming/Zed", "~/.config/zed"],
+      "confidence": "template",
+      "note": "Zed uses settings.json -> context_servers with a nested {command:{path,args}} shape; paste the snippet."
+    },
+    "goose": {
+      "label": "Goose",
+      "dialect": "snippet",
+      "detect": ["~/.config/goose", "~/AppData/Roaming/Block/goose"],
+      "confidence": "template",
+      "note": "Goose config.yaml -> extensions.<name> with type: stdio, cmd, args."
+    },
+    "continue": {
+      "label": "Continue",
+      "dialect": "snippet",
+      "detect": ["~/.continue"],
+      "skillDirs": ["~/.continue/skills"],
+      "confidence": "template",
+      "note": "Continue config.yaml -> mcpServers: name: command/args."
+    },
+    "amp": {
+      "label": "Amp",
+      "dialect": "snippet",
+      "detect": ["~/.config/amp"],
+      "confidence": "template",
+      "note": "Amp takes MCP servers through its settings UI or amp.mcpServers."
+    },
+    "crush": {
+      "label": "Crush",
+      "dialect": "snippet",
+      "detect": ["~/.config/crush"],
+      "confidence": "template",
+      "note": "Crush crush.json -> mcp.<name>."
+    },
+    "kimi-cli": {
+      "label": "Kimi CLI",
+      "dialect": "snippet",
+      "detect": ["~/.kimi"],
+      "confidence": "template",
+      "note": "Kimi CLI reads mcpServers from its own config."
+    },
+    "warp": {
+      "label": "Warp",
+      "dialect": "snippet",
+      "detect": ["~/.warp"],
+      "confidence": "template",
+      "note": "Warp configures MCP in Settings -> MCP servers; use the JSON snippet."
+    },
+    "copilot": {
+      "label": "VS Code Copilot",
+      "dialect": "snippet",
+      "detect": ["~/.vscode", "~/AppData/Roaming/Code/User"],
+      "confidence": "template",
+      "note": "VS Code reads .vscode/mcp.json (project) or mcp.servers in user settings; paste the snippet."
+    },
+    "aider": {
+      "label": "Aider",
+      "dialect": "cli-only",
+      "detect": ["~/.aider.conf.yml", "~/.aider"],
+      "confidence": "verified",
+      "note": "Aider has no MCP. It can shell out: use the citlens.cmd CLI, or add a read-only doc to CONVENTIONS.md."
+    }
+  }
+}
