@@ -1,6 +1,6 @@
 # 配置参考（.env 全量键）
 
-配置文件是数据家目录下的 `.env`（agent 路径默认为 clone 根；用 `portable/install.py init --home .` 交互生成，或 `cp .env.example .env` 手编）。运行期旋钮在 CLI 参数上，不进 `.env`。
+配置文件是数据家目录下的 `.env`（`cp .env.example .env` 手编；把 CiteLens 装进 AI agent 的免 LLM 版见 [citlens-agent](https://github.com/yfxiao123/citlens-agent)）。运行期旋钮在 CLI 参数上，不进 `.env`。
 
 ## 必填（引擎无法运行的唯一一块）
 
