@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "citlens-mcp"
+version = "1.0.0"
+description = "CiteLens as a portable MCP tool: nine-family literature recall + citation-grounded survey writing for any agent client."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+# Deliberately dependency-free: the server is a stdlib supervisor that spawns the
+# CiteLens engine in its own interpreter. Installing it never pulls a runtime.
+dependencies = []
+
+[project.scripts]
+citlens-mcp = "citlens_mcp:console_main"
+citlens = "citlens_mcp:console_main"
+
+[tool.setuptools]
+py-modules = ["citlens_mcp"]
+
+[tool.setuptools.package-data]
+"*" = ["agents.json", "skill/**/*.md"]
