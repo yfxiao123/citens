@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — the repository becomes agent-first (v1.5.0)
+- **portable/ installer layer on main** (from branch test/portable-mcp,
+  E2E-validated bytes): zero-dependency MCP stdio server (7 tools),
+  declarative 21-client registry, drivers that call the engine's own
+  functions, cross-agent skill. Repo front door is now "install into your
+  agent"; README rewritten (English quick start + Chinese main), INSTALL.md
+  is the complete install/configure flow, docs/CONFIGURATION.md the full
+  .env reference.
+- **install.py init**: interactive .env wizard (required LLM trio +
+  recommended search keys; never overwrites existing values; in-place
+  upsert). --non-interactive reports missing keys (exit 1 while any
+  required key absent); --set KEY=VALUE for scripted setups.
+
+### Fixed — installer (E2E audit 2026-10-18)
+- an explicit --engine/--python/--home now wins over an existing
+  ~/.citlens/config.json for all six path keys (engine was silently
+  dropped from the force-override list)
+- old-install driver reuse is scoped: reused only when the engine
+  resolves to that same install and no explicit engine override exists;
+  an engine switch carries this tree's own portable/drivers
+
+
 ### Fixed — third-party audit findings (2026-08-30 RL+ads run)
 - **Same-paper duplicates in references**: a UCL-repository record
   ("Cai, H" surname-first house style) of a paper whose OpenAlex record
